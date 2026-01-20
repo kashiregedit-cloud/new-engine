@@ -20,6 +20,22 @@ import PaymentPage from "./pages/dashboard/PaymentPage";
 import AdminPage from "./pages/dashboard/AdminPage";
 import PlatformSelection from "./pages/dashboard/PlatformSelection";
 import SettingsPage from "./pages/dashboard/SettingsPage";
+import SessionManager from "./pages/dashboard/whatsapp/SessionManager";
+import { WhatsAppProvider } from "./context/WhatsAppContext";
+import { Outlet, useParams } from "react-router-dom";
+
+// Wrapper to inject WhatsApp Context only for WhatsApp routes
+const WhatsAppWrapper = () => {
+  const { platform } = useParams();
+  if (platform === 'whatsapp') {
+    return (
+      <WhatsAppProvider>
+        <Outlet />
+      </WhatsAppProvider>
+    );
+  }
+  return <Outlet />;
+};
 
 const queryClient = new QueryClient();
 
@@ -39,9 +55,10 @@ const App = () => (
             <Route index element={<PlatformSelection />} />
             
             {/* Platform Specific Routes */}
-            <Route path=":platform">
+            <Route path=":platform" element={<WhatsAppWrapper />}>
               <Route index element={<DashboardHome />} />
               <Route path="integration" element={<IntegrationPage />} />
+              <Route path="sessions" element={<SessionManager />} />
               <Route path="database" element={<DatabasePage />} />
               <Route path="control" element={<ControlPage />} />
               <Route path="settings" element={<SettingsPage />} />

@@ -22,6 +22,8 @@ import logo from "@/assets/logo.png";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+import { SessionSelector } from "./SessionSelector";
+
 export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
@@ -42,7 +44,8 @@ export function DashboardSidebar() {
     
     const items = [
       { title: "Dashboard", icon: LayoutDashboard, path: base },
-      { title: "Integration", icon: Plug, path: `${base}/integration` },
+      // "Integration" replaced by "Sessions" for WhatsApp
+      { title: platform === 'whatsapp' ? "Sessions" : "Integration", icon: Plug, path: platform === 'whatsapp' ? `${base}/sessions` : `${base}/integration` },
       { title: "Database Connect", icon: Database, path: `${base}/database` },
       { title: "Control Page", icon: Settings, path: `${base}/control` },
       { title: "Product Entry", icon: Package, path: `${base}/products` },
@@ -105,16 +108,19 @@ export function DashboardSidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2">
         {platform && !collapsed && (
-          <div className="mb-2 px-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="w-full justify-start gap-2"
-              onClick={() => navigate('/dashboard')}
-            >
-              <ArrowLeft size={16} />
-              Switch Platform
-            </Button>
+          <div className="mb-4">
+             <div className="mb-2 px-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => navigate('/dashboard')}
+                >
+                  <ArrowLeft size={16} />
+                  Switch Platform
+                </Button>
+             </div>
+             {platform === 'whatsapp' && <SessionSelector />}
           </div>
         )}
         <ul className="space-y-1">

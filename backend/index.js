@@ -208,6 +208,75 @@ app.post('/session/create', async (req, res) => {
   }
 });
 
+app.get('/sessions', async (req, res) => {
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions?all=true`;
+    const headers = {};
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { headers });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
+});
+
+app.post('/session/start', async (req, res) => {
+  const { sessionName } = req.body;
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { method: 'POST', headers });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+    
+    await supabase.from('whatsapp_sessions').update({ status: 'WORKING' }).eq('session_name', sessionName);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to start session' });
+  }
+});
+
+app.post('/session/stop', async (req, res) => {
+  const { sessionName } = req.body;
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}/stop`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { method: 'POST', headers });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+
+    await supabase.from('whatsapp_sessions').update({ status: 'STOPPED' }).eq('session_name', sessionName);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to stop session' });
+  }
+});
+
+app.post('/session/delete', async (req, res) => {
+  const { sessionName } = req.body;
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { method: 'DELETE', headers });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json(data);
+
+    await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete session' });
+  }
+});
+
 app.get('/session/qr/:sessionName', async (req, res) => {
   const { sessionName } = req.params;
   try {
