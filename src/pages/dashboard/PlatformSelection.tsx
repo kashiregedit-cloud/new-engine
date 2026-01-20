@@ -37,7 +37,7 @@ export default function PlatformSelection() {
           <Card 
             key={platform.id} 
             className="cursor-pointer hover:shadow-lg transition-shadow"
-            onClick={() => navigate(`/dashboard/${platform}`)}
+            onClick={() => navigate(`/dashboard/${platform.id}`)}
           >
             <CardHeader className="flex flex-row items-center gap-4">
               <div className={`p-3 rounded-full text-white ${platform.color}`}>

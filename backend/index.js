@@ -143,8 +143,29 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
       return;
     }
 
+    // Determine Base URL based on provider
+    let baseURL;
+    switch (config.provider) {
+      case 'openai':
+        baseURL = undefined; // Default OpenAI URL
+        break;
+      case 'google': // Gemini
+        baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        break;
+      case 'xai': // Grok
+        baseURL = 'https://api.x.ai/v1';
+        break;
+      case 'groq':
+        baseURL = 'https://api.groq.com/openai/v1';
+        break;
+      case 'openrouter':
+      default:
+        baseURL = 'https://openrouter.ai/api/v1';
+        break;
+    }
+
     const openai = new OpenAI({
-      baseURL: config.provider === 'openai' ? undefined : 'https://openrouter.ai/api/v1',
+      baseURL: baseURL,
       apiKey: config.apiKey,
     });
 
@@ -153,11 +174,34 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
     try {
       const messagesPayload = [
         { role: 'system', content: config.systemPrompt },
-        { role: 'user', content: mergedText.trim() }
       ];
 
-      // TODO: If hasImage, we could attach image URL if the model supports it.
-      // For now, we rely on text description placeholders.
+      // Construct User Message with Multimodal Support
+      const userContent = [];
+      
+      // Add text context
+      if (mergedText.trim()) {
+        userContent.push({ type: "text", text: mergedText.trim() });
+      }
+
+      // Add Images
+      messages.forEach(m => {
+        if (m.media_type === 'image' && m.media_url && config.mediaEnabled) {
+          userContent.push({
+            type: "image_url",
+            image_url: {
+              url: m.media_url
+            }
+          });
+        }
+      });
+
+      // If no content (e.g. only audio that wasn't transcribed), add a fallback
+      if (userContent.length === 0) {
+        userContent.push({ type: "text", text: "User sent a message but content could not be processed." });
+      }
+
+      messagesPayload.push({ role: 'user', content: userContent });
 
       completion = await openai.chat.completions.create({
         model: config.model,
@@ -353,10 +397,19 @@ app.post('/webhook', async (req, res) => {
     // Check for Media
     if (messageData.hasMedia) {
        // WAHA 2024+ might send mediaUrl or we need to download.
-       // For now, we assume text description.
-       const rawType = messageData._data ? messageData._data.type : 'unknown';
+       // We try to find the URL in the payload
+       const rawType = messageData._data ? messageData._data.type : (messageData.type || 'unknown');
        if (rawType === 'ptt' || rawType === 'audio') type = 'audio';
        else if (rawType === 'image') type = 'image';
+
+       // Try to get Media URL
+       // Note: WAHA might provide it in 'mediaUrl' or 'body' if it's a link
+       if (messageData.mediaUrl) {
+         // Direct URL provided by WAHA (if configured to download)
+         // We store this in the 'media_url' column
+          // @ts-ignore
+         // We will add media_url to the insert below
+       }
     }
 
     // 1. Check duplicates
@@ -372,6 +425,7 @@ app.post('/webhook', async (req, res) => {
       message_id: messageId,
       text: text,
       media_type: type,
+      media_url: messageData.mediaUrl || null, // Capture Media URL
       status: 'pending'
     });
 

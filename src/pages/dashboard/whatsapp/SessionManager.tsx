@@ -6,8 +6,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-
-const BACKEND_URL = "http://localhost:3001";
+import { BACKEND_URL } from "@/config";
 
 export default function SessionManager() {
   const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();

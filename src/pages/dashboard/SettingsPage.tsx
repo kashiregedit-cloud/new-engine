@@ -156,11 +156,11 @@ export default function SettingsPage() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value="openrouter">OpenRouter (Recommended)</SelectItem>
                         <SelectItem value="openai">OpenAI</SelectItem>
-                        <SelectItem value="gemini">Google Gemini</SelectItem>
-                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                        <SelectItem value="google">Google (Gemini)</SelectItem>
                         <SelectItem value="groq">Groq</SelectItem>
-                        <SelectItem value="xai">X AI</SelectItem>
+                        <SelectItem value="xai">X AI (Grok)</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormDescription>

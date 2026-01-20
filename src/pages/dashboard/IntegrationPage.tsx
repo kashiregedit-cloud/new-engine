@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, CheckCircle, XCircle } from "lucide-react";
-
-const BACKEND_URL = "http://localhost:3001";
+import { BACKEND_URL } from "@/config";
 
 export default function IntegrationPage() {
   const { platform } = useParams();

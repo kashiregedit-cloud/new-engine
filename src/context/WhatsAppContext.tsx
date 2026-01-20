@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-
-const BACKEND_URL = "http://localhost:3001";
+import { BACKEND_URL } from "@/config";
 
 interface WhatsAppContextType {
   sessions: any[];
