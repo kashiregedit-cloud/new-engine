@@ -43,12 +43,15 @@ About You :
 async function getAIConfig() {
   try {
     const { data } = await supabase.from('user_configs').select('*').limit(1).single();
-    if (data && data.api_key) {
+    if (data) {
       return {
         provider: data.ai_provider || 'openrouter',
-        apiKey: data.api_key,
+        apiKey: data.api_key || process.env.OPENROUTER_API_KEY,
         model: data.model_name || 'xiaomi/mimo-v2-flash:free',
-        systemPrompt: data.system_prompt || DEFAULT_SYSTEM_PROMPT
+        systemPrompt: data.system_prompt || DEFAULT_SYSTEM_PROMPT,
+        autoReply: data.auto_reply ?? true,
+        aiEnabled: data.ai_enabled ?? true,
+        mediaEnabled: data.media_enabled ?? true
       };
     }
   } catch (e) {
@@ -58,7 +61,10 @@ async function getAIConfig() {
     provider: 'openrouter',
     apiKey: process.env.OPENROUTER_API_KEY,
     model: 'xiaomi/mimo-v2-flash:free',
-    systemPrompt: DEFAULT_SYSTEM_PROMPT
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    autoReply: true,
+    aiEnabled: true,
+    mediaEnabled: true
   };
 }
 
@@ -95,18 +101,35 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
     if (fetchError || !messages || messages.length === 0) return;
 
-    // 2. Merge Content
+    // 2. Get AI Config early to check flags
+    const config = await getAIConfig();
+
+    if (!config.autoReply) {
+      console.log(`Auto-reply disabled for ${debounceKey}. Marking messages as ignored.`);
+      await supabase.from('wp_chats').update({ status: 'ignored' }).in('id', messages.map(m => m.id));
+      return;
+    }
+
+    // 3. Merge Content
     let mergedText = '';
     let hasImage = false;
     let hasAudio = false;
 
     messages.forEach(m => {
       if (m.media_type === 'image') {
-        mergedText += ` [User sent an image] `;
-        hasImage = true;
+        if (config.mediaEnabled) {
+          mergedText += ` [User sent an image] `;
+          hasImage = true;
+        } else {
+          mergedText += ` [User sent an image (Ignored)] `;
+        }
       } else if (m.media_type === 'audio') {
-        mergedText += ` [User sent a voice message] `;
-        hasAudio = true;
+        if (config.mediaEnabled) {
+          mergedText += ` [User sent a voice message] `;
+          hasAudio = true;
+        } else {
+          mergedText += ` [User sent a voice message (Ignored)] `;
+        }
       } else {
         mergedText += ` ${m.text} `;
       }
@@ -114,8 +137,12 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
     console.log(`Merged Context: ${mergedText}`);
 
-    // 3. Get AI Config & Init Client
-    const config = await getAIConfig();
+    if (!config.aiEnabled) {
+      console.log(`AI disabled. Marking done.`);
+      await supabase.from('wp_chats').update({ status: 'done' }).in('id', messages.map(m => m.id));
+      return;
+    }
+
     const openai = new OpenAI({
       baseURL: config.provider === 'openai' ? undefined : 'https://openrouter.ai/api/v1',
       apiKey: config.apiKey,

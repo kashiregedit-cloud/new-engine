@@ -63,6 +63,9 @@ export function DashboardSidebar() {
        }
     }
 
+    // Add "Switch Platform" at the top for easy navigation back
+    items.unshift({ title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" });
+
     return items;
   };
 

@@ -8,6 +8,18 @@ import { Eye, EyeOff, ArrowLeft, Mail, Lock, User, Phone, CheckCircle2, Sparkles
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import logoImage from "@/assets/logo.png";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
 
 const Register = () => {
   const navigate = useNavigate();
@@ -20,6 +32,31 @@ const Register = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
+  const handleVerifyOtp = async () => {
+    if (!otp || otp.length !== 6) return;
+    setVerifying(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        email: formData.email,
+        token: otp,
+        type: 'signup',
+      });
+
+      if (error) throw error;
+
+      toast.success("Email verified successfully!");
+      setShowOtpModal(false);
+      navigate("/dashboard");
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });

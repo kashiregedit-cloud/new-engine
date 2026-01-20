@@ -41,3 +41,10 @@ alter table wp_chats add column if not exists media_url text;
 -- Indexes for performance
 create index if not exists idx_wp_chats_sender_page_status on wp_chats(sender_id, page_id, status);
 create index if not exists idx_wpp_debounce_key on wpp_debounce(debounce_key);
+
+-- Update user_configs for Control Page settings
+alter table user_configs add column if not exists auto_reply boolean default true;
+alter table user_configs add column if not exists ai_enabled boolean default true;
+alter table user_configs add column if not exists media_enabled boolean default true;
+alter table user_configs add column if not exists response_language text default 'bn';
+alter table user_configs add column if not exists response_tone text default 'professional';

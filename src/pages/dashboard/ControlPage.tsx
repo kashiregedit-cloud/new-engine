@@ -1,21 +1,113 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bot, MessageSquare, Clock, Zap, Shield, Bell } from "lucide-react";
+import { Bot, MessageSquare, Loader2, Save } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export default function ControlPage() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [config, setConfig] = useState({
+    auto_reply: true,
+    ai_enabled: true,
+    media_enabled: true,
+    response_language: 'bn',
+    response_tone: 'professional'
+  });
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const fetchConfig = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('user_configs')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data) {
+        setConfig({
+          auto_reply: data.auto_reply ?? true,
+          ai_enabled: data.ai_enabled ?? true,
+          media_enabled: data.media_enabled ?? true,
+          response_language: data.response_language || 'bn',
+          response_tone: data.response_tone || 'professional'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching config:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Please login first");
+        return;
+      }
+
+      // Check if config exists
+      const { data: existing } = await supabase
+        .from('user_configs')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      const payload = {
+        user_id: user.id,
+        ...config
+      };
+
+      if (existing) {
+         const { error } = await supabase.from('user_configs').update(config).eq('user_id', user.id);
+         if (error) throw error;
+      } else {
+         const { error } = await supabase.from('user_configs').insert(payload);
+         if (error) throw error;
+      }
+      toast.success("Settings saved successfully");
+    } catch (error: any) {
+      toast.error("Failed to save settings: " + error.message);
+      console.error(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-foreground">Control Page</h2>
-        <p className="text-muted-foreground">
-          Configure your chatbot behavior and automation settings
-        </p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">Control Page</h2>
+          <p className="text-muted-foreground">
+            Configure your chatbot behavior and automation settings
+          </p>
+        </div>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+          Save Changes
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -36,7 +128,10 @@ export default function ControlPage() {
                   Automatically respond to messages
                 </p>
               </div>
-              <Switch defaultChecked />
+              <Switch 
+                checked={config.auto_reply}
+                onCheckedChange={(c) => setConfig({...config, auto_reply: c})}
+              />
             </div>
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -45,16 +140,22 @@ export default function ControlPage() {
                   Use AI to generate smart replies
                 </p>
               </div>
-              <Switch defaultChecked />
+              <Switch 
+                checked={config.ai_enabled}
+                onCheckedChange={(c) => setConfig({...config, ai_enabled: c})}
+              />
             </div>
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label>Order Detection</Label>
+                <Label>Media Analysis (Image/Audio)</Label>
                 <p className="text-sm text-muted-foreground">
-                  Automatically detect and process orders
+                  Analyze images and audio for product queries
                 </p>
               </div>
-              <Switch defaultChecked />
+              <Switch 
+                checked={config.media_enabled}
+                onCheckedChange={(c) => setConfig({...config, media_enabled: c})}
+              />
             </div>
           </CardContent>
         </Card>
@@ -71,7 +172,10 @@ export default function ControlPage() {
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label>Response Language</Label>
-              <Select defaultValue="bn">
+              <Select 
+                value={config.response_language} 
+                onValueChange={(v) => setConfig({...config, response_language: v})}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select language" />
                 </SelectTrigger>
@@ -84,7 +188,10 @@ export default function ControlPage() {
             </div>
             <div className="space-y-2">
               <Label>Response Tone</Label>
-              <Select defaultValue="professional">
+              <Select 
+                value={config.response_tone} 
+                onValueChange={(v) => setConfig({...config, response_tone: v})}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select tone" />
                 </SelectTrigger>
@@ -97,104 +204,7 @@ export default function ControlPage() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Timing Settings */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-primary" />
-              <CardTitle>Timing Settings</CardTitle>
-            </div>
-            <CardDescription>Configure response timing</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <Label>Response Delay (seconds)</Label>
-                <span className="text-sm text-muted-foreground">3s</span>
-              </div>
-              <Slider defaultValue={[3]} max={10} step={1} />
-            </div>
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <Label>Typing Indicator Duration</Label>
-                <span className="text-sm text-muted-foreground">2s</span>
-              </div>
-              <Slider defaultValue={[2]} max={5} step={1} />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Business Hours Only</Label>
-                <p className="text-sm text-muted-foreground">
-                  Respond only during business hours
-                </p>
-              </div>
-              <Switch />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Automation */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Zap className="h-5 w-5 text-primary" />
-              <CardTitle>Automation</CardTitle>
-            </div>
-            <CardDescription>Set up automated workflows</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Auto-assign Conversations</Label>
-                <p className="text-sm text-muted-foreground">
-                  Distribute conversations to team members
-                </p>
-              </div>
-              <Switch />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Auto-close Inactive Chats</Label>
-                <p className="text-sm text-muted-foreground">
-                  Close chats after 24 hours of inactivity
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Send Follow-up Messages</Label>
-                <p className="text-sm text-muted-foreground">
-                  Automatically send follow-up after orders
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-          </CardContent>
-        </Card>
       </div>
-
-      {/* Welcome Message */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle>Welcome Message Template</CardTitle>
-          <CardDescription>
-            This message will be sent when a new conversation starts
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Textarea
-            placeholder="Enter your welcome message..."
-            defaultValue="আস্সালামু আলাইকুম! 👋 Service Hub BD তে স্বাগতম। আমরা আপনাকে কিভাবে সাহায্য করতে পারি?"
-            rows={4}
-          />
-          <div className="flex gap-2">
-            <Button>Save Template</Button>
-            <Button variant="outline">Preview</Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
