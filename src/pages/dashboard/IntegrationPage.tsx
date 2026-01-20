@@ -1,126 +1,119 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { MessageSquare, Instagram, Facebook, Plus, Settings, RefreshCw } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { Loader2, RefreshCw, CheckCircle, XCircle } from "lucide-react";
 
-const integrations = [
-  {
-    id: "whatsapp",
-    name: "WhatsApp Business",
-    description: "Connect your WhatsApp Business account to handle messages",
-    icon: MessageSquare,
-    color: "bg-chart-3",
-    connected: true,
-    status: "Active",
-  },
-  {
-    id: "messenger",
-    name: "Facebook Messenger",
-    description: "Integrate with Facebook Messenger for customer support",
-    icon: Facebook,
-    color: "bg-chart-2",
-    connected: true,
-    status: "Active",
-  },
-  {
-    id: "instagram",
-    name: "Instagram DM",
-    description: "Connect Instagram Direct Messages to your chatbot",
-    icon: Instagram,
-    color: "bg-chart-5",
-    connected: false,
-    status: "Disconnected",
-  },
-];
+const BACKEND_URL = "http://localhost:3001";
 
 export default function IntegrationPage() {
+  const { platform } = useParams();
+  const [sessionName, setSessionName] = useState("default");
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (platform === 'whatsapp') {
+      checkSession();
+    }
+  }, [platform, sessionName]);
+
+  const checkSession = async () => {
+    // Check Supabase for existing session
+    const { data } = await supabase.from('whatsapp_sessions').select('*').eq('session_name', sessionName).maybeSingle();
+    if (data) {
+      setSessionStatus(data.status);
+      if (data.status === 'created' || data.status === 'STOPPED') {
+          fetchQr();
+      }
+    } else {
+      setSessionStatus(null);
+      setQrCodeUrl(null);
+    }
+  };
+
+  const createSession = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/session/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionName })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create session');
+      
+      toast.success("Session created! Fetching QR Code...");
+      setSessionStatus('created');
+      fetchQr();
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchQr = async () => {
+    try {
+      // Direct fetch to backend which proxies WAHA
+      const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        setQrCodeUrl(URL.createObjectURL(blob));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  if (platform !== 'whatsapp') {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold mb-4 capitalize">{platform} Integration</h1>
+        <p className="text-muted-foreground">Integration for {platform} is coming soon.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground">Integrations</h2>
-          <p className="text-muted-foreground">
-            Connect your social media accounts and messaging platforms
-          </p>
-        </div>
-        <Button className="gap-2">
-          <Plus size={18} />
-          Add Integration
-        </Button>
-      </div>
-
-      {/* Integration Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {integrations.map((integration) => (
-          <Card key={integration.id} className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className={`p-3 rounded-lg ${integration.color}`}>
-                  <integration.icon className="h-6 w-6 text-primary-foreground" />
-                </div>
-                <Badge
-                  variant={integration.connected ? "default" : "secondary"}
-                  className={integration.connected ? "bg-chart-3 hover:bg-chart-3" : ""}
-                >
-                  {integration.status}
-                </Badge>
-              </div>
-              <CardTitle className="text-lg mt-4">{integration.name}</CardTitle>
-              <CardDescription>{integration.description}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between pt-2 border-t border-border">
-                <div className="flex items-center gap-2">
-                  <Switch checked={integration.connected} />
-                  <span className="text-sm text-muted-foreground">
-                    {integration.connected ? "Enabled" : "Disabled"}
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="icon">
-                    <RefreshCw size={16} />
-                  </Button>
-                  <Button variant="ghost" size="icon">
-                    <Settings size={16} />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Integration Guide */}
-      <Card className="bg-card border-border">
+      <h1 className="text-2xl font-bold">WhatsApp Integration</h1>
+      
+      <Card>
         <CardHeader>
-          <CardTitle>Integration Guide</CardTitle>
-          <CardDescription>
-            Learn how to connect your accounts
-          </CardDescription>
+          <CardTitle>Connection Status</CardTitle>
+          <CardDescription>Manage your WhatsApp connection</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="p-4 rounded-lg bg-secondary">
-              <h4 className="font-medium text-foreground mb-2">Step 1: Select Platform</h4>
-              <p className="text-sm text-muted-foreground">
-                Choose the messaging platform you want to integrate with your chatbot.
-              </p>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-full ${sessionStatus === 'WORKING' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+              {sessionStatus === 'WORKING' ? <CheckCircle size={24} /> : <XCircle size={24} />}
             </div>
-            <div className="p-4 rounded-lg bg-secondary">
-              <h4 className="font-medium text-foreground mb-2">Step 2: Authenticate</h4>
-              <p className="text-sm text-muted-foreground">
-                Log in to your account and authorize access to your messages.
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-secondary">
-              <h4 className="font-medium text-foreground mb-2">Step 3: Configure</h4>
-              <p className="text-sm text-muted-foreground">
-                Set up auto-replies, keywords, and conversation flows.
-              </p>
+            <div>
+              <p className="font-medium capitalize">{sessionStatus || 'Not Connected'}</p>
+              <p className="text-sm text-muted-foreground">Session: {sessionName}</p>
             </div>
           </div>
+
+          {!sessionStatus || sessionStatus === 'STOPPED' ? (
+             <Button onClick={createSession} disabled={loading}>
+               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+               Create Session & Connect
+             </Button>
+          ) : null}
+
+          {qrCodeUrl && sessionStatus !== 'WORKING' && (
+            <div className="mt-4">
+              <p className="mb-2 font-medium">Scan this QR Code with WhatsApp:</p>
+              <img src={qrCodeUrl} alt="QR Code" className="border rounded-lg shadow-sm max-w-xs" />
+              <Button variant="outline" size="sm" onClick={fetchQr} className="mt-2">
+                <RefreshCw className="mr-2 h-4 w-4" /> Refresh QR
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

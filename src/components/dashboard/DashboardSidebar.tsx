@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Plug,
@@ -13,66 +13,57 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  Sparkles,
+  ArrowLeft
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-
-const menuItems = [
-  {
-    title: "Dashboard",
-    icon: LayoutDashboard,
-    path: "/dashboard",
-  },
-  {
-    title: "Integration",
-    icon: Plug,
-    path: "/dashboard/integration",
-  },
-  {
-    title: "Database Connect",
-    icon: Database,
-    path: "/dashboard/database",
-  },
-  {
-    title: "Control Page",
-    icon: Settings,
-    path: "/dashboard/control",
-  },
-  {
-    title: "Product Entry",
-    icon: Package,
-    path: "/dashboard/products",
-  },
-  {
-    title: "Ads Library",
-    icon: Megaphone,
-    path: "/dashboard/ads",
-  },
-  {
-    title: "Reseller",
-    icon: Users,
-    path: "/dashboard/reseller",
-  },
-  {
-    title: "Profile",
-    icon: User,
-    path: "/dashboard/profile",
-  },
-  {
-    title: "Payment / Topup",
-    icon: CreditCard,
-    path: "/dashboard/payment",
-  },
-];
 
 export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  const pathParts = location.pathname.split('/');
+  const platform = ['whatsapp', 'messenger', 'instagram'].includes(pathParts[2]) ? pathParts[2] : null;
+
+  const getMenuItems = () => {
+    if (!platform) {
+      return [
+        { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
+        { title: "Profile", icon: User, path: "/dashboard/profile" },
+      ];
+    }
+
+    const base = `/dashboard/${platform}`;
+    
+    const items = [
+      { title: "Dashboard", icon: LayoutDashboard, path: base },
+      { title: "Integration", icon: Plug, path: `${base}/integration` },
+      { title: "Database Connect", icon: Database, path: `${base}/database` },
+      { title: "Control Page", icon: Settings, path: `${base}/control` },
+      { title: "Product Entry", icon: Package, path: `${base}/products` },
+      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
+      { title: "Reseller", icon: Users, path: `${base}/reseller` },
+      { title: "Profile", icon: User, path: `${base}/profile` },
+      { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
+    ];
+
+    if (platform === 'whatsapp') {
+       // Insert AI Settings after Control Page
+       const controlIndex = items.findIndex(i => i.title === "Control Page");
+       if (controlIndex !== -1) {
+         items.splice(controlIndex + 1, 0, { title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
+       }
+    }
+
+    return items;
+  };
+
+  const menuItems = getMenuItems();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -90,9 +81,16 @@ export function DashboardSidebar() {
       {/* Logo */}
       <div className="p-4 border-b border-sidebar-border flex items-center justify-between">
         {!collapsed && (
-          <Link to="/" className="flex items-center gap-2">
-            <img src={logo} alt="Service Hub BD" className="h-8 w-auto" />
-          </Link>
+          <div className="flex flex-col gap-1">
+            <Link to="/" className="flex items-center gap-2">
+              <img src={logo} alt="Service Hub BD" className="h-8 w-auto" />
+            </Link>
+            {platform && (
+               <span className="text-xs font-semibold uppercase text-muted-foreground ml-1">
+                 {platform}
+               </span>
+            )}
+          </div>
         )}
         <Button
           variant="ghost"
@@ -106,6 +104,19 @@ export function DashboardSidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2">
+        {platform && !collapsed && (
+          <div className="mb-2 px-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="w-full justify-start gap-2"
+              onClick={() => navigate('/dashboard')}
+            >
+              <ArrowLeft size={16} />
+              Switch Platform
+            </Button>
+          </div>
+        )}
         <ul className="space-y-1">
           {menuItems.map((item) => {
             const isActive = location.pathname === item.path;

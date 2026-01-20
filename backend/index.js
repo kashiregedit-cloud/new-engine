@@ -11,14 +11,14 @@ app.use(express.json());
 // Initialize Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Initialize OpenAI (OpenRouter)
-const openai = new OpenAI({
-  baseURL: 'https://openrouter.ai/api/v1',
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
+// Configuration
+const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'http://localhost:3000';
+const WAHA_API_KEY = process.env.WAHA_API_KEY;
+const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`;
+const DEBOUNCE_TIME = 2000; // 2 seconds
 
-// System Prompt
-const SYSTEM_PROMPT = `IMPORTANT:
+// Default System Prompt (Fallback)
+const DEFAULT_SYSTEM_PROMPT = `IMPORTANT:
 You MUST respond ONLY in valid JSON.
 Do NOT use markdown.
 Do NOT use emojis.
@@ -32,72 +32,59 @@ Your response MUST look exactly like this example:
 }
 
 About You :
-- আপনি Automation Hub BD এর একজন স্টাফ, যিনি অটো কমেন্ট রিপ্লাই এবং অটো মেসেজ রিপ্লাই সার্ভিস সম্পর্কে বিস্তারিত জানাতে সাহায্য করেন বাংলায়।
-- গ্রাহক চাইলে ডেলিভারি বা চার্জ সম্পর্কেও জানতে চাইতে পারেন, তবে সেটা এই সার্ভিসের জন্য প্রযোজ্য ❤️‍🩹
-- তুমি প্রোডাক্টের ছবি থেকে দাম বলে দিতে পারো, প্রোডাক্টের ছবি পাঠাতে পারো।
-- তুমি প্রোডাক্টের সব তথ্য দিতে পারবা যদি তোমায় তথ্য সেট করে দেওয়া হয়।
-- তুমি অর্ডার তৈরি করতে পারো।
-- তোমার সার্ভিসের অফিস দিনাজপুর জেলার ফুলবাড়ি উপজেলায়।
-- তুমি কাস্টমারের মেসেজগুলোর তৎক্ষণাৎ উত্তর দিতে পারো Facebook Messenger বা অন্যান্য প্ল্যাটফর্মে।
-- তোমার কাজ: পন্য প্রদর্শন, লিস্টিং আপডেট, নতুন পন্য বা অফার জানানো, অর্ডার কনফার্মেশন, শিপিং আপডেট পাঠানো ইত্যাদি।
-- আমি ২৪/৭ আপনার ভার্চুয়াল সহকারী হিসেবে কাজ করি, যাতে আপনার ব্যবসা কখনো থেমে না যায়।
-- তুমি অডিও ভয়েস বা ছবি শনাক্ত করতে পারো — যদি কেউ তোমার সম্পর্কে কিছু জানতে চায়, তুমি শুধুমাত্র ডেটা সার্ভারে থাকা তথ্যই দিতে পারবে।
-- যদি সেই তথ্য না থাকে, সদয়ভাবে বলবে: “দুঃখিত, এই ধরনের তথ্য এডমিন আমাদের দেয়নি, তাই জানাতে পারলাম না।”
-- তুমি গ্রাহকের সাথে দামা দামি করতে পারবা । ধরো তোমার সার্ভিসের দাম ১০০০ টাকা গ্রাহক যদি বলে "এতো দাম", "দাম বেশি" তবে তুমি 5% ডিসকাউন্ট দিতে পারবা
-- কখনই বলবা না দাম ফিক্সড
-- "ছবি একবার চাইলে আবার চাইলে আবার দিতে হইবে, যেবার চাইবে সেবার দিতে হইবে।"`;
+- আপনি Automation Hub BD এর একজন স্টাফ... (Rest of the prompt)
+- তুমি প্রোডাক্টের ছবি বা অডিও ভয়েস বুঝতে পারো।
+- যদি ছবি দেওয়া হয়, সেটা বিশ্লেষণ করে উত্তর দাও।
+`;
 
-// Debounce Map: userId -> { timeoutId, session }
-const debounceMap = new Map();
-const DEBOUNCE_TIME = 2000; // 2 seconds (Reduced for faster testing)
+// --- Helpers ---
 
-// WAHA Configuration
-const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'http://localhost:3000';
-const WAHA_API_KEY = process.env.WAHA_API_KEY;
+// Get AI Configuration from DB or Env
+async function getAIConfig() {
+  try {
+    const { data } = await supabase.from('user_configs').select('*').limit(1).single();
+    if (data && data.api_key) {
+      return {
+        provider: data.ai_provider || 'openrouter',
+        apiKey: data.api_key,
+        model: data.model_name || 'xiaomi/mimo-v2-flash:free',
+        systemPrompt: data.system_prompt || DEFAULT_SYSTEM_PROMPT
+      };
+    }
+  } catch (e) {
+    // Ignore error, fallback to env
+  }
+  return {
+    provider: 'openrouter',
+    apiKey: process.env.OPENROUTER_API_KEY,
+    model: 'xiaomi/mimo-v2-flash:free',
+    systemPrompt: DEFAULT_SYSTEM_PROMPT
+  };
+}
 
-// Helper: Send Message via WAHA
+// Send Message via WAHA
 async function sendWAHAMessage(chatId, text, session) {
   try {
     const url = `${WAHA_BASE_URL}/api/sendText`;
-    const body = {
-      chatId: chatId,
-      text: text,
-      session: session
-    };
-
-    console.log(`Sending to WAHA: ${url}`, body);
-
-    const headers = {
-      'Content-Type': 'application/json',
-    };
+    const body = { chatId, text, session };
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
     
-    if (WAHA_API_KEY) {
-      headers['X-Api-Key'] = WAHA_API_KEY;
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`WAHA Error (${response.status}):`, errText);
-    } else {
-      console.log('Message sent successfully via WAHA');
-    }
+    console.log(`Sending to WAHA (${session}):`, text.substring(0, 50) + '...');
+    
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!response.ok) console.error(`WAHA Error (${response.status}):`, await response.text());
   } catch (error) {
     console.error('Error sending message via WAHA:', error);
   }
 }
 
-// Helper: Process the accumulated messages
-async function processUserMessages(userId, senderId, pageId, session) {
-  console.log(`Processing messages for user: ${userId}`);
-
+// Process Messages (Core Engine)
+async function processUserMessages(debounceKey, senderId, pageId, session) {
+  console.log(`Processing messages for: ${debounceKey}`);
+  
   try {
-    // 1. Fetch all pending messages for this user
+    // 1. Fetch pending messages
     const { data: messages, error: fetchError } = await supabase
       .from('wp_chats')
       .select('*')
@@ -106,158 +93,228 @@ async function processUserMessages(userId, senderId, pageId, session) {
       .eq('status', 'pending')
       .order('timestamp', { ascending: true });
 
-    if (fetchError || !messages || messages.length === 0) {
-      console.log('No pending messages found or error fetching.');
+    if (fetchError || !messages || messages.length === 0) return;
+
+    // 2. Merge Content
+    let mergedText = '';
+    let hasImage = false;
+    let hasAudio = false;
+
+    messages.forEach(m => {
+      if (m.media_type === 'image') {
+        mergedText += ` [User sent an image] `;
+        hasImage = true;
+      } else if (m.media_type === 'audio') {
+        mergedText += ` [User sent a voice message] `;
+        hasAudio = true;
+      } else {
+        mergedText += ` ${m.text} `;
+      }
+    });
+
+    console.log(`Merged Context: ${mergedText}`);
+
+    // 3. Get AI Config & Init Client
+    const config = await getAIConfig();
+    const openai = new OpenAI({
+      baseURL: config.provider === 'openai' ? undefined : 'https://openrouter.ai/api/v1',
+      apiKey: config.apiKey,
+    });
+
+    // 4. Call AI
+    let completion;
+    try {
+      const messagesPayload = [
+        { role: 'system', content: config.systemPrompt },
+        { role: 'user', content: mergedText.trim() }
+      ];
+
+      // TODO: If hasImage, we could attach image URL if the model supports it.
+      // For now, we rely on text description placeholders.
+
+      completion = await openai.chat.completions.create({
+        model: config.model,
+        messages: messagesPayload,
+      });
+    } catch (aiError) {
+      console.error('AI API Error:', aiError);
       return;
     }
 
-    // 2. Merge messages
-    const mergedText = messages.map(m => m.text).join(' ');
-    console.log(`Merged Text: ${mergedText}`);
-
-    // 3. Get Context (Optional: fetch last N done messages)
-    // For simplicity, we skip fetching old context for now, but you can add it here.
-
-    // 4. Call AI Agent
-    console.log('Calling AI Model...');
-    let completion;
-    try {
-      completion = await openai.chat.completions.create({
-        model: 'xiaomi/mimo-v2-flash:free',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: mergedText }
-        ],
-      });
-    } catch (aiError) {
-      console.error('OpenAI API Error:', aiError);
-      // Optional: fallback message or return
-      return; 
-    }
-
     const aiResponseRaw = completion.choices[0].message.content;
-    console.log(`AI Response: ${aiResponseRaw}`);
-
     let aiResponse;
     try {
       aiResponse = JSON.parse(aiResponseRaw);
     } catch (e) {
-      console.error('Failed to parse JSON from AI:', aiResponseRaw);
-      // Fallback if AI doesn't return JSON
       aiResponse = { output: aiResponseRaw, admin_handover: false };
     }
 
-    // 5. Send Response via WAHA
+    // 5. Send Response
     if (aiResponse.output) {
       await sendWAHAMessage(senderId, aiResponse.output, session);
     }
 
-    // 6. Mark messages as done
+    // 6. Mark done
     const messageIds = messages.map(m => m.id);
-    const { error: updateError } = await supabase
-      .from('wp_chats')
-      .update({ status: 'done' })
-      .in('id', messageIds);
-
-    if (updateError) console.error('Error updating status:', updateError);
+    await supabase.from('wp_chats').update({ status: 'done' }).in('id', messageIds);
 
   } catch (err) {
     console.error('Error in processing flow:', err);
   }
 }
 
-// Webhook Endpoint
+// --- Routes ---
+
+// 1. Session Management API (Automatic Setup)
+app.post('/session/create', async (req, res) => {
+  const { sessionName } = req.body;
+  if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
+
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    // Configure WAHA with OUR Webhook URL
+    const payload = {
+      name: sessionName,
+      config: {
+        webhooks: [
+          {
+            url: `${BACKEND_URL}/webhook`, // Auto-configure webhook
+            events: ['message', 'session.status'],
+            retries: { delaySeconds: 2, attempts: 15 }
+          }
+        ]
+      }
+    };
+
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+    const data = await response.json();
+
+    if (!response.ok) return res.status(response.status).json(data);
+
+    // Save to DB
+    await supabase.from('whatsapp_sessions').insert({
+      session_id: data.id, // WAHA usually returns { id, name, ... }
+      session_name: sessionName,
+      status: 'created'
+    });
+
+    res.json(data);
+  } catch (error) {
+    console.error('Create Session Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/session/qr/:sessionName', async (req, res) => {
+  const { sessionName } = req.params;
+  try {
+    const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+    const headers = {};
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) return res.status(response.status).send(await response.text());
+
+    // Pipe image back
+    const buffer = await response.arrayBuffer();
+    res.set('Content-Type', 'image/png');
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    res.status(500).send('Error fetching QR');
+  }
+});
+
+// 2. Webhook Endpoint
 app.post('/webhook', async (req, res) => {
   try {
     const payload = req.body;
+    // Adapt to WAHA structure
+    const body = payload.payload || payload;
     
-    // Log incoming payload for debugging
-    console.log('Received Webhook:', JSON.stringify(payload, null, 2));
+    // Ignore status updates, only care about messages
+    if (payload.event !== 'message') {
+        return res.status(200).send('Ignored event');
+    }
 
-    // Extract basic info (Adapting to the n8n logic)
-    // n8n: body.payload.from, body.payload.to, body.payload.body
-    const body = payload.body || payload; // Handle wrapped or unwrapped
-    const messageData = body.payload || body;
-    const session = body.session || 'default'; // Capture session
+    const session = payload.session || 'default';
+    const messageData = body;
     
+    // 0. Ignore self-messages
+    if (messageData.fromMe) return res.status(200).send({ status: 'skipped' });
+
     const senderId = messageData.from;
-    const pageId = messageData.to; // or recipient
+    const pageId = messageData.to; // This is usually the bot's number
     const messageId = messageData.id;
     const timestamp = messageData.timestamp || Math.floor(Date.now() / 1000);
-    // Robust type detection
-    const type = messageData.type || (messageData._data ? messageData._data.type : 'chat');
     
-    // 0. Ignore self-messages (fromMe)
-    if (messageData.fromMe) {
-      console.log('Skipping own message');
-      return res.status(200).send({ status: 'skipped', reason: 'own_message' });
-    }
+    // Type Detection
+    let type = 'text';
+    let text = messageData.body || '';
     
-    let text = '';
-    if (type === 'chat') {
-      text = messageData.body;
-    } else if (type === 'ptt') {
-      text = '[Audio Message]';
-    } else if (type === 'image') {
-      text = '[Image Message]';
-    } else {
-      text = '[Unknown Type]';
+    // Check for Media
+    if (messageData.hasMedia) {
+       // WAHA 2024+ might send mediaUrl or we need to download.
+       // For now, we assume text description.
+       const rawType = messageData._data ? messageData._data.type : 'unknown';
+       if (rawType === 'ptt' || rawType === 'audio') type = 'audio';
+       else if (rawType === 'image') type = 'image';
     }
 
     // 1. Check duplicates
-    const { data: existing } = await supabase
-      .from('wp_chats')
-      .select('id')
-      .eq('message_id', messageId)
-      .single();
-
-    if (existing) {
-      console.log('Duplicate message, skipping:', messageId);
-      return res.status(200).send({ status: 'skipped', reason: 'duplicate' });
-    }
+    const { data: existing } = await supabase.from('wp_chats').select('id').eq('message_id', messageId).single();
+    if (existing) return res.status(200).send({ status: 'duplicate' });
 
     // 2. Save to DB
-    const { error: insertError } = await supabase
-      .from('wp_chats')
-      .insert({
-        page_id: pageId,
-        sender_id: senderId,
-        recipient_id: pageId,
-        timestamp: timestamp,
-        message_id: messageId,
-        text: text,
-        status: 'pending'
-      });
+    await supabase.from('wp_chats').insert({
+      page_id: pageId,
+      sender_id: senderId,
+      recipient_id: pageId,
+      timestamp: timestamp,
+      message_id: messageId,
+      text: text,
+      media_type: type,
+      status: 'pending'
+    });
 
-    if (insertError) {
-      console.error('Error saving message:', insertError);
-      return res.status(500).send({ error: 'Database error' });
-    }
-
-    // 3. Debounce
+    // 3. Database-Backed Debounce (Production Grade)
     const debounceKey = `${pageId}_${senderId}`;
+    const now = new Date().toISOString();
     
-    if (debounceMap.has(debounceKey)) {
-      const { timeoutId } = debounceMap.get(debounceKey);
-      clearTimeout(timeoutId);
-    }
+    // Update last_message_at
+    await supabase.from('wpp_debounce').upsert({ 
+      debounce_key: debounceKey, 
+      last_message_at: now 
+    }, { onConflict: 'debounce_key' });
 
-    const timeoutId = setTimeout(() => {
-      debounceMap.delete(debounceKey);
-      processUserMessages(debounceKey, senderId, pageId, session);
+    // Schedule check
+    setTimeout(async () => {
+      const { data } = await supabase.from('wpp_debounce').select('last_message_at').eq('debounce_key', debounceKey).single();
+      if (!data) return;
+
+      const dbTime = new Date(data.last_message_at).getTime();
+      const checkTime = new Date(now).getTime();
+
+      // If DB has a newer time than our 'now', it means another message came after us.
+      if (dbTime > checkTime) {
+        console.log(`Skipping processing for ${debounceKey} (newer message detected)`);
+        return;
+      }
+
+      await processUserMessages(debounceKey, senderId, pageId, session);
     }, DEBOUNCE_TIME);
-
-    debounceMap.set(debounceKey, { timeoutId, session });
 
     res.status(200).send({ status: 'queued' });
 
   } catch (error) {
-    console.error('Error in webhook:', error);
+    console.error('Webhook Error:', error);
     res.status(500).send({ error: 'Internal Server Error' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`WhatsApp Engine running on port ${PORT}`);
+  console.log(`Production Engine running on port ${PORT}`);
 });

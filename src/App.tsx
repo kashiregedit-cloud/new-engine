@@ -18,6 +18,8 @@ import ResellerPage from "./pages/dashboard/ResellerPage";
 import ProfilePage from "./pages/dashboard/ProfilePage";
 import PaymentPage from "./pages/dashboard/PaymentPage";
 import AdminPage from "./pages/dashboard/AdminPage";
+import PlatformSelection from "./pages/dashboard/PlatformSelection";
+import SettingsPage from "./pages/dashboard/SettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -34,16 +36,25 @@ const App = () => (
           
           {/* Dashboard Routes */}
           <Route path="/dashboard" element={<DashboardLayout />}>
-            <Route index element={<DashboardHome />} />
-            <Route path="integration" element={<IntegrationPage />} />
-            <Route path="database" element={<DatabasePage />} />
-            <Route path="control" element={<ControlPage />} />
-            <Route path="products" element={<ProductsPage />} />
-            <Route path="ads" element={<AdsPage />} />
-            <Route path="reseller" element={<ResellerPage />} />
-            <Route path="profile" element={<ProfilePage />} />
-            <Route path="payment" element={<PaymentPage />} />
-            <Route path="admin" element={<AdminPage />} />
+            <Route index element={<PlatformSelection />} />
+            
+            {/* Platform Specific Routes */}
+            <Route path=":platform">
+              <Route index element={<DashboardHome />} />
+              <Route path="integration" element={<IntegrationPage />} />
+              <Route path="database" element={<DatabasePage />} />
+              <Route path="control" element={<ControlPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="ads" element={<AdsPage />} />
+              <Route path="reseller" element={<ResellerPage />} />
+              <Route path="profile" element={<ProfilePage />} />
+              <Route path="payment" element={<PaymentPage />} />
+              <Route path="admin" element={<AdminPage />} />
+            </Route>
+
+            {/* Direct access to generic pages (optional, but good for backward compat if needed) */}
+             <Route path="profile" element={<ProfilePage />} />
           </Route>
           
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
