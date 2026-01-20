@@ -71,7 +71,7 @@ export function DashboardLayout() {
 
   const currentTitle = pageTitles[location.pathname] || "Dashboard";
 
-  return (
+  const LayoutContent = (
     <div className="min-h-screen bg-background flex w-full">
       {/* Desktop Sidebar */}
       <div className="hidden lg:block">
@@ -97,4 +97,14 @@ export function DashboardLayout() {
       </div>
     </div>
   );
+
+  if (platform === 'whatsapp') {
+    return (
+      <WhatsAppProvider>
+        {LayoutContent}
+      </WhatsAppProvider>
+    );
+  }
+
+  return LayoutContent;
 }

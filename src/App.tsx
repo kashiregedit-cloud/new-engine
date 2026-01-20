@@ -55,7 +55,7 @@ const App = () => (
             <Route index element={<PlatformSelection />} />
             
             {/* Platform Specific Routes */}
-            <Route path=":platform" element={<WhatsAppWrapper />}>
+            <Route path=":platform" element={<Outlet />}>
               <Route index element={<DashboardHome />} />
               <Route path="integration" element={<IntegrationPage />} />
               <Route path="sessions" element={<SessionManager />} />
