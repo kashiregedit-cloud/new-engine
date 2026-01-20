@@ -49,7 +49,7 @@ About You :
 
 // Debounce Map: userId -> { timeoutId, session }
 const debounceMap = new Map();
-const DEBOUNCE_TIME = 8000; // 8 seconds
+const DEBOUNCE_TIME = 2000; // 2 seconds (Reduced for faster testing)
 
 // WAHA Configuration
 const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'http://localhost:3000';
@@ -119,13 +119,21 @@ async function processUserMessages(userId, senderId, pageId, session) {
     // For simplicity, we skip fetching old context for now, but you can add it here.
 
     // 4. Call AI Agent
-    const completion = await openai.chat.completions.create({
-      model: 'xiaomi/mimo-v2-flash:free',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: mergedText }
-      ],
-    });
+    console.log('Calling AI Model...');
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        model: 'xiaomi/mimo-v2-flash:free',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: mergedText }
+        ],
+      });
+    } catch (aiError) {
+      console.error('OpenAI API Error:', aiError);
+      // Optional: fallback message or return
+      return; 
+    }
 
     const aiResponseRaw = completion.choices[0].message.content;
     console.log(`AI Response: ${aiResponseRaw}`);
@@ -176,7 +184,14 @@ app.post('/webhook', async (req, res) => {
     const pageId = messageData.to; // or recipient
     const messageId = messageData.id;
     const timestamp = messageData.timestamp || Math.floor(Date.now() / 1000);
-    const type = messageData._data ? messageData._data.type : 'chat';
+    // Robust type detection
+    const type = messageData.type || (messageData._data ? messageData._data.type : 'chat');
+    
+    // 0. Ignore self-messages (fromMe)
+    if (messageData.fromMe) {
+      console.log('Skipping own message');
+      return res.status(200).send({ status: 'skipped', reason: 'own_message' });
+    }
     
     let text = '';
     if (type === 'chat') {
