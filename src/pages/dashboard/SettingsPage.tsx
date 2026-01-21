@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Save, ExternalLink } from "lucide-react";
+import { Save, ExternalLink, ChevronDown, ChevronUp, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ const formSchema = z.object({
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -116,7 +117,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle>AI Provider Configuration</CardTitle>
             <CardDescription>
-              We recommend <strong>OpenRouter</strong> as it gives access to all top models (DeepSeek, GPT-4, Claude 3) with one key.
+              Select an AI provider and enter your API Key. We'll handle the rest.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -128,7 +129,19 @@ export default function SettingsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-base">Select Provider</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value}>
+                      <Select 
+                        onValueChange={(val) => {
+                            field.onChange(val);
+                            // Auto-set recommended models
+                            if (val === 'openai') form.setValue('model_name', 'openai/gpt-4o');
+                            if (val === 'google') form.setValue('model_name', 'google/gemini-2.0-flash-lite-preview-02-05:free');
+                            if (val === 'groq') form.setValue('model_name', 'groq/llama-3.3-70b-versatile');
+                            if (val === 'openrouter') form.setValue('model_name', 'xiaomi/mimo-v2-flash:free');
+                            if (val === 'xai') form.setValue('model_name', 'xai/grok-beta');
+                        }} 
+                        defaultValue={field.value} 
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="h-12">
                             <SelectValue placeholder="Select a provider" />
@@ -150,61 +163,77 @@ export default function SettingsPage() {
                   )}
                 />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="api_key"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>API Key</FormLabel>
-                        <FormControl>
-                          <Input placeholder="sk-or-..." type="password" {...field} className="font-mono" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="model_name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Model Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. google/gemini-2.0-flash-lite-preview-02-05:free" {...field} className="font-mono" />
-                        </FormControl>
-                        <FormDescription className="text-xs">
-                          Example: <code>google/gemini-2.0-flash-lite-preview-02-05:free</code> or <code>openai/gpt-4o</code>
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
                 <FormField
                   control={form.control}
-                  name="system_prompt"
+                  name="api_key"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>System Instruction (Prompt)</FormLabel>
+                      <FormLabel>API Key</FormLabel>
                       <FormControl>
-                        <Textarea 
-                          placeholder="You are a helpful assistant for a WhatsApp store. You help customers buy products..." 
-                          className="min-h-[150px] font-sans text-base leading-relaxed"
-                          {...field} 
-                        />
+                        <Input placeholder="sk-or-..." type="password" {...field} className="font-mono h-12" />
                       </FormControl>
-                      <FormDescription>
-                        Tell the AI how to behave. Include your store name, policies, and tone.
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
 
-                <Button type="submit" disabled={loading} size="lg" className="w-full md:w-auto">
+                <div className="border rounded-lg p-4 bg-secondary/10">
+                    <button 
+                        type="button" 
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="flex items-center justify-between w-full text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Settings2 size={16} />
+                            Advanced Settings (Model & Prompt)
+                        </div>
+                        {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+
+                    {showAdvanced && (
+                        <div className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-2">
+                             <FormField
+                                control={form.control}
+                                name="model_name"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Model Name</FormLabel>
+                                    <FormControl>
+                                      <Input placeholder="e.g. google/gemini-2.0-flash-lite-preview-02-05:free" {...field} className="font-mono" />
+                                    </FormControl>
+                                    <FormDescription className="text-xs">
+                                      The specific AI model ID to use.
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                            <FormField
+                              control={form.control}
+                              name="system_prompt"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>System Instruction (Prompt)</FormLabel>
+                                  <FormControl>
+                                    <Textarea 
+                                      placeholder="You are a helpful assistant for a WhatsApp store..." 
+                                      className="min-h-[150px] font-sans text-base leading-relaxed"
+                                      {...field} 
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    Tell the AI how to behave. Include your store name, policies, and tone.
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                        </div>
+                    )}
+                </div>
+
+                <Button type="submit" disabled={loading} size="lg" className="w-full">
                   {loading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>}
                   <Save className="mr-2 h-4 w-4" />
                   Save AI Settings

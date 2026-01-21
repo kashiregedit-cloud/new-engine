@@ -114,9 +114,9 @@ export default function ControlPage() {
                    <MessageCircle size={20} />
                 </div>
                 <div className="space-y-0.5">
-                  <Label className="text-base font-semibold cursor-pointer">Auto Reply</Label>
+                  <Label className="text-base font-semibold cursor-pointer">Automatic Replies</Label>
                   <p className="text-xs text-muted-foreground">
-                    Master switch for all automated replies
+                    Let the bot reply to customers instantly 24/7.
                   </p>
                 </div>
               </div>
@@ -132,9 +132,9 @@ export default function ControlPage() {
                    <Sparkles size={20} />
                 </div>
                 <div className="space-y-0.5">
-                  <Label className="text-base font-semibold cursor-pointer">AI Intelligence</Label>
+                  <Label className="text-base font-semibold cursor-pointer">Smart AI Brain</Label>
                   <p className="text-xs text-muted-foreground">
-                    Use AI to generate smart answers
+                    Use AI to understand complex questions & sell products.
                   </p>
                 </div>
               </div>
@@ -150,9 +150,9 @@ export default function ControlPage() {
                    <Image size={20} />
                 </div>
                 <div className="space-y-0.5">
-                  <Label className="text-base font-semibold cursor-pointer">Media Analysis</Label>
+                  <Label className="text-base font-semibold cursor-pointer">See Images & Hear Audio</Label>
                   <p className="text-xs text-muted-foreground">
-                    Allow bot to see images and hear audio
+                    Bot will analyze product photos and listen to voice notes.
                   </p>
                 </div>
               </div>
