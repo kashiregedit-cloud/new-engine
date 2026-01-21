@@ -47,4 +47,12 @@ alter table user_configs add column if not exists auto_reply boolean default tru
 alter table user_configs add column if not exists ai_enabled boolean default true;
 alter table user_configs add column if not exists media_enabled boolean default true;
 alter table user_configs add column if not exists response_language text default 'bn';
-alter table user_configs add column if not exists response_tone text default 'professional';
+-- 5. Table for Session QR Links (User Requested)
+create table if not exists session_qr_link ( 
+   id bigint generated always as identity not null, 
+   qr_link text not null, 
+   session_name text null, 
+   session_used boolean null default false, 
+   constraint session_qr_link_pkey primary key (id) 
+ ) TABLESPACE pg_default;
+

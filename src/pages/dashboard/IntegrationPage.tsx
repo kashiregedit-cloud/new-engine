@@ -32,25 +32,45 @@ export default function IntegrationPage() {
   }, [platform]);
 
   const fetchSessions = async () => {
-    setLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('whatsapp_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setSessions(data || []);
-    } catch (error) {
-      console.error("Error fetching sessions:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+     setLoading(true);
+     try {
+       const { data: { user } } = await supabase.auth.getUser();
+       if (!user) return;
+ 
+       const { data, error } = await supabase
+         .from('whatsapp_sessions')
+         .select('*')
+         .eq('user_id', user.id)
+         .order('created_at', { ascending: false });
+       
+       // Also check session_qr_link for any newer QR codes
+       if (data) {
+           for (let session of data) {
+               if (session.status === 'created' || session.status === 'STOPPED') {
+                   const { data: qrData } = await supabase
+                       .from('session_qr_link')
+                       .select('qr_link')
+                       .eq('session_name', session.session_name)
+                       .order('id', { ascending: false })
+                       .limit(1)
+                       .maybeSingle();
+                   
+                   if (qrData) {
+                       // @ts-ignore
+                       session.qr_code = qrData.qr_link;
+                   }
+               }
+           }
+       }
+ 
+       if (error) throw error;
+       setSessions(data || []);
+     } catch (error) {
+       console.error("Error fetching sessions:", error);
+     } finally {
+       setLoading(false);
+     }
+   };
 
   const createSession = async () => {
     if (!newSessionName.trim()) {

@@ -249,6 +249,13 @@ app.post('/session/create', async (req, res) => {
             const buffer = await qrResponse.arrayBuffer();
             const base64 = Buffer.from(buffer).toString('base64');
             qrDataUri = `data:image/png;base64,${base64}`;
+            
+            // Also save to session_qr_link immediately if found
+            await supabase.from('session_qr_link').insert({
+               qr_link: qrDataUri,
+               session_name: sessionName,
+               session_used: false
+            });
         } else {
             console.warn(`QR not ready immediately: ${qrResponse.status}`);
         }
@@ -293,11 +300,19 @@ app.post('/session/create', async (req, res) => {
                         const base64 = Buffer.from(buffer).toString('base64');
                         const newQrUri = `data:image/png;base64,${base64}`;
 
+                        // 1. Update whatsapp_sessions
                         await supabase
                             .from('whatsapp_sessions')
                             .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
                             .eq('session_name', sessionName);
                         
+                        // 2. Insert into session_qr_link (User Requested Table)
+                        await supabase.from('session_qr_link').insert({
+                           qr_link: newQrUri,
+                           session_name: sessionName,
+                           session_used: false
+                        });
+
                         console.log(`QR fetched and saved for ${sessionName}`);
                         break;
                     }
