@@ -60,4 +60,5 @@ create table if not exists session_qr_link (
 -- 6. Fix for existing whatsapp_sessions table
 alter table whatsapp_sessions add column if not exists user_id text;
 alter table whatsapp_sessions add column if not exists qr_code text;
+alter table whatsapp_sessions add column if not exists status text default 'stopped';
 
