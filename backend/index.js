@@ -265,10 +265,13 @@ app.post('/session/create', async (req, res) => {
 
     // 2. Save to DB (Create User/Session Row)
     // Upserting based on session_name to avoid duplicates if retrying
+    // Ensure session_id is not null (fallback to sessionName if WAHA doesn't return id)
+    const finalSessionId = data.id || sessionName;
+
     const { error: upsertError } = await supabase
         .from('whatsapp_sessions')
         .upsert({
-            session_id: data.id, 
+            session_id: finalSessionId, 
             session_name: sessionName,
             // Only update user_email if it's provided and not null
             ...(userEmail ? { user_email: userEmail } : {}),
