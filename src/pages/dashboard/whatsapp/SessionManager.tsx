@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/config";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function SessionManager() {
   const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();
@@ -23,17 +24,52 @@ export default function SessionManager() {
     setIsCreating(true);
     setQrCodeUrl(null);
     try {
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      // Strict check for session validity
+      if (!session || !session.user || !session.access_token) {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !refreshData.session) {
+             throw new Error("User session expired. Please logout and login again.");
+        }
+        session = refreshData.session;
+      }
+
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const user = authUser || session.user;
+      
+      if (!user?.email) throw new Error("User email not found. Please contact support.");
+
+      const payload = { 
+        sessionName: newSessionName,
+        userEmail: user.email,
+        userId: user.id,
+        plan: 30
+      };
+
       const res = await fetch(`${BACKEND_URL}/session/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName: newSessionName })
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        },
+        body: JSON.stringify(payload)
       });
+      
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create session');
       
       toast.success("Session created! Fetching QR Code...");
+      
+      // Use the QR code returned directly from creation response if available
+      if (data.qr_code) {
+          setQrCodeUrl(data.qr_code);
+          setViewingSessionQr(newSessionName);
+      } else {
+          fetchQr(newSessionName);
+      }
+      
       await refreshSessions();
-      fetchQr(newSessionName);
       setNewSessionName("");
     } catch (error: any) {
       toast.error(error.message);
@@ -46,32 +82,37 @@ export default function SessionManager() {
     try {
       setViewingSessionQr(sessionName);
       
-      // Check if session has a saved QR code first (from list)
-      // @ts-ignore
-      const session = sessions.find(s => s.name === sessionName);
-      // @ts-ignore
-      if (session?.qr_code) {
-         // @ts-ignore
-         setQrCodeUrl(session.qr_code);
-         // Also fetch fresh in background
-      } else {
-         setQrCodeUrl(null);
+      // 1. Try to get from Supabase first (Base64 is reliable)
+      const { data: sessionData } = await supabase
+        .from('whatsapp_sessions')
+        .select('qr_code')
+        .eq('session_name', sessionName)
+        .single();
+        
+      if (sessionData?.qr_code) {
+          setQrCodeUrl(sessionData.qr_code);
+          return;
       }
 
-      // Add timestamp to prevent caching
-      const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`);
+      // 2. Fallback to backend fetch with Auth header
+      let { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`, {
+          headers: {
+              'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+          }
+      });
+      
       if (res.ok) {
         const blob = await res.blob();
-        setQrCodeUrl(URL.createObjectURL(blob));
+        if (blob.size > 0) {
+            setQrCodeUrl(URL.createObjectURL(blob));
+        }
       } else {
         if (retries > 0) {
-            // Retry after 2 seconds
             setTimeout(() => fetchQr(sessionName, retries - 1), 2000);
             return;
         }
-        if (!session?.qr_code) {
-           toast.error("QR Code not available (Session might be connected or stopped)");
-        }
+        toast.error("QR Code not available yet");
       }
     } catch (e) {
       if (retries > 0) {
@@ -79,20 +120,34 @@ export default function SessionManager() {
           return;
       }
       console.error(e);
-      toast.error("Failed to fetch QR");
     }
   };
 
-  const handleAction = async (action: 'start' | 'stop' | 'delete', sessionName: string) => {
+  const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
     try {
+      let { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
         method: action === 'delete' ? 'DELETE' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        },
         body: JSON.stringify({ sessionName })
       });
       if (!res.ok) throw new Error('Action failed');
+      
       toast.success(`Session ${action}ed successfully`);
-      await refreshSessions();
+      
+      if (action === 'restart') {
+          // Wait and refresh to show new status/QR
+          setTimeout(async () => {
+              await refreshSessions();
+              fetchQr(sessionName);
+          }, 3000);
+      } else {
+          await refreshSessions();
+      }
+
       if (action === 'delete' && viewingSessionQr === sessionName) {
         setViewingSessionQr(null);
         setQrCodeUrl(null);
@@ -172,6 +227,11 @@ export default function SessionManager() {
                      <Pause className="mr-2 h-4 w-4" /> Stop
                    </Button>
                 )}
+                
+                <Button size="sm" variant="outline" className="w-full border-orange-200 hover:bg-orange-50 text-orange-600" onClick={() => handleAction('restart', session.name)}>
+                    <RefreshCw className="mr-2 h-4 w-4" /> Restart
+                </Button>
+
                 <Button size="sm" variant="destructive" onClick={() => handleAction('delete', session.name)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
