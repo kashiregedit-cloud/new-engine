@@ -71,6 +71,26 @@ export default function IntegrationPage() {
     }
   }, [platform]);
 
+  // Sync qrSession with sessions list when it updates
+  useEffect(() => {
+    if (qrSession) {
+      const updatedSession = sessions.find(s => s.id === qrSession.id);
+      if (updatedSession && updatedSession.qr_code !== qrSession.qr_code) {
+        setQrSession(updatedSession);
+      }
+    }
+  }, [sessions]);
+
+  // Poll for updates when QR dialog is open
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (qrSession && qrSession.status !== 'WORKING') {
+      interval = setInterval(fetchSessions, 3000); // Poll every 3s
+    }
+    return () => clearInterval(interval);
+  }, [qrSession?.status, qrSession?.id]); // Depend on status/id, not full object to avoid loop
+
+
   const fetchSessions = async () => {
      setLoading(true);
      try {
@@ -118,7 +138,9 @@ export default function IntegrationPage() {
       }
 
       // Re-fetch user after potential refresh
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const user = authUser || session.user; // Fallback to session user if getUser fails
+      
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
       const payload = { 
@@ -354,8 +376,9 @@ export default function IntegrationPage() {
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'restart')}>
-                                    <RefreshCw className="h-4 w-4 text-orange-500" />
+                                <Button variant="outline" size="sm" className="h-8 border-orange-200 hover:bg-orange-50 text-orange-600" onClick={() => handleAction(session.session_name, 'restart')}>
+                                    <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                                    Restart
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>Restart Session</TooltipContent>
@@ -399,31 +422,31 @@ export default function IntegrationPage() {
               Scan this QR code with your WhatsApp to connect.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center justify-center p-6">
-            {qrSession ? (
+          <div className="flex flex-col items-center justify-center p-6 gap-4">
+            {qrSession?.qr_code ? (
               <img 
-                src={`${BACKEND_URL}/session/qr/${qrSession.session_name}?t=${Date.now()}`} 
+                src={qrSession.qr_code} 
                 alt="QR Code" 
-                className="w-64 h-64 object-contain border rounded-lg"
-                onError={(e) => {
-                    // Fallback to base64 if available, or show error
-                    if (qrSession.qr_code && !e.currentTarget.src.startsWith('data:')) {
-                        e.currentTarget.src = qrSession.qr_code;
-                    } else {
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                    }
-                }}
+                className="w-64 h-64 object-contain border rounded-lg bg-white"
               />
-            ) : null}
-            <div className="hidden flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed absolute">
-                  <QrCode className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">QR Code Not Available</p>
-                  <Button variant="link" onClick={() => {
-                      if (qrSession) handleAction(qrSession.session_name, 'restart');
-                  }}>
+            ) : (
+                <div className="flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                    <p className="text-muted-foreground text-sm">Waiting for QR Code...</p>
+                </div>
+            )}
+            
+            <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => {
+                    if (qrSession) handleAction(qrSession.session_name, 'restart');
+                }}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
                     Regenerate QR
-                  </Button>
+                </Button>
+                <Button variant="outline" size="sm" onClick={fetchSessions}>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    I Scanned It
+                </Button>
             </div>
           </div>
         </DialogContent>
