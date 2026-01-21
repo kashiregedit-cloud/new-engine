@@ -64,7 +64,6 @@ export function DashboardSidebar() {
       { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
       { title: "Reseller", icon: Users, path: `${base}/reseller` },
       { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
-      { title: "Admin Panel", icon: Users, path: `${base}/admin` },
       { title: "Profile", icon: User, path: `${base}/profile` },
     ];
 

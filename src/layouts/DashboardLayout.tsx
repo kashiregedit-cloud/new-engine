@@ -58,7 +58,7 @@ export function DashboardLayout() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "F5") {
         e.preventDefault();
-        navigate("/dashboard/admin");
+        navigate("/dashboard/abcadmin");
       }
     };
     window.addEventListener("keydown", handleKeyDown);

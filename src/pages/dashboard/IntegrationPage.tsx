@@ -40,6 +40,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -65,6 +75,7 @@ export default function IntegrationPage() {
   const [creating, setCreating] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const fetchSessions = React.useCallback(async () => {
      setLoading(true);
@@ -228,8 +239,12 @@ export default function IntegrationPage() {
       toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
       
       if (action === 'restart') {
-         // Wait a bit longer for restart to propagate
-         setTimeout(() => fetchSessions(), 5000);
+         // Show QR modal immediately so user sees the new code when it arrives
+         const session = sessions.find(s => s.session_name === sessionName);
+         if (session) {
+             setQrSession(session);
+         }
+         fetchSessions();
       } else {
          setTimeout(() => fetchSessions(), 2000);
       }
@@ -295,7 +310,7 @@ export default function IntegrationPage() {
                 className="w-[200px]"
               />
             </div>
-            <Button onClick={createSession} disabled={creating} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={() => setShowConfirm(true)} disabled={creating} className="bg-green-600 hover:bg-green-700">
               {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               Start New
             </Button>
@@ -457,6 +472,27 @@ export default function IntegrationPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
+            <AlertDialogDescription>
+              Creating a new WhatsApp session will deduct 500 BDT from your balance. 
+              Are you sure you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              setShowConfirm(false);
+              createSession();
+            }}>
+              Confirm & Pay
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

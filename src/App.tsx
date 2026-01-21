@@ -40,6 +40,7 @@ const App = () => (
           {/* Dashboard Routes */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<PlatformSelection />} />
+            <Route path="abcadmin" element={<AdminPage />} />
             
             {/* Platform Specific Routes */}
             <Route path=":platform" element={<Outlet />}>
@@ -54,7 +55,6 @@ const App = () => (
               <Route path="reseller" element={<ResellerPage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="payment" element={<PaymentPage />} />
-              <Route path="admin" element={<AdminPage />} />
             </Route>
 
             {/* Direct access to generic pages (optional, but good for backward compat if needed) */}
