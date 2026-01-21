@@ -1,13 +1,50 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, CheckCircle, XCircle, Plus, Trash2, StopCircle, PlayCircle, QrCode } from "lucide-react";
+import { 
+  Loader2, 
+  RefreshCw, 
+  CheckCircle, 
+  XCircle, 
+  Plus, 
+  Trash2, 
+  StopCircle, 
+  PlayCircle, 
+  QrCode, 
+  Search,
+  Eye,
+  Settings,
+  MoreVertical
+} from "lucide-react";
 import { BACKEND_URL } from "@/config";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface WhatsAppSession {
   id: string;
@@ -16,6 +53,7 @@ interface WhatsAppSession {
   qr_code?: string;
   plan_days?: number;
   user_email?: string;
+  updated_at?: string;
 }
 
 export default function IntegrationPage() {
@@ -24,6 +62,8 @@ export default function IntegrationPage() {
   const [loading, setLoading] = useState(false);
   const [newSessionName, setNewSessionName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
 
   useEffect(() => {
     if (platform === 'whatsapp') {
@@ -43,28 +83,12 @@ export default function IntegrationPage() {
          .eq('user_id', user.id)
          .order('created_at', { ascending: false });
        
-       // Also check session_qr_link for any newer QR codes
        if (data) {
-           for (let session of data) {
-               if (session.status === 'created' || session.status === 'STOPPED') {
-                   const { data: qrData } = await supabase
-                       .from('session_qr_link')
-                       .select('qr_link')
-                       .eq('session_name', session.session_name)
-                       .order('id', { ascending: false })
-                       .limit(1)
-                       .maybeSingle();
-                   
-                   if (qrData) {
-                       // @ts-ignore
-                       session.qr_code = qrData.qr_link;
-                   }
-               }
-           }
+           // No need to fetch from session_qr_link as backend now stores QR in whatsapp_sessions
+           setSessions(data);
        }
  
        if (error) throw error;
-       setSessions(data || []);
      } catch (error) {
        console.error("Error fetching sessions:", error);
      } finally {
@@ -90,16 +114,29 @@ export default function IntegrationPage() {
           sessionName: newSessionName, 
           userEmail: user.email, 
           userId: user.id,
-          plan: 30 // Default plan
+          plan: 30 
         })
       });
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create session');
       
-      toast.success("Session created! Waiting for QR Code...");
+      toast.success("Session created! Please scan the QR code.");
       setNewSessionName("");
-      fetchSessions(); // Refresh list
+      
+      // Immediately show QR from response if available, even if DB fetch might fail/delay
+      if (data.qr_code) {
+          setQrSession({
+              id: data.id || data.session_name, // Use session_name as ID if ID is missing
+              session_name: data.session_name,
+              status: 'created',
+              qr_code: data.qr_code,
+              plan_days: data.plan_days,
+              user_email: user.email
+          });
+      }
+
+      fetchSessions(); 
     } catch (error: any) {
       toast.error(error.message);
     } finally {
@@ -110,7 +147,7 @@ export default function IntegrationPage() {
   const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
     try {
       if (action === 'restart') {
-         toast.info("Restarting session to generate new QR...");
+         toast.info("Restarting session...");
       }
       
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
@@ -121,12 +158,29 @@ export default function IntegrationPage() {
       
       if (!res.ok) throw new Error(`Failed to ${action} session`);
       
-      toast.success(action === 'restart' ? "Session restarting. QR will appear shortly." : `Session ${action}ed successfully`);
+      toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
       
-      // Delay fetch slightly to allow backend to process
       setTimeout(() => fetchSessions(), 2000);
     } catch (error: any) {
       toast.error(error.message);
+    }
+  };
+
+  const filteredSessions = sessions.filter(session => 
+    session.session_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'WORKING':
+        return <Badge className="bg-green-500 hover:bg-green-600"><CheckCircle className="w-3 h-3 mr-1" /> WORKING</Badge>;
+      case 'STOPPED':
+        return <Badge variant="secondary"><StopCircle className="w-3 h-3 mr-1" /> STOPPED</Badge>;
+      case 'created':
+      case 'scanned': // WAHA might return scanned before working
+        return <Badge className="bg-orange-500 hover:bg-orange-600"><QrCode className="w-3 h-3 mr-1" /> SCAN_QR_CODE</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
     }
   };
 
@@ -140,131 +194,183 @@ export default function IntegrationPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 p-2">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
            <h1 className="text-2xl font-bold">WhatsApp Sessions</h1>
            <p className="text-muted-foreground">Manage your WhatsApp connections and sessions.</p>
         </div>
-        <Button variant="outline" onClick={fetchSessions} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={fetchSessions} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
       
-      {/* Create New Session */}
-      <Card className="border-dashed border-2">
-        <CardHeader>
-          <CardTitle>Create New Session</CardTitle>
-          <CardDescription>Enter a unique name for your new WhatsApp session.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4">
-            <div className="grid w-full max-w-sm items-center gap-1.5">
-              <Label htmlFor="sessionName">Session Name</Label>
+      {/* Controls Bar */}
+      <div className="flex flex-col md:flex-row gap-4 justify-between items-end md:items-center bg-card p-4 rounded-lg border">
+        {/* Create Session Form */}
+        <div className="flex gap-2 w-full md:w-auto items-end">
+             <div className="grid w-full max-w-sm items-center gap-1.5">
+              <Label htmlFor="sessionName">New Session Name</Label>
               <Input 
                 id="sessionName" 
-                placeholder="e.g., Support Bot 1" 
+                placeholder="e.g., Sales Bot" 
                 value={newSessionName}
                 onChange={(e) => setNewSessionName(e.target.value)}
+                className="w-[200px]"
               />
             </div>
-            <div className="flex items-end">
-              <Button onClick={createSession} disabled={creating}>
-                {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                Create Session
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            <Button onClick={createSession} disabled={creating} className="bg-green-600 hover:bg-green-700">
+              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+              Start New
+            </Button>
+        </div>
 
-      {/* Session List */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {sessions.map((session) => (
-          <Card key={session.id} className="relative overflow-hidden">
-            <div className={`absolute top-0 left-0 w-1 h-full ${session.status === 'WORKING' ? 'bg-green-500' : 'bg-orange-500'}`} />
-            <CardHeader className="pb-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <CardTitle className="text-lg">{session.session_name}</CardTitle>
-                  <CardDescription className="flex items-center gap-2 mt-1">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                      session.status === 'WORKING' 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-orange-100 text-orange-700'
-                    }`}>
-                      {session.status === 'WORKING' ? <CheckCircle size={12} className="mr-1"/> : <XCircle size={12} className="mr-1"/>}
-                      {session.status}
-                    </span>
-                    {session.plan_days && (
-                       <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
-                         {session.plan_days} Days Plan
-                       </span>
-                    )}
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* QR Code Display */}
-              {(session.status === 'created' || session.status === 'STOPPED') && session.qr_code ? (
-                <div className="flex flex-col items-center justify-center p-4 bg-white rounded-lg border my-4">
-                  <img src={session.qr_code} alt="QR Code" className="w-48 h-48 object-contain" />
-                  <p className="text-xs text-muted-foreground mt-2">Scan with WhatsApp</p>
-                </div>
-              ) : session.status === 'WORKING' ? (
-                <div className="flex flex-col items-center justify-center p-8 bg-green-50/50 rounded-lg border border-green-100 my-4">
-                  <CheckCircle className="h-12 w-12 text-green-500 mb-2" />
-                  <p className="text-green-700 font-medium">Connected</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center p-8 bg-secondary/20 rounded-lg border border-dashed my-4 min-h-[200px]">
-                   {creating ? (
-                      <div className="text-center">
-                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">Generating QR...</p>
-                      </div>
-                   ) : (
-                      <div className="text-center">
-                        <QrCode className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">QR Not Available</p>
-                        <Button variant="link" size="sm" onClick={fetchSessions} className="mt-1 h-auto p-0">
-                          Click to Refresh
-                        </Button>
-                      </div>
-                   )}
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="bg-secondary/10 pt-4 flex flex-col gap-3">
-              <div className="flex gap-2 w-full">
-                {session.status === 'WORKING' ? (
-                  <Button variant="destructive" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'stop')}>
-                    <StopCircle className="mr-2 h-4 w-4" /> Stop
-                  </Button>
-                ) : (
-                  <Button variant="default" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'start')}>
-                    <PlayCircle className="mr-2 h-4 w-4" /> Start
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'restart')}>
-                  <RefreshCw className="mr-2 h-4 w-4" /> Get New QR
-                </Button>
-              </div>
-              <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => handleAction(session.session_name, 'delete')}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete Session
-              </Button>
-            </CardFooter>
-          </Card>
-        ))}
+        {/* Search */}
+        <div className="relative w-full md:w-[300px]">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input 
+            placeholder="Search by Name..." 
+            className="pl-8" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
 
-        {sessions.length === 0 && !loading && (
-          <div className="col-span-full text-center py-12 text-muted-foreground">
-            <p>No active sessions found. Create one to get started.</p>
-          </div>
+      {/* Sessions Grid */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {filteredSessions.length === 0 ? (
+           <div className="col-span-full text-center p-8 border rounded-lg bg-muted/20">
+             {loading ? (
+                <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p>Loading sessions...</p>
+                </div>
+             ) : (
+                <p className="text-muted-foreground">No sessions found. Create one to get started.</p>
+             )}
+           </div>
+        ) : (
+          filteredSessions.map((session) => (
+            <Card key={session.id} className="overflow-hidden">
+              <CardHeader className="pb-2">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle className="text-lg">{session.session_name}</CardTitle>
+                        <CardDescription className="text-xs mt-1">ID: {session.id.slice(0, 8)}...</CardDescription>
+                    </div>
+                    {getStatusBadge(session.status)}
+                </div>
+              </CardHeader>
+              <CardContent className="pb-2">
+                <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Account:</span>
+                        <span className="font-medium">{session.user_email || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Server:</span>
+                        <span className="font-medium">WAHA</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-muted-foreground">Plan:</span>
+                        <span className="font-medium">{session.plan_days || 30} Days</span>
+                    </div>
+                </div>
+              </CardContent>
+              <div className="flex items-center justify-between p-4 bg-muted/20 border-t">
+                  <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="sm" onClick={() => setQrSession(session)}>
+                                <QrCode className="h-4 w-4 mr-2 text-blue-500" />
+                                View QR
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Scan QR Code</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
+                  <div className="flex gap-1">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'start')}>
+                                    <PlayCircle className="h-4 w-4 text-green-500" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Start Session</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'restart')}>
+                                    <RefreshCw className="h-4 w-4 text-orange-500" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Restart Session</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'stop')}>
+                                    <StopCircle className="h-4 w-4 text-red-500" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Stop Session</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'delete')}>
+                                    <Trash2 className="h-4 w-4 text-gray-500" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Delete Session</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                  </div>
+              </div>
+            </Card>
+          ))
         )}
       </div>
+
+      {/* QR Code Dialog */}
+      <Dialog open={!!qrSession} onOpenChange={(open) => !open && setQrSession(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Session QR Code: {qrSession?.session_name}</DialogTitle>
+            <DialogDescription>
+              Scan this QR code with your WhatsApp to connect.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-6">
+            {qrSession?.qr_code ? (
+              <img src={qrSession.qr_code} alt="QR Code" className="w-64 h-64 object-contain border rounded-lg" />
+            ) : (
+               <div className="flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed">
+                  <QrCode className="h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No QR Code Available</p>
+                  <Button variant="link" onClick={() => {
+                      if (qrSession) handleAction(qrSession.session_name, 'restart');
+                  }}>
+                    Generate New QR
+                  </Button>
+               </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

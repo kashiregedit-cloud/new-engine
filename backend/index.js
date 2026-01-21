@@ -273,35 +273,26 @@ app.post('/session/create', async (req, res) => {
     // Now we insert EVERYTHING at once (session + qr)
     const finalSessionId = data.id || sessionName;
 
-    const { error: upsertError } = await supabase
-        .from('whatsapp_sessions')
-        .upsert({
-            session_id: finalSessionId, 
-            session_name: sessionName,
-            ...(userEmail ? { user_email: userEmail } : {}),
-            ...(userId ? { user_id: userId } : {}),
-            status: 'created',
-            qr_code: qrDataUri, // Will be populated if found, else null
-            plan_days: req.body.plan || 30,
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'session_name' });
+    try {
+        const { error: upsertError } = await supabase
+            .from('whatsapp_sessions')
+            .upsert({
+                session_id: finalSessionId, 
+                session_name: sessionName,
+                ...(userEmail ? { user_email: userEmail } : {}),
+                ...(userId ? { user_id: userId } : {}),
+                status: 'created',
+                qr_code: qrDataUri,
+                plan_days: req.body.plan || 30,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'session_name' });
 
-    if (qrDataUri) {
-        // Also insert into session_qr_link
-        const { error: qrError } = await supabase.from('session_qr_link').insert({
-           qr_link: qrDataUri,
-           session_name: sessionName,
-           session_used: false
-        });
-        if (qrError) {
-            console.error('QR Link Insert Error:', qrError);
-            // Don't fail the whole request, just log it
+        if (upsertError) {
+            console.error('DB Upsert Error (Non-fatal):', upsertError);
+            // return res.status(500).json({ error: `Failed to save session to database: ${upsertError.message}` });
         }
-    }
-
-    if (upsertError) {
-        console.error('DB Upsert Error:', upsertError);
-        return res.status(500).json({ error: `Failed to save session to database: ${upsertError.message}` });
+    } catch (dbErr) {
+        console.error('DB Unexpected Error (Non-fatal):', dbErr);
     }
 
     // Return final response with QR (or null if timed out)
@@ -437,20 +428,14 @@ app.post('/session/restart', async (req, res) => {
                      }
  
                      if (newQrUri) {
-                         await supabase
-                             .from('whatsapp_sessions')
-                             .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
-                             .eq('session_name', sessionName);
-                         
-                         await supabase.from('session_qr_link').insert({
-                            qr_link: newQrUri,
-                            session_name: sessionName,
-                            session_used: false
-                         });
- 
-                         console.log(`QR fetched and saved for ${sessionName} (Restart)`);
-                         break;
-                     }
+                        await supabase
+                            .from('whatsapp_sessions')
+                            .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
+                            .eq('session_name', sessionName);
+                        
+                        console.log(`QR fetched and saved for ${sessionName} (Restart)`);
+                        break;
+                    }
                  }
              } catch (e) {
                  console.error(`Retry failed for ${sessionName}:`, e);
@@ -485,8 +470,20 @@ app.post('/session/delete', async (req, res) => {
 });
 
 app.get('/session/qr/:sessionName', async (req, res) => {
-  const { sessionName } = req.params;
-  try {
+    const { sessionName } = req.params;
+    try {
+        // 1. Try fetching from Supabase first (Fastest)
+        const { data: dbSession } = await supabase
+            .from('whatsapp_sessions')
+            .select('qr_code')
+            .eq('session_name', sessionName)
+            .maybeSingle();
+
+        if (dbSession?.qr_code) {
+            return res.json({ qr: dbSession.qr_code });
+        }
+
+        // 2. If not in DB, try WAHA directly (Slow but fresh)
     const url = `${WAHA_BASE_URL}/api/${sessionName}/auth/qr?format=image`;
     const headers = {};
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
