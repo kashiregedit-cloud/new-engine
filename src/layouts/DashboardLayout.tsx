@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
+import { WhatsAppProvider } from "@/context/WhatsAppContext";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -25,6 +26,9 @@ export function DashboardLayout() {
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const pathParts = location.pathname.split('/');
+  const platform = ['whatsapp', 'messenger', 'instagram'].includes(pathParts[2]) ? pathParts[2] : null;
 
   useEffect(() => {
     const checkAuth = async () => {
