@@ -113,8 +113,9 @@ export default function PaymentPage() {
         setSenderNumber("");
         setCustomAmount("");
         fetchData(); // Refresh list
-    } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : "Unknown error";
+    } catch (e: any) {
+        console.error("Deposit Error:", e);
+        const message = e?.message || (e instanceof Error ? e.message : "Unknown error");
         toast.error("Failed to submit deposit: " + message);
     } finally {
         setSubmitting(false);

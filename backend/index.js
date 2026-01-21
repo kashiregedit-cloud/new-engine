@@ -343,17 +343,18 @@ app.post('/session/create', async (req, res) => {
         },
         webhooks: [
           {
-            url: `${BACKEND_URL}/webhook`,
+            url: `https://n8n.salesmanchatbot.online/webhook/webhook`,
             events: ['message', 'session.status'],
             retries: {
               delaySeconds: 2,
               attempts: 15,
               policy: "linear"
-            }
+            },
+            customHeaders: null
           }
         ],
         client: {
-          deviceName: "salesmanchatbot.online || wp : +8801310148077",
+          deviceName: "salesmanchatbot.online || wp : +880195687140.",
           browserName: "IE"
         }
       }
