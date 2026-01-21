@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export interface Database {
   public: {
     Tables: {
       whatsapp_sessions: {
@@ -15,6 +15,7 @@ export type Database = {
           session_id: string
           session_name: string | null
           user_email: string | null
+          user_id: string | null
           plan_days: number | null
           qr_code: string | null
           status: string | null
@@ -26,6 +27,7 @@ export type Database = {
           session_id: string
           session_name?: string | null
           user_email?: string | null
+          user_id?: string | null
           plan_days?: number | null
           qr_code?: string | null
           status?: string | null
@@ -37,6 +39,7 @@ export type Database = {
           session_id?: string
           session_name?: string | null
           user_email?: string | null
+          user_id?: string | null
           plan_days?: number | null
           qr_code?: string | null
           status?: string | null

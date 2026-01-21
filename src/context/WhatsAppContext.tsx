@@ -21,16 +21,31 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
   const refreshSessions = async () => {
     setLoading(true);
     try {
-      // 1. Fetch from WAHA via Backend
+      // 1. Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // 2. Fetch all from WAHA via Backend
       const res = await fetch(`${BACKEND_URL}/sessions`);
       const wahaSessions = await res.json();
-      
-      // 2. Fetch from Supabase (to sync metadata if needed)
-      const { data: dbSessions } = await supabase.from('whatsapp_sessions').select('*');
-      
-      // Merge logic could go here, for now we trust WAHA + DB status
-      // We will use WAHA sessions as the source of truth for existence
-      const formattedSessions = Array.isArray(wahaSessions) ? wahaSessions : [];
+      const allSessions = Array.isArray(wahaSessions) ? wahaSessions : [];
+
+      let formattedSessions = [];
+
+      if (user && user.email) {
+        // 3. Filter by user email from Supabase
+        const { data: mySessions } = await supabase
+          .from('whatsapp_sessions')
+          .select('session_name')
+          .eq('user_email', user.email);
+          
+        const allowedNames = mySessions?.map(s => s.session_name) || [];
+        
+        // Filter WAHA sessions to only show those owned by user
+        formattedSessions = allSessions.filter((s: any) => allowedNames.includes(s.name));
+      } else {
+        // If no user logged in, show nothing or handle accordingly
+        formattedSessions = []; 
+      }
       
       setSessions(formattedSessions);
       
@@ -41,6 +56,7 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
          // Update current session object with latest data
          const updated = formattedSessions.find((s: any) => s.name === currentSession.name);
          if (updated) setCurrentSession(updated);
+         else setCurrentSession(null);
       }
     } catch (error) {
       console.error("Failed to fetch sessions", error);

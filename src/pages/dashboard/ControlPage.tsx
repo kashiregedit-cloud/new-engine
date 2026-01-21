@@ -29,20 +29,20 @@ export default function ControlPage() {
       if (!user) return;
 
       const { data, error } = await supabase
-        .from('user_configs')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (data) {
-        setConfig({
-          auto_reply: data.auto_reply ?? true,
-          ai_enabled: data.ai_enabled ?? true,
-          media_enabled: data.media_enabled ?? true,
-          response_language: data.response_language || 'bn',
-          response_tone: data.response_tone || 'professional'
-        });
-      }
+      .from('user_configs')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
+    
+    if (data) {
+      setConfig({
+        auto_reply: data.auto_reply ?? true,
+        ai_enabled: data.ai_enabled ?? true,
+        media_enabled: data.media_enabled ?? true,
+        response_language: data.response_language || 'bn',
+        response_tone: data.response_tone || 'professional'
+      });
+    }
     } catch (error) {
       console.error('Error fetching config:', error);
     } finally {
@@ -59,25 +59,11 @@ export default function ControlPage() {
         return;
       }
 
-      // Check if config exists
-      const { data: existing } = await supabase
-        .from('user_configs')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      const payload = {
+      const { error } = await supabase.from('user_configs').upsert({
         user_id: user.id,
         ...config
-      };
-
-      if (existing) {
-         const { error } = await supabase.from('user_configs').update(config).eq('user_id', user.id);
-         if (error) throw error;
-      } else {
-         const { error } = await supabase.from('user_configs').insert(payload);
-         if (error) throw error;
-      }
+      });
+      if (error) throw error;
       toast.success("Settings saved successfully");
     } catch (error: any) {
       toast.error("Failed to save settings: " + error.message);

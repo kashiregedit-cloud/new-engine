@@ -37,10 +37,13 @@ export default function IntegrationPage() {
   const createSession = async () => {
     setLoading(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) throw new Error("User not authenticated");
+
       const res = await fetch(`${BACKEND_URL}/session/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName })
+        body: JSON.stringify({ sessionName, userEmail: user.email, userId: user.id })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create session');

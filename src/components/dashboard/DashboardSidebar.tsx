@@ -34,42 +34,47 @@ export function DashboardSidebar() {
 
   const getMenuItems = () => {
     if (!platform) {
-      return [
-        { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
-        { title: "Profile", icon: User, path: "/dashboard/profile" },
-      ];
+      return {
+        switchItem: null,
+        platformItems: [
+          { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
+          { title: "Profile", icon: User, path: "/dashboard/profile" },
+        ],
+        fixedItems: []
+      };
     }
 
     const base = `/dashboard/${platform}`;
     
-    const items = [
+    // Platform Specific Items
+    const platformItems = [
       { title: "Dashboard", icon: LayoutDashboard, path: base },
-      // "Integration" replaced by "Sessions" for WhatsApp
       { title: platform === 'whatsapp' ? "Sessions" : "Integration", icon: Plug, path: platform === 'whatsapp' ? `${base}/sessions` : `${base}/integration` },
       { title: "Database Connect", icon: Database, path: `${base}/database` },
       { title: "Control Page", icon: Settings, path: `${base}/control` },
-      { title: "Product Entry", icon: Package, path: `${base}/products` },
-      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
-      { title: "Reseller", icon: Users, path: `${base}/reseller` },
-      { title: "Profile", icon: User, path: `${base}/profile` },
-      { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
     ];
 
     if (platform === 'whatsapp') {
-       // Insert AI Settings after Control Page
-       const controlIndex = items.findIndex(i => i.title === "Control Page");
-       if (controlIndex !== -1) {
-         items.splice(controlIndex + 1, 0, { title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
-       }
+      platformItems.push({ title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
     }
 
-    // Add "Switch Platform" at the top for easy navigation back
-    items.unshift({ title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" });
+    // Fixed / Common Sections (Always visible)
+    const fixedItems = [
+      { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
+      { title: "Profile", icon: User, path: `${base}/profile` },
+      { title: "Reseller", icon: Users, path: `${base}/reseller` },
+      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
+      { title: "Product Entry", icon: Package, path: `${base}/products` },
+      { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
+    ];
 
-    return items;
+    // Remove separate switchItem as it is now in fixedItems
+    const switchItem = null;
+
+    return { switchItem, platformItems, fixedItems };
   };
 
-  const menuItems = getMenuItems();
+  const menu = getMenuItems();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -112,22 +117,32 @@ export function DashboardSidebar() {
       <nav className="flex-1 overflow-y-auto p-2">
         {platform && !collapsed && (
           <div className="mb-4">
-             <div className="mb-2 px-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="w-full justify-start gap-2"
-                  onClick={() => navigate('/dashboard')}
-                >
-                  <ArrowLeft size={16} />
-                  Switch Platform
-                </Button>
-             </div>
              {platform === 'whatsapp' && <SessionSelector />}
           </div>
         )}
+
         <ul className="space-y-1">
-          {menuItems.map((item) => {
+          {/* Switch Platform (Always Top) */}
+          {menu.switchItem && (
+            <li key={menu.switchItem.path}>
+              <Link
+                to={menu.switchItem.path}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <menu.switchItem.icon size={20} className="shrink-0" />
+                {!collapsed && (
+                  <span className="text-sm font-medium">{menu.switchItem.title}</span>
+                )}
+              </Link>
+            </li>
+          )}
+
+          <div className="my-2 border-t border-sidebar-border/50" />
+
+          {/* Platform Specific Items */}
+          {menu.platformItems && menu.platformItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <li key={item.path}>
@@ -148,6 +163,35 @@ export function DashboardSidebar() {
               </li>
             );
           })}
+
+          {menu.fixedItems && (
+            <>
+               <div className="my-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                 {!collapsed && "Tools & Profile"}
+               </div>
+               {menu.fixedItems.map((item) => {
+                const isActive = location.pathname === item.path;
+                return (
+                  <li key={item.path}>
+                    <Link
+                      to={item.path}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
+                        isActive
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      )}
+                    >
+                      <item.icon size={20} className="shrink-0" />
+                      {!collapsed && (
+                        <span className="text-sm font-medium">{item.title}</span>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
+            </>
+          )}
         </ul>
       </nav>
 

@@ -81,38 +81,14 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user found");
 
-      // Check if config exists
-      const { data: existing } = await supabase
-        .from('user_configs')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      let error;
-      if (existing) {
-        const { error: updateError } = await supabase
-          .from('user_configs')
-          .update({
-            ai_provider: values.ai_provider,
-            api_key: values.api_key,
-            model_name: values.model_name,
-            system_prompt: values.system_prompt,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', user.id);
-        error = updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('user_configs')
-          .insert({
-            user_id: user.id,
-            ai_provider: values.ai_provider,
-            api_key: values.api_key,
-            model_name: values.model_name,
-            system_prompt: values.system_prompt,
-          });
-        error = insertError;
-      }
+      const { error } = await supabase.from('user_configs').upsert({
+        user_id: user.id,
+        ai_provider: values.ai_provider,
+        api_key: values.api_key,
+        model_name: values.model_name,
+        system_prompt: values.system_prompt,
+        updated_at: new Date().toISOString(),
+      });
 
       if (error) throw error;
       toast.success("Settings saved successfully");

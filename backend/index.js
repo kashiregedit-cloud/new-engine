@@ -40,9 +40,31 @@ About You :
 // --- Helpers ---
 
 // Get AI Configuration from DB or Env
-async function getAIConfig() {
+async function getAIConfig(sessionName) {
+  let userId = null;
+
   try {
-    const { data } = await supabase.from('user_configs').select('*').limit(1).single();
+    if (sessionName) {
+      const { data: sessionData } = await supabase
+        .from('whatsapp_sessions')
+        .select('user_id')
+        .eq('session_name', sessionName)
+        .maybeSingle();
+      
+      if (sessionData) {
+        userId = sessionData.user_id;
+      }
+    }
+
+    let query = supabase.from('user_configs').select('*');
+    if (userId) {
+      query = query.eq('user_id', userId);
+    } else {
+      query = query.limit(1);
+    }
+
+    const { data } = await query.maybeSingle();
+
     if (data) {
       return {
         provider: data.ai_provider || 'openrouter',
@@ -55,6 +77,7 @@ async function getAIConfig() {
       };
     }
   } catch (e) {
+    console.error("Error fetching AI Config:", e);
     // Ignore error, fallback to env
   }
   return {
@@ -102,7 +125,7 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
     if (fetchError || !messages || messages.length === 0) return;
 
     // 2. Get AI Config early to check flags
-    const config = await getAIConfig();
+    const config = await getAIConfig(session);
 
     if (!config.autoReply) {
       console.log(`Auto-reply disabled for ${debounceKey}. Marking messages as ignored.`);
@@ -238,7 +261,7 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
-  const { sessionName } = req.body;
+  const { sessionName, userEmail, userId } = req.body;
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
 
   try {
@@ -269,6 +292,8 @@ app.post('/session/create', async (req, res) => {
     await supabase.from('whatsapp_sessions').insert({
       session_id: data.id, // WAHA usually returns { id, name, ... }
       session_name: sessionName,
+      user_email: userEmail,
+      user_id: userId,
       status: 'created'
     });
 
