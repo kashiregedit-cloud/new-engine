@@ -199,10 +199,10 @@ app.post('/session/create', async (req, res) => {
   if (!userId) console.warn('Warning: userId is missing in request body');
 
   // Create a scoped Supabase client if authorization header is provided
-  // This allows RLS policies to work correctly using the user's identity
+  // Use ANON KEY for scoped client to respect RLS policies
   const authHeader = req.headers.authorization;
   const scopedSupabase = authHeader 
-    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, { 
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY, { 
         global: { headers: { Authorization: authHeader } } 
       })
     : supabase;
@@ -249,6 +249,16 @@ app.post('/session/create', async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) return res.status(response.status).json(data);
+
+    // 1.5. Ensure Session is Started (Fix for STOPPED status)
+    if (data.status === 'STOPPED') {
+        console.log(`Session ${sessionName} created but STOPPED. Attempting explicit start...`);
+        try {
+            await fetch(`${WAHA_BASE_URL}/api/sessions/${sessionName}/start`, { method: 'POST', headers });
+        } catch (startErr) {
+            console.error('Error starting session:', startErr);
+        }
+    }
 
     // Initialize qrDataUri
     let qrDataUri = null;
