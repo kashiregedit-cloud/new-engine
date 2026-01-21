@@ -65,11 +65,9 @@ export function DashboardSidebar() {
       { title: "Reseller", icon: Users, path: `${base}/reseller` },
       { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
       { title: "Product Entry", icon: Package, path: `${base}/products` },
-      { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
     ];
 
-    // Remove separate switchItem as it is now in fixedItems
-    const switchItem = null;
+    const switchItem = { title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" };
 
     return { switchItem, platformItems, fixedItems };
   };
