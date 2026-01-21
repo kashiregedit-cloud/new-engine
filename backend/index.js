@@ -222,8 +222,10 @@ app.post('/session/create', async (req, res) => {
       }
   }
 
-  if (!userEmail) console.warn('Warning: userEmail is missing in request body and could not be recovered');
-  if (!userId) console.warn('Warning: userId is missing in request body and could not be recovered');
+  if (!userEmail || !userId) {
+      console.error('CRITICAL: User Identity missing even after recovery attempt. Aborting session creation.');
+      return res.status(401).json({ error: 'User identity verification failed. Please login again to create a session.' });
+  }
 
   try {
     const url = `${WAHA_BASE_URL}/api/sessions`;

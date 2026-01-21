@@ -105,8 +105,19 @@ export default function IntegrationPage() {
     setCreating(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user?.email) throw new Error("User not authenticated");
+      
+      // Strict check for session validity
+      if (!session || !session.user || !session.access_token) {
+        // Try to refresh session
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !refreshData.session) {
+             throw new Error("User session expired. Please logout and login again.");
+        }
+      }
+
+      // Re-fetch user after potential refresh
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) throw new Error("User email not found. Please contact support.");
 
       const payload = { 
         sessionName: newSessionName, 
