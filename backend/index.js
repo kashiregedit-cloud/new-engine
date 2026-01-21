@@ -199,10 +199,12 @@ app.post('/session/create', async (req, res) => {
     const headers = { 'Content-Type': 'application/json' };
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
-    // Configure WAHA with OUR Webhook URL
+    // Configure WAHA with specific config requested by user
     const payload = {
       name: sessionName,
       config: {
+        metadata: {},
+        debug: false,
         noweb: {
           markOnline: true,
           store: {
@@ -212,7 +214,7 @@ app.post('/session/create', async (req, res) => {
         },
         webhooks: [
           {
-            url: `${BACKEND_URL}/webhook`, // Auto-configure webhook
+            url: `${BACKEND_URL}/webhook`,
             events: ['message', 'session.status'],
             retries: {
               delaySeconds: 2,
@@ -233,60 +235,81 @@ app.post('/session/create', async (req, res) => {
 
     if (!response.ok) return res.status(response.status).json(data);
 
-    // Save to DB initial state
-    const { error: insertError } = await supabase.from('whatsapp_sessions').insert({
-      session_id: data.id, 
-      session_name: sessionName,
-      user_email: userEmail,
-      user_id: userId,
-      status: 'created'
-    });
-
-    if (insertError) {
-      console.error('DB Insert Error:', insertError);
-      // We might want to continue to try fetching QR even if insert failed, 
-      // but usually we want the record to exist. 
-      // For now, log it.
-    }
-
-    // Immediately fetch QR Code to save to DB (Retry mechanism)
-    let qrFound = false;
-    for (let i = 0; i < 15; i++) {
-        try {
-            console.log(`Attempting to fetch QR for ${sessionName} (Attempt ${i + 1})...`);
-            const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
-            const qrResponse = await fetch(qrUrl, { headers });
-            
-            if (qrResponse.ok) {
-                const buffer = await qrResponse.arrayBuffer();
-                const base64 = Buffer.from(buffer).toString('base64');
-                const dataUri = `data:image/png;base64,${base64}`;
-
-                // Update DB with QR
-                await supabase
-                .from('whatsapp_sessions')
-                .update({ qr_code: dataUri, updated_at: new Date().toISOString() })
-                .eq('session_name', sessionName);
-                
-                // Add QR to response so frontend gets it immediately
-                data.qr_code = dataUri;
-                qrFound = true;
-                break; // Exit loop
-            } else {
-                console.log(`QR not ready yet: ${qrResponse.status}`);
-            }
-        } catch (qrError) {
-            console.error('Immediate QR Fetch Error:', qrError);
+    // 1. First, try to fetch QR Code immediately (as per n8n workflow "Get QR")
+    let qrDataUri = null;
+    try {
+        console.log(`Fetching QR for ${sessionName}...`);
+        // Wait a brief moment for WAHA to initialize the session
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+        const qrResponse = await fetch(qrUrl, { headers });
+        
+        if (qrResponse.ok) {
+            const buffer = await qrResponse.arrayBuffer();
+            const base64 = Buffer.from(buffer).toString('base64');
+            qrDataUri = `data:image/png;base64,${base64}`;
+        } else {
+            console.warn(`QR not ready immediately: ${qrResponse.status}`);
         }
-        // Wait 2 seconds before retry
-        await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (qrError) {
+        console.error('Error fetching QR:', qrError);
     }
 
-    if (!qrFound) {
-        console.warn(`Could not fetch QR code for ${sessionName} after retries.`);
+    // 2. Save to DB (Create User/Session Row)
+    // Upserting based on session_name to avoid duplicates if retrying
+    const { error: upsertError } = await supabase
+        .from('whatsapp_sessions')
+        .upsert({
+            session_id: data.id, 
+            session_name: sessionName,
+            user_email: userEmail,
+            user_id: userId,
+            status: 'created',
+            qr_code: qrDataUri, // Save QR if we got it
+            plan_days: req.body.plan || 30, // Default to 30 if not provided
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'session_name' });
+
+    if (upsertError) {
+        console.error('DB Upsert Error:', upsertError);
+        return res.status(500).json({ error: 'Failed to save session to database' });
     }
 
-    res.json(data);
+    // If we didn't get QR code yet, we start a background retry process
+    if (!qrDataUri) {
+        // Start background retry loop
+        (async () => {
+            for (let i = 0; i < 15; i++) {
+                try {
+                    console.log(`Retry QR fetch for ${sessionName} (Attempt ${i + 1})...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+                    const qrResponse = await fetch(qrUrl, { headers });
+                    
+                    if (qrResponse.ok) {
+                        const buffer = await qrResponse.arrayBuffer();
+                        const base64 = Buffer.from(buffer).toString('base64');
+                        const newQrUri = `data:image/png;base64,${base64}`;
+
+                        await supabase
+                            .from('whatsapp_sessions')
+                            .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
+                            .eq('session_name', sessionName);
+                        
+                        console.log(`QR fetched and saved for ${sessionName}`);
+                        break;
+                    }
+                } catch (e) {
+                    console.error(`Retry failed for ${sessionName}:`, e);
+                }
+            }
+        })();
+    }
+
+    res.json({ ...data, qr_code: qrDataUri });
+
   } catch (error) {
     console.error('Create Session Error:', error);
     res.status(500).json({ error: 'Internal Server Error' });
