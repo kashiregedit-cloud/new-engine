@@ -230,17 +230,28 @@ app.post('/session/create', async (req, res) => {
       }
     };
 
+    // 1. Create Session
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
     const data = await response.json();
 
     if (!response.ok) return res.status(response.status).json(data);
 
-    // 1. First, try to fetch QR Code immediately (as per n8n workflow "Get QR")
+    // 2. Start Session (User Requested Workflow: Create -> Start -> Get QR)
+    try {
+        console.log(`Starting session ${sessionName}...`);
+        const startUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;
+        await fetch(startUrl, { method: 'POST', headers });
+    } catch (startError) {
+        console.error(`Error starting session ${sessionName}:`, startError);
+        // We continue even if start fails, as it might already be started or auto-started
+    }
+
+    // 3. Fetch QR Code immediately
     let qrDataUri = null;
     try {
         console.log(`Fetching QR for ${sessionName}...`);
-        // Wait a brief moment for WAHA to initialize the session
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait a brief moment for WAHA to initialize the session after start
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
         const qrResponse = await fetch(qrUrl, { headers });
