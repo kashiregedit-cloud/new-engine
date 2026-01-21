@@ -194,6 +194,15 @@ app.post('/session/create', async (req, res) => {
   const { sessionName, userEmail, userId } = req.body;
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
 
+  // Create a scoped Supabase client if authorization header is provided
+  // This allows RLS policies to work correctly using the user's identity
+  const authHeader = req.headers.authorization;
+  const scopedSupabase = authHeader 
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, { 
+        global: { headers: { Authorization: authHeader } } 
+      })
+    : supabase;
+
   try {
     const url = `${WAHA_BASE_URL}/api/sessions`;
     const headers = { 'Content-Type': 'application/json' };
@@ -274,7 +283,7 @@ app.post('/session/create', async (req, res) => {
     const finalSessionId = data.id || sessionName;
 
     try {
-        const { error: upsertError } = await supabase
+        const { error: upsertError } = await scopedSupabase
             .from('whatsapp_sessions')
             .upsert({
                 session_id: finalSessionId, 
@@ -289,7 +298,20 @@ app.post('/session/create', async (req, res) => {
 
         if (upsertError) {
             console.error('DB Upsert Error (Non-fatal):', upsertError);
-            // return res.status(500).json({ error: `Failed to save session to database: ${upsertError.message}` });
+            // Try fallback to global client if scoped failed (e.g. invalid token)
+             if (authHeader) {
+                 console.log('Retrying with global client...');
+                 await supabase.from('whatsapp_sessions').upsert({
+                    session_id: finalSessionId, 
+                    session_name: sessionName,
+                    ...(userEmail ? { user_email: userEmail } : {}),
+                    ...(userId ? { user_id: userId } : {}),
+                    status: 'created',
+                    qr_code: qrDataUri,
+                    plan_days: req.body.plan || 30,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'session_name' });
+             }
         }
     } catch (dbErr) {
         console.error('DB Unexpected Error (Non-fatal):', dbErr);

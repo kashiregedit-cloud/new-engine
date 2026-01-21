@@ -104,12 +104,16 @@ export default function IntegrationPage() {
 
     setCreating(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user?.email) throw new Error("User not authenticated");
 
       const res = await fetch(`${BACKEND_URL}/session/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        },
         body: JSON.stringify({ 
           sessionName: newSessionName, 
           userEmail: user.email, 
@@ -124,16 +128,21 @@ export default function IntegrationPage() {
       toast.success("Session created! Please scan the QR code.");
       setNewSessionName("");
       
+      // Optimistically add to list
+      const newSession: WhatsAppSession = {
+          id: data.id || data.session_name,
+          session_name: data.session_name,
+          status: 'created',
+          qr_code: data.qr_code,
+          plan_days: data.plan_days,
+          user_email: user.email,
+          user_id: user.id
+      };
+      setSessions(prev => [newSession, ...prev]);
+
       // Immediately show QR from response if available, even if DB fetch might fail/delay
       if (data.qr_code) {
-          setQrSession({
-              id: data.id || data.session_name, // Use session_name as ID if ID is missing
-              session_name: data.session_name,
-              status: 'created',
-              qr_code: data.qr_code,
-              plan_days: data.plan_days,
-              user_email: user.email
-          });
+          setQrSession(newSession);
       }
 
       fetchSessions(); 
