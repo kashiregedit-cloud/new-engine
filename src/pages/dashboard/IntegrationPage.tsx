@@ -105,7 +105,7 @@ export default function IntegrationPage() {
 
     setCreating(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
       
       // Strict check for session validity
       if (!session || !session.user || !session.access_token) {
@@ -114,6 +114,7 @@ export default function IntegrationPage() {
         if (refreshError || !refreshData.session) {
              throw new Error("User session expired. Please logout and login again.");
         }
+        session = refreshData.session;
       }
 
       // Re-fetch user after potential refresh
