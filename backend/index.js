@@ -206,19 +206,43 @@ app.post('/session/create', async (req, res) => {
     : supabase;
 
   // Attempt to recover missing user info from Token
-  if ((!userEmail || !userId) && authHeader) {
+  if (!userEmail && authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      
+      // Method 1: Try Supabase getUser()
       try {
-          console.log('Attempting to recover User Info from Token...');
+          console.log('Attempting to recover User Info from Token via Supabase...');
           const { data: { user }, error: userError } = await scopedSupabase.auth.getUser();
           if (user && !userError) {
-              console.log('Recovered User from Token:', user.email, user.id);
-              if (!userEmail) userEmail = user.email;
+              console.log('Recovered User from Token (Supabase):', user.email);
+              userEmail = user.email;
               if (!userId) userId = user.id;
           } else {
-              console.warn('Failed to recover user from token:', userError);
+              console.warn('Supabase getUser() failed:', userError);
           }
       } catch (e) {
-          console.error('Token recovery error:', e);
+          console.error('Token recovery error (Supabase):', e);
+      }
+
+      // Method 2: Fallback to manual JWT decoding if still missing
+      if (!userEmail) {
+          try {
+              console.log('Attempting to recover User Info via Manual JWT Decode...');
+              const payloadPart = token.split('.')[1];
+              if (payloadPart) {
+                  const decodedBuffer = Buffer.from(payloadPart, 'base64');
+                  const decodedString = decodedBuffer.toString('utf-8');
+                  const decoded = JSON.parse(decodedString);
+                  
+                  if (decoded.email) {
+                      console.log('Recovered User from Token (Manual Decode):', decoded.email);
+                      userEmail = decoded.email;
+                      if (!userId) userId = decoded.sub; // 'sub' is usually the user ID in Supabase JWT
+                  }
+              }
+          } catch (e) {
+              console.error('Token recovery error (Manual Decode):', e);
+          }
       }
   }
 
