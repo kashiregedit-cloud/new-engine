@@ -24,19 +24,6 @@ import SessionManager from "./pages/dashboard/whatsapp/SessionManager";
 import { WhatsAppProvider } from "./context/WhatsAppContext";
 import { Outlet, useParams } from "react-router-dom";
 
-// Wrapper to inject WhatsApp Context only for WhatsApp routes
-const WhatsAppWrapper = () => {
-  const { platform } = useParams();
-  if (platform === 'whatsapp') {
-    return (
-      <WhatsAppProvider>
-        <Outlet />
-      </WhatsAppProvider>
-    );
-  }
-  return <Outlet />;
-};
-
 const queryClient = new QueryClient();
 
 const App = () => (
