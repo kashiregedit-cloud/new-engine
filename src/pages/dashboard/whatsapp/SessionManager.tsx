@@ -42,7 +42,7 @@ export default function SessionManager() {
     }
   };
 
-  const fetchQr = async (sessionName: string) => {
+  const fetchQr = async (sessionName: string, retries = 3) => {
     try {
       setViewingSessionQr(sessionName);
       
@@ -64,11 +64,20 @@ export default function SessionManager() {
         const blob = await res.blob();
         setQrCodeUrl(URL.createObjectURL(blob));
       } else {
+        if (retries > 0) {
+            // Retry after 2 seconds
+            setTimeout(() => fetchQr(sessionName, retries - 1), 2000);
+            return;
+        }
         if (!session?.qr_code) {
            toast.error("QR Code not available (Session might be connected or stopped)");
         }
       }
     } catch (e) {
+      if (retries > 0) {
+          setTimeout(() => fetchQr(sessionName, retries - 1), 2000);
+          return;
+      }
       console.error(e);
       toast.error("Failed to fetch QR");
     }

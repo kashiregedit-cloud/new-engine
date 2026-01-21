@@ -60,11 +60,11 @@ export function DashboardSidebar() {
 
     // Fixed / Common Sections (Always visible)
     const fixedItems = [
+      { title: "Product Entry", icon: Package, path: `${base}/products` },
+      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
+      { title: "Reseller", icon: Users, path: `${base}/reseller` },
       { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
       { title: "Profile", icon: User, path: `${base}/profile` },
-      { title: "Reseller", icon: Users, path: `${base}/reseller` },
-      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
-      { title: "Product Entry", icon: Package, path: `${base}/products` },
     ];
 
     const switchItem = { title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" };
@@ -120,16 +120,16 @@ export function DashboardSidebar() {
         )}
 
         <ul className="space-y-1">
-          {/* Switch Platform (Always Top) */}
+          {/* Switch Platform (Highlighted) */}
           {menu.switchItem && (
-            <li key={menu.switchItem.path}>
+            <li key={menu.switchItem.path} className="mb-2">
               <Link
                 to={menu.switchItem.path}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border border-sidebar-border/50 bg-sidebar-accent/10"
                 )}
               >
-                <menu.switchItem.icon size={20} className="shrink-0" />
+                <menu.switchItem.icon size={20} className="shrink-0 text-primary" />
                 {!collapsed && (
                   <span className="text-sm font-medium">{menu.switchItem.title}</span>
                 )}
@@ -137,9 +137,13 @@ export function DashboardSidebar() {
             </li>
           )}
 
-          <div className="my-2 border-t border-sidebar-border/50" />
-
           {/* Platform Specific Items */}
+          {menu.platformItems && menu.platformItems.length > 0 && (
+             <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-4">
+               {!collapsed && "Platform Menu"}
+             </div>
+          )}
+          
           {menu.platformItems && menu.platformItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -162,10 +166,11 @@ export function DashboardSidebar() {
             );
           })}
 
-          {menu.fixedItems && (
+          {menu.fixedItems && menu.fixedItems.length > 0 && (
             <>
-               <div className="my-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                 {!collapsed && "Tools & Profile"}
+               <div className="my-2 border-t border-sidebar-border/50 mx-2" />
+               <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-2">
+                 {!collapsed && "Global Tools"}
                </div>
                {menu.fixedItems.map((item) => {
                 const isActive = location.pathname === item.path;

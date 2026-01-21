@@ -251,7 +251,7 @@ app.post('/session/create', async (req, res) => {
 
     // Immediately fetch QR Code to save to DB (Retry mechanism)
     let qrFound = false;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 15; i++) {
         try {
             console.log(`Attempting to fetch QR for ${sessionName} (Attempt ${i + 1})...`);
             const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
