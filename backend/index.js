@@ -249,22 +249,17 @@ app.post('/session/create', async (req, res) => {
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 // Corrected URL: Removed /sessions/ as per testing
-                const qrUrl = `${WAHA_BASE_URL}/api/${encodeURIComponent(sessionName)}/auth/qr?format=json`;
+                // WAHA returns image/png even if format=json is requested, so we must handle binary
+                const qrUrl = `${WAHA_BASE_URL}/api/${encodeURIComponent(sessionName)}/auth/qr?format=image`;
                 const qrResponse = await fetch(qrUrl, { headers });
                 
                 if (qrResponse.ok) {
-                    const json = await qrResponse.json();
-                    // Handle various JSON formats
-                    if (json.qr) {
-                        qrDataUri = json.qr;
-                    } else if (json.data) {
-                        // n8n style or other wrapper
-                         qrDataUri = json.data.startsWith('data:') ? json.data : `data:image/png;base64,${json.data}`;
-                    }
-
-                    if (qrDataUri) {
-                        console.log(`QR fetched for ${sessionName}`);
-                        break; // Stop retrying once found
+                    const buffer = await qrResponse.arrayBuffer();
+                    if (buffer.byteLength > 0) {
+                        const base64 = Buffer.from(buffer).toString('base64');
+                        qrDataUri = `data:image/png;base64,${base64}`;
+                        console.log(`QR fetched for ${sessionName} (Size: ${buffer.byteLength})`);
+                        break; 
                     }
                 } else {
                      console.log(`QR not ready yet for ${sessionName} (${qrResponse.status})...`);
