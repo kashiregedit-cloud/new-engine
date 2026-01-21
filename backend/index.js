@@ -191,8 +191,12 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
+  console.log('Received /session/create request body:', req.body); // LOG REQUEST BODY
   const { sessionName, userEmail, userId } = req.body;
+  
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
+  if (!userEmail) console.warn('Warning: userEmail is missing in request body');
+  if (!userId) console.warn('Warning: userId is missing in request body');
 
   // Create a scoped Supabase client if authorization header is provided
   // This allows RLS policies to work correctly using the user's identity
@@ -283,34 +287,28 @@ app.post('/session/create', async (req, res) => {
     const finalSessionId = data.id || sessionName;
 
     try {
+        const payload = {
+            session_id: finalSessionId, 
+            session_name: sessionName,
+            user_email: userEmail || null, // Explicitly set even if null
+            user_id: userId || null,       // Explicitly set even if null
+            status: 'created',
+            qr_code: qrDataUri,
+            plan_days: req.body.plan || 30,
+            updated_at: new Date().toISOString()
+        };
+        console.log('Upserting to DB:', payload);
+
         const { error: upsertError } = await scopedSupabase
             .from('whatsapp_sessions')
-            .upsert({
-                session_id: finalSessionId, 
-                session_name: sessionName,
-                ...(userEmail ? { user_email: userEmail } : {}),
-                ...(userId ? { user_id: userId } : {}),
-                status: 'created',
-                qr_code: qrDataUri,
-                plan_days: req.body.plan || 30,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'session_name' });
+            .upsert(payload, { onConflict: 'session_name' });
 
         if (upsertError) {
             console.error('DB Upsert Error (Non-fatal):', upsertError);
             // Try fallback to global client if scoped failed (e.g. invalid token)
              if (authHeader) {
                  console.log('Retrying with global client...');
-                 await supabase.from('whatsapp_sessions').upsert({
-                    session_id: finalSessionId, 
-                    session_name: sessionName,
-                    ...(userEmail ? { user_email: userEmail } : {}),
-                    ...(userId ? { user_id: userId } : {}),
-                    status: 'created',
-                    qr_code: qrDataUri,
-                    plan_days: req.body.plan || 30,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'session_name' });
+                 await supabase.from('whatsapp_sessions').upsert(payload, { onConflict: 'session_name' });
              }
         }
     } catch (dbErr) {

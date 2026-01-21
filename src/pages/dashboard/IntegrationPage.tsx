@@ -108,18 +108,21 @@ export default function IntegrationPage() {
       const user = session?.user;
       if (!user?.email) throw new Error("User not authenticated");
 
+      const payload = { 
+        sessionName: newSessionName, 
+        userEmail: user.email, 
+        userId: user.id,
+        plan: 30 
+      };
+      console.log("Sending payload to /session/create:", payload);
+
       const res = await fetch(`${BACKEND_URL}/session/create`, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
             'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
         },
-        body: JSON.stringify({ 
-          sessionName: newSessionName, 
-          userEmail: user.email, 
-          userId: user.id,
-          plan: 30 
-        })
+        body: JSON.stringify(payload)
       });
       
       const data = await res.json();
