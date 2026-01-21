@@ -93,8 +93,10 @@ const Register = () => {
       if (error) {
         toast.error(error.message);
       } else {
-        toast.success("Registration successful! Please login.");
-        navigate("/login");
+        // Check if session is null, meaning email confirmation is required
+        // Or if we explicitly want to show OTP entry for verification
+        toast.success("Registration successful! Please check your email for the OTP.");
+        setShowOtpModal(true);
       }
     } catch (error) {
       toast.error("An error occurred during registration");
