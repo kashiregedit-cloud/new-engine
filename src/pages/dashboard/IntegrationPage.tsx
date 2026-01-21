@@ -26,7 +26,14 @@ export default function IntegrationPage() {
     if (data) {
       setSessionStatus(data.status);
       if (data.status === 'created' || data.status === 'STOPPED') {
-          fetchQr();
+          // Check for saved QR
+          // @ts-ignore
+          if (data.qr_code) {
+             // @ts-ignore
+             setQrCodeUrl(data.qr_code);
+          } else {
+             fetchQr();
+          }
       }
     } else {
       setSessionStatus(null);

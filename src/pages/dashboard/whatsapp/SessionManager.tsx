@@ -45,14 +45,28 @@ export default function SessionManager() {
   const fetchQr = async (sessionName: string) => {
     try {
       setViewingSessionQr(sessionName);
-      setQrCodeUrl(null);
+      
+      // Check if session has a saved QR code first (from list)
+      // @ts-ignore
+      const session = sessions.find(s => s.name === sessionName);
+      // @ts-ignore
+      if (session?.qr_code) {
+         // @ts-ignore
+         setQrCodeUrl(session.qr_code);
+         // Also fetch fresh in background
+      } else {
+         setQrCodeUrl(null);
+      }
+
       // Add timestamp to prevent caching
       const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`);
       if (res.ok) {
         const blob = await res.blob();
         setQrCodeUrl(URL.createObjectURL(blob));
       } else {
-        toast.error("QR Code not available (Session might be connected or stopped)");
+        if (!session?.qr_code) {
+           toast.error("QR Code not available (Session might be connected or stopped)");
+        }
       }
     } catch (e) {
       console.error(e);
@@ -100,7 +114,11 @@ export default function SessionManager() {
               <Plus className="h-5 w-5" />
               New Session
             </CardTitle>
-            <CardDescription>Start a new WhatsApp connection</CardDescription>
+            <CardDescription>
+              Step 1: Enter a name and click create.<br/>
+              Step 2: Wait for QR Code to appear.<br/>
+              Step 3: Scan with WhatsApp.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">

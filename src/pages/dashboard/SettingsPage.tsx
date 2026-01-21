@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Save } from "lucide-react";
+import { Save, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -102,115 +102,118 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">AI Settings</h2>
-        <p className="text-muted-foreground">
-          Configure your AI provider and model settings.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+           <h2 className="text-3xl font-bold tracking-tight">AI Intelligence</h2>
+           <p className="text-muted-foreground">
+             Connect your preferred AI brain (GPT, Claude, Gemini, etc.)
+           </p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>AI Provider Configuration</CardTitle>
-          <CardDescription>
-            Select your preferred AI provider and enter the API key.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="ai_provider"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Provider</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value}>
+      <div className="grid gap-6">
+        <Card className="border-l-4 border-l-purple-500 shadow-md">
+          <CardHeader>
+            <CardTitle>AI Provider Configuration</CardTitle>
+            <CardDescription>
+              We recommend <strong>OpenRouter</strong> as it gives access to all top models (DeepSeek, GPT-4, Claude 3) with one key.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                <FormField
+                  control={form.control}
+                  name="ai_provider"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base">Select Provider</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="h-12">
+                            <SelectValue placeholder="Select a provider" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="openrouter">🚀 OpenRouter (Recommended - All Models)</SelectItem>
+                          <SelectItem value="openai">🟢 OpenAI (ChatGPT)</SelectItem>
+                          <SelectItem value="google">🔵 Google (Gemini)</SelectItem>
+                          <SelectItem value="groq">⚡ Groq (Super Fast)</SelectItem>
+                          <SelectItem value="xai">❌ X AI (Grok)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                         Don't have a key? <a href="https://openrouter.ai/keys" target="_blank" className="text-primary hover:underline inline-flex items-center gap-1">Get one here <ExternalLink size={12}/></a>
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FormField
+                    control={form.control}
+                    name="api_key"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>API Key</FormLabel>
+                        <FormControl>
+                          <Input placeholder="sk-or-..." type="password" {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="model_name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Model Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. google/gemini-2.0-flash-lite-preview-02-05:free" {...field} className="font-mono" />
+                        </FormControl>
+                        <FormDescription className="text-xs">
+                          Example: <code>google/gemini-2.0-flash-lite-preview-02-05:free</code> or <code>openai/gpt-4o</code>
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="system_prompt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>System Instruction (Prompt)</FormLabel>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a provider" />
-                        </SelectTrigger>
+                        <Textarea 
+                          placeholder="You are a helpful assistant for a WhatsApp store. You help customers buy products..." 
+                          className="min-h-[150px] font-sans text-base leading-relaxed"
+                          {...field} 
+                        />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="openrouter">OpenRouter (Recommended)</SelectItem>
-                        <SelectItem value="openai">OpenAI</SelectItem>
-                        <SelectItem value="google">Google (Gemini)</SelectItem>
-                        <SelectItem value="groq">Groq</SelectItem>
-                        <SelectItem value="xai">X AI (Grok)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      Choose the AI service you want to use.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormDescription>
+                        Tell the AI how to behave. Include your store name, policies, and tone.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              <FormField
-                control={form.control}
-                name="api_key"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>API Key</FormLabel>
-                    <FormControl>
-                      <Input placeholder="sk-..." type="password" {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      Your API key from the selected provider.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="model_name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Model Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="e.g. gpt-4o, gemini-pro" {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      The specific model identifier to use.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="system_prompt"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>System Prompt</FormLabel>
-                    <FormControl>
-                      <Textarea 
-                        placeholder="You are a helpful assistant..." 
-                        className="min-h-[100px]"
-                        {...field} 
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      The initial instruction given to the AI.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <Button type="submit" disabled={loading}>
-                {loading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>}
-                <Save className="mr-2 h-4 w-4" />
-                Save Settings
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
+                <Button type="submit" disabled={loading} size="lg" className="w-full md:w-auto">
+                  {loading && <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>}
+                  <Save className="mr-2 h-4 w-4" />
+                  Save AI Settings
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

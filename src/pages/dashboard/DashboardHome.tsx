@@ -1,145 +1,167 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Link, useParams } from "react-router-dom";
 import {
   MessageSquare,
   Users,
-  ShoppingCart,
-  TrendingUp,
-  Activity,
-  Clock,
+  Settings,
+  Plus,
+  Zap,
+  ExternalLink,
+  Smartphone
 } from "lucide-react";
-
-const stats = [
-  {
-    title: "Total Messages",
-    value: "12,543",
-    change: "+12.5%",
-    icon: MessageSquare,
-    color: "text-primary",
-  },
-  {
-    title: "Active Users",
-    value: "2,345",
-    change: "+8.2%",
-    icon: Users,
-    color: "text-chart-2",
-  },
-  {
-    title: "Orders Today",
-    value: "156",
-    change: "+23.1%",
-    icon: ShoppingCart,
-    color: "text-chart-3",
-  },
-  {
-    title: "Conversion Rate",
-    value: "3.2%",
-    change: "+2.4%",
-    icon: TrendingUp,
-    color: "text-chart-4",
-  },
-];
-
-const recentActivities = [
-  { action: "New order received", time: "2 mins ago", icon: ShoppingCart },
-  { action: "New user registered", time: "5 mins ago", icon: Users },
-  { action: "Message replied", time: "10 mins ago", icon: MessageSquare },
-  { action: "Product updated", time: "15 mins ago", icon: Activity },
-  { action: "Integration connected", time: "30 mins ago", icon: Activity },
-];
+import { supabase } from "@/integrations/supabase/client";
 
 export default function DashboardHome() {
+  const { platform } = useParams();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    sessions: 0,
+    messages: 0,
+    active: false
+  });
+
+  const isWhatsApp = platform === 'whatsapp';
+  const platformName = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : 'Platform';
+
+  useEffect(() => {
+    async function getUser() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUserEmail(user.email);
+        
+        if (isWhatsApp) {
+          // Fetch simple stats for WhatsApp
+          const { count: sessionCount } = await supabase.from('whatsapp_sessions').select('*', { count: 'exact', head: true });
+          // @ts-ignore
+          setStats(prev => ({ ...prev, sessions: sessionCount || 0 }));
+        }
+      }
+    }
+    getUser();
+  }, [isWhatsApp]);
+
   return (
-    <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        {stats.map((stat) => (
-          <Card key={stat.title} className="bg-card border-border">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className={`h-5 w-5 ${stat.color}`} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{stat.value}</div>
-              <p className="text-xs text-chart-3 mt-1">{stat.change} from last month</p>
-            </CardContent>
-          </Card>
-        ))}
+    <div className="space-y-8 animate-fade-in">
+      {/* Welcome Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            Welcome to {platformName} Dashboard
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            {userEmail ? `Logged in as ${userEmail}` : 'Manage your automation empire'}
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Button asChild variant="outline">
+            <Link to={`/dashboard/${platform}/settings`}>
+              <Settings className="mr-2 h-4 w-4" />
+              Settings
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link to={`/dashboard/${platform}/${isWhatsApp ? 'sessions' : 'integration'}`}>
+              <Plus className="mr-2 h-4 w-4" />
+              {isWhatsApp ? 'New Session' : 'Connect Page'}
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chart Placeholder */}
-        <Card className="lg:col-span-2 bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-foreground">Analytics Overview</CardTitle>
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-100 dark:border-blue-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+              {isWhatsApp ? 'Active Sessions' : 'Connected Pages'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-64 flex items-center justify-center bg-secondary/30 rounded-lg">
-              <div className="text-center text-muted-foreground">
-                <Activity className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p>Chart data will appear here</p>
-                <p className="text-sm">Connect integrations to see analytics</p>
-              </div>
-            </div>
+            <div className="text-4xl font-bold text-foreground">{stats.sessions}</div>
+            <p className="text-xs text-muted-foreground mt-1">Connected {platformName} Accounts</p>
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-foreground">Recent Activity</CardTitle>
+        <Card className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-100 dark:border-green-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-green-600 dark:text-green-400 uppercase tracking-wider">
+              System Status
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentActivities.map((activity, index) => (
-                <div key={index} className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-secondary flex items-center justify-center">
-                    <activity.icon className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {activity.action}
-                    </p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {activity.time}
-                    </p>
-                  </div>
-                </div>
-              ))}
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-2xl font-bold text-foreground">Operational</span>
             </div>
+            <p className="text-xs text-muted-foreground mt-1">All systems normal</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 border-purple-100 dark:border-purple-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wider">
+              AI Provider
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground">Active</div>
+            <p className="text-xs text-muted-foreground mt-1">Smart replies enabled</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Quick Actions */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="text-foreground">Quick Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              { label: "Add Integration", icon: "🔌" },
-              { label: "Add Product", icon: "📦" },
-              { label: "Create Ad", icon: "📢" },
-              { label: "Add Reseller", icon: "👥" },
-              { label: "View Reports", icon: "📊" },
-              { label: "Settings", icon: "⚙️" },
-            ].map((action) => (
-              <button
-                key={action.label}
-                className="p-4 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-center"
-              >
-                <span className="text-2xl block mb-2">{action.icon}</span>
-                <span className="text-sm text-foreground">{action.label}</span>
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Quick Actions Grid */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <Zap className="h-5 w-5 text-yellow-500" />
+          Quick Actions
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <Link to="/dashboard/whatsapp/sessions" className="group">
+            <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-green-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
+                  <Smartphone className="h-5 w-5" />
+                  Connect WhatsApp
+                </CardTitle>
+                <CardDescription>
+                  Scan QR code to connect new numbers
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link to="/dashboard/whatsapp/control" className="group">
+            <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-blue-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
+                  <Settings className="h-5 w-5" />
+                  Configure Bot
+                </CardTitle>
+                <CardDescription>
+                  Toggle Auto-Reply, Media, and AI settings
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link to="/dashboard/whatsapp/settings" className="group">
+            <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-purple-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
+                  <MessageSquare className="h-5 w-5" />
+                  AI Intelligence
+                </CardTitle>
+                <CardDescription>
+                  Change AI provider (GPT, Gemini, Claude)
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
-const OpenAI = require('openai');
+const { generateAIResponse } = require('./utils/aiEngine');
 
 const app = express();
 app.use(cors());
@@ -32,7 +32,7 @@ Your response MUST look exactly like this example:
 }
 
 About You :
-- আপনি Automation Hub BD এর একজন স্টাফ... (Rest of the prompt)
+- আপনি Automation Hub BD এর একজন স্টাফ...
 - তুমি প্রোডাক্টের ছবি বা অডিও ভয়েস বুঝতে পারো।
 - যদি ছবি দেওয়া হয়, সেটা বিশ্লেষণ করে উত্তর দাও।
 `;
@@ -135,21 +135,17 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
     // 3. Merge Content
     let mergedText = '';
-    let hasImage = false;
-    let hasAudio = false;
-
+    
     messages.forEach(m => {
       if (m.media_type === 'image') {
         if (config.mediaEnabled) {
           mergedText += ` [User sent an image] `;
-          hasImage = true;
         } else {
           mergedText += ` [User sent an image (Ignored)] `;
         }
       } else if (m.media_type === 'audio') {
         if (config.mediaEnabled) {
           mergedText += ` [User sent a voice message] `;
-          hasAudio = true;
         } else {
           mergedText += ` [User sent a voice message (Ignored)] `;
         }
@@ -166,85 +162,19 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
       return;
     }
 
-    // Determine Base URL based on provider
-    let baseURL;
-    switch (config.provider) {
-      case 'openai':
-        baseURL = undefined; // Default OpenAI URL
-        break;
-      case 'google': // Gemini
-        baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-        break;
-      case 'xai': // Grok
-        baseURL = 'https://api.x.ai/v1';
-        break;
-      case 'groq':
-        baseURL = 'https://api.groq.com/openai/v1';
-        break;
-      case 'openrouter':
-      default:
-        baseURL = 'https://openrouter.ai/api/v1';
-        break;
-    }
+    // 4. Call AI Engine (Platform Agnostic)
+    // Construct User Message Object
+    const userMessage = {
+      text: mergedText,
+      images: messages
+        .filter(m => m.media_type === 'image' && m.media_url && config.mediaEnabled)
+        .map(m => m.media_url)
+    };
 
-    const openai = new OpenAI({
-      baseURL: baseURL,
-      apiKey: config.apiKey,
-    });
-
-    // 4. Call AI
-    let completion;
-    try {
-      const messagesPayload = [
-        { role: 'system', content: config.systemPrompt },
-      ];
-
-      // Construct User Message with Multimodal Support
-      const userContent = [];
-      
-      // Add text context
-      if (mergedText.trim()) {
-        userContent.push({ type: "text", text: mergedText.trim() });
-      }
-
-      // Add Images
-      messages.forEach(m => {
-        if (m.media_type === 'image' && m.media_url && config.mediaEnabled) {
-          userContent.push({
-            type: "image_url",
-            image_url: {
-              url: m.media_url
-            }
-          });
-        }
-      });
-
-      // If no content (e.g. only audio that wasn't transcribed), add a fallback
-      if (userContent.length === 0) {
-        userContent.push({ type: "text", text: "User sent a message but content could not be processed." });
-      }
-
-      messagesPayload.push({ role: 'user', content: userContent });
-
-      completion = await openai.chat.completions.create({
-        model: config.model,
-        messages: messagesPayload,
-      });
-    } catch (aiError) {
-      console.error('AI API Error:', aiError);
-      return;
-    }
-
-    const aiResponseRaw = completion.choices[0].message.content;
-    let aiResponse;
-    try {
-      aiResponse = JSON.parse(aiResponseRaw);
-    } catch (e) {
-      aiResponse = { output: aiResponseRaw, admin_handover: false };
-    }
+    const aiResponse = await generateAIResponse(config, [], userMessage);
 
     // 5. Send Response
-    if (aiResponse.output) {
+    if (aiResponse && aiResponse.output) {
       await sendWAHAMessage(senderId, aiResponse.output, session);
     }
 
@@ -311,10 +241,26 @@ app.get('/sessions', async (req, res) => {
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
     const response = await fetch(url, { headers });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json(data);
-    res.json(data);
+    const wahaData = await response.json();
+    if (!response.ok) return res.status(response.status).json(wahaData);
+
+    // Fetch from Supabase to merge additional info (QR, plan, etc)
+    const { data: dbSessions } = await supabase.from('whatsapp_sessions').select('*');
+
+    // Merge WAHA data with DB data
+    const mergedSessions = wahaData.map(session => {
+      const dbSession = dbSessions?.find(s => s.session_name === session.name);
+      return {
+        ...session,
+        qr_code: dbSession?.qr_code || null,
+        plan_days: dbSession?.plan_days || null,
+        user_email: dbSession?.user_email || null
+      };
+    });
+
+    res.json(mergedSessions);
   } catch (error) {
+    console.error('Fetch Sessions Error:', error);
     res.status(500).json({ error: 'Failed to fetch sessions' });
   }
 });
@@ -385,9 +331,19 @@ app.get('/session/qr/:sessionName', async (req, res) => {
 
     // Pipe image back
     const buffer = await response.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString('base64');
+    const dataUri = `data:image/png;base64,${base64}`;
+
+    // Save to Supabase
+    await supabase
+      .from('whatsapp_sessions')
+      .update({ qr_code: dataUri, updated_at: new Date().toISOString() })
+      .eq('session_name', sessionName);
+
     res.set('Content-Type', 'image/png');
     res.send(Buffer.from(buffer));
   } catch (error) {
+    console.error('QR Fetch Error:', error);
     res.status(500).send('Error fetching QR');
   }
 });
