@@ -559,7 +559,13 @@ app.get('/session/qr/:sessionName', async (req, res) => {
             .maybeSingle();
 
         if (dbSession?.qr_code) {
-            return res.json({ qr: dbSession.qr_code });
+             const matches = dbSession.qr_code.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+             if (matches && matches.length === 3) {
+                 const type = matches[1];
+                 const buffer = Buffer.from(matches[2], 'base64');
+                 res.set('Content-Type', type);
+                 return res.send(buffer);
+             }
         }
 
         // 2. If not in DB, try WAHA directly (Slow but fresh)

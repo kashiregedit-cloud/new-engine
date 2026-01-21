@@ -380,19 +380,31 @@ export default function IntegrationPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-center p-6">
-            {qrSession?.qr_code ? (
-              <img src={qrSession.qr_code} alt="QR Code" className="w-64 h-64 object-contain border rounded-lg" />
-            ) : (
-               <div className="flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed">
+            {qrSession ? (
+              <img 
+                src={`${BACKEND_URL}/session/qr/${qrSession.session_name}?t=${Date.now()}`} 
+                alt="QR Code" 
+                className="w-64 h-64 object-contain border rounded-lg"
+                onError={(e) => {
+                    // Fallback to base64 if available, or show error
+                    if (qrSession.qr_code && !e.currentTarget.src.startsWith('data:')) {
+                        e.currentTarget.src = qrSession.qr_code;
+                    } else {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                    }
+                }}
+              />
+            ) : null}
+            <div className="hidden flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed absolute">
                   <QrCode className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No QR Code Available</p>
+                  <p className="text-muted-foreground">QR Code Not Available</p>
                   <Button variant="link" onClick={() => {
                       if (qrSession) handleAction(qrSession.session_name, 'restart');
                   }}>
-                    Generate New QR
+                    Regenerate QR
                   </Button>
-               </div>
-            )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
