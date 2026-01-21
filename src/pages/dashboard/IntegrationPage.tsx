@@ -107,8 +107,12 @@ export default function IntegrationPage() {
     }
   };
 
-  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete') => {
+  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
     try {
+      if (action === 'restart') {
+         toast.info("Restarting session to generate new QR...");
+      }
+      
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -117,8 +121,10 @@ export default function IntegrationPage() {
       
       if (!res.ok) throw new Error(`Failed to ${action} session`);
       
-      toast.success(`Session ${action}ed successfully`);
-      fetchSessions();
+      toast.success(action === 'restart' ? "Session restarting. QR will appear shortly." : `Session ${action}ed successfully`);
+      
+      // Delay fetch slightly to allow backend to process
+      setTimeout(() => fetchSessions(), 2000);
     } catch (error: any) {
       toast.error(error.message);
     }
@@ -231,18 +237,23 @@ export default function IntegrationPage() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-secondary/10 pt-4 flex justify-between gap-2">
-              {session.status === 'WORKING' ? (
-                <Button variant="destructive" size="sm" className="w-full" onClick={() => handleAction(session.session_name, 'stop')}>
-                  <StopCircle className="mr-2 h-4 w-4" /> Stop
+            <CardFooter className="bg-secondary/10 pt-4 flex flex-col gap-3">
+              <div className="flex gap-2 w-full">
+                {session.status === 'WORKING' ? (
+                  <Button variant="destructive" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'stop')}>
+                    <StopCircle className="mr-2 h-4 w-4" /> Stop
+                  </Button>
+                ) : (
+                  <Button variant="default" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'start')}>
+                    <PlayCircle className="mr-2 h-4 w-4" /> Start
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => handleAction(session.session_name, 'restart')}>
+                  <RefreshCw className="mr-2 h-4 w-4" /> Get New QR
                 </Button>
-              ) : (
-                <Button variant="default" size="sm" className="w-full" onClick={() => handleAction(session.session_name, 'start')}>
-                  <PlayCircle className="mr-2 h-4 w-4" /> Start
-                </Button>
-              )}
-              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => handleAction(session.session_name, 'delete')}>
-                <Trash2 className="h-4 w-4" />
+              </div>
+              <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => handleAction(session.session_name, 'delete')}>
+                <Trash2 className="mr-2 h-4 w-4" /> Delete Session
               </Button>
             </CardFooter>
           </Card>

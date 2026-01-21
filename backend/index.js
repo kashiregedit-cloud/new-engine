@@ -237,13 +237,11 @@ app.post('/session/create', async (req, res) => {
 
     if (!response.ok) return res.status(response.status).json(data);
 
-    // 2. Fetch QR Code (Retry Logic)
-    let qrDataUri = null;
-    
+    // 3. Fetch QR Code (Retry Logic)
     // Start background retry loop immediately
     (async () => {
-        // Initial delay to let WAHA start the browser (User said ~10s, we start checking after 3s)
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Initial delay to let WAHA start the browser
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         for (let i = 0; i < 20; i++) { // 20 attempts * 2s = 40s total coverage
             try {
@@ -253,25 +251,45 @@ app.post('/session/create', async (req, res) => {
                 const qrResponse = await fetch(qrUrl, { headers });
                 
                 if (qrResponse.ok) {
-                    const buffer = await qrResponse.arrayBuffer();
-                    const base64 = Buffer.from(buffer).toString('base64');
-                    const newQrUri = `data:image/png;base64,${base64}`;
+                    const contentType = qrResponse.headers.get('content-type');
+                    let newQrUri = null;
 
-                    // 1. Update whatsapp_sessions
-                    await supabase
-                        .from('whatsapp_sessions')
-                        .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
-                        .eq('session_name', sessionName);
-                    
-                    // 2. Insert into session_qr_link (User Requested Table)
-                    await supabase.from('session_qr_link').insert({
-                       qr_link: newQrUri,
-                       session_name: sessionName,
-                       session_used: false
-                    });
+                    if (contentType && contentType.includes('application/json')) {
+                        // Handle JSON response (some WAHA versions or wrappers)
+                        const json = await qrResponse.json();
+                        if (json.data) {
+                             newQrUri = `data:image/png;base64,${json.data}`;
+                        } else if (json.qr) {
+                             newQrUri = json.qr;
+                        }
+                    } else {
+                        // Handle Binary Image response
+                        const buffer = await qrResponse.arrayBuffer();
+                        if (buffer.byteLength > 0) {
+                            const base64 = Buffer.from(buffer).toString('base64');
+                            newQrUri = `data:image/png;base64,${base64}`;
+                        }
+                    }
 
-                    console.log(`QR fetched and saved for ${sessionName}`);
-                    break; // Stop retrying once found
+                    if (newQrUri) {
+                        // 1. Update whatsapp_sessions
+                        await supabase
+                            .from('whatsapp_sessions')
+                            .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
+                            .eq('session_name', sessionName);
+                        
+                        // 2. Insert into session_qr_link
+                        await supabase.from('session_qr_link').insert({
+                           qr_link: newQrUri,
+                           session_name: sessionName,
+                           session_used: false
+                        });
+
+                        console.log(`QR fetched and saved for ${sessionName}`);
+                        break; // Stop retrying once found
+                    } else {
+                        console.log(`QR response ok but no data for ${sessionName}`);
+                    }
                 } else {
                      console.log(`QR not ready yet for ${sessionName} (${qrResponse.status})...`);
                 }
@@ -419,6 +437,92 @@ app.post('/session/stop', async (req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: 'Failed to stop session' });
+  }
+});
+
+app.post('/session/restart', async (req, res) => {
+  const { sessionName } = req.body;
+  try {
+    // 1. Stop Session
+    try {
+        const stopUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/stop`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+        await fetch(stopUrl, { method: 'POST', headers });
+    } catch (e) {
+        console.log(`Stop failed for ${sessionName} (might be already stopped):`, e);
+    }
+
+    // Wait 2s
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 2. Start Session
+    const startUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+    
+    const response = await fetch(startUrl, { method: 'POST', headers });
+    const data = await response.json();
+    
+    if (!response.ok) return res.status(response.status).json(data);
+
+    await supabase.from('whatsapp_sessions').update({ status: 'WORKING' }).eq('session_name', sessionName);
+
+    // 3. Trigger QR Fetch Loop
+     (async () => {
+         // Initial delay
+         await new Promise(resolve => setTimeout(resolve, 5000));
+ 
+         for (let i = 0; i < 20; i++) {
+             try {
+                 console.log(`Fetching QR for ${sessionName} (Restart Attempt ${i + 1})...`);
+                 
+                 const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+                 const qrResponse = await fetch(qrUrl, { headers });
+                 
+                 if (qrResponse.ok) {
+                     const contentType = qrResponse.headers.get('content-type');
+                     let newQrUri = null;
+ 
+                     if (contentType && contentType.includes('application/json')) {
+                         const json = await qrResponse.json();
+                         if (json.data) newQrUri = `data:image/png;base64,${json.data}`;
+                         else if (json.qr) newQrUri = json.qr;
+                     } else {
+                         const buffer = await qrResponse.arrayBuffer();
+                         if (buffer.byteLength > 0) {
+                             const base64 = Buffer.from(buffer).toString('base64');
+                             newQrUri = `data:image/png;base64,${base64}`;
+                         }
+                     }
+ 
+                     if (newQrUri) {
+                         await supabase
+                             .from('whatsapp_sessions')
+                             .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
+                             .eq('session_name', sessionName);
+                         
+                         await supabase.from('session_qr_link').insert({
+                            qr_link: newQrUri,
+                            session_name: sessionName,
+                            session_used: false
+                         });
+ 
+                         console.log(`QR fetched and saved for ${sessionName} (Restart)`);
+                         break;
+                     }
+                 }
+             } catch (e) {
+                 console.error(`Retry failed for ${sessionName}:`, e);
+             }
+             await new Promise(resolve => setTimeout(resolve, 2000));
+         }
+     })();
+
+    res.json({ message: "Session restarting. QR code will update shortly." });
+  } catch (error) {
+    console.error('Restart Session Error:', error);
+    res.status(500).json({ error: 'Failed to restart session' });
   }
 });
 
