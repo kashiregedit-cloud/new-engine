@@ -237,6 +237,9 @@ app.post('/session/create', async (req, res) => {
 
     if (!response.ok) return res.status(response.status).json(data);
 
+    // Initialize qrDataUri
+    let qrDataUri = null;
+
     // 3. Fetch QR Code (Retry Logic)
     // Start background retry loop immediately
     (async () => {
