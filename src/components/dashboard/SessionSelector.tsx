@@ -6,11 +6,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MessageSquare, PlusCircle } from "lucide-react";
+import { MessageSquare, PlusCircle, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export function SessionSelector() {
-  const { sessions, currentSession, setCurrentSession } = useWhatsApp();
+  let context;
+  try {
+    context = useWhatsApp();
+  } catch (e) {
+    // Handle case where context is missing (e.g. rendered outside provider)
+    return (
+      <div className="px-2 mb-4 text-destructive text-xs flex items-center gap-1">
+        <AlertCircle size={12} />
+        <span>Context Error</span>
+      </div>
+    );
+  }
+
+  const { sessions, currentSession, setCurrentSession } = context;
   const navigate = useNavigate();
 
   const handleValueChange = (value: string) => {
