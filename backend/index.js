@@ -189,6 +189,27 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
 // --- Routes ---
 
+app.get('/session/qr/:sessionName', async (req, res) => {
+  const { sessionName } = req.params;
+  try {
+    const url = `${WAHA_BASE_URL}/api/${sessionName}/auth/qr?format=image`;
+    const headers = {};
+    if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) return res.status(response.status).send('QR not found');
+
+    const buffer = await response.arrayBuffer();
+    const bufferData = Buffer.from(buffer);
+    
+    res.setHeader('Content-Type', 'image/png');
+    res.send(bufferData);
+  } catch (error) {
+    console.error('Error fetching QR:', error);
+    res.status(500).send('Error fetching QR');
+  }
+});
+
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
   console.log('Received /session/create request body:', req.body); // LOG REQUEST BODY
@@ -255,6 +276,51 @@ app.post('/session/create', async (req, res) => {
   if (!userId) {
       console.warn('Warning: userId missing. Proceeding with email only as per user request.');
   }
+
+  // --- PRICING LOGIC ---
+  const SESSION_PRICE = 500;
+  
+  // Check Balance
+  if (userId) {
+      const { data: userConfig, error: configError } = await supabase
+          .from('user_configs')
+          .select('balance')
+          .eq('user_id', userId)
+          .maybeSingle();
+      
+      if (configError) {
+          console.error('Balance check error:', configError);
+          // Proceed cautiously or fail? Let's assume 0 if error/missing
+      }
+
+      const currentBalance = userConfig?.balance || 0;
+      
+      if (currentBalance < SESSION_PRICE) {
+          return res.status(402).json({ 
+              error: `Insufficient balance. Cost: ${SESSION_PRICE} BDT. Current: ${currentBalance} BDT. Please recharge.` 
+          });
+      }
+
+      // Deduct Balance
+      const { error: deductError } = await supabase
+          .from('user_configs')
+          .update({ balance: currentBalance - SESSION_PRICE })
+          .eq('user_id', userId);
+
+      if (deductError) {
+          console.error('Failed to deduct balance:', deductError);
+          return res.status(500).json({ error: 'Payment processing failed. Please try again.' });
+      }
+      
+      // Log Transaction (Optional, best effort)
+      await supabase.from('payment_transactions').insert({
+          user_id: userId,
+          amount: SESSION_PRICE,
+          type: 'debit',
+          description: `Session Creation: ${sessionName}`
+      });
+  }
+  // ---------------------
 
   try {
     const url = `${WAHA_BASE_URL}/api/sessions`;
@@ -463,8 +529,8 @@ app.post('/session/restart', async (req, res) => {
         console.log(`Stop failed for ${sessionName} (might be already stopped):`, e);
     }
 
-    // Wait 2s
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait 5s to ensure full stop
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // 2. Start Session
     const startUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;

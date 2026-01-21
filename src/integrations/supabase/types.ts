@@ -9,6 +9,67 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      payment_transactions: {
+        Row: {
+          id: string
+          user_id: string
+          amount: number
+          type: string
+          method: string | null
+          status: string
+          transaction_id: string | null
+          description: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          amount: number
+          type: string
+          method?: string | null
+          status?: string
+          transaction_id?: string | null
+          description?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          amount?: number
+          type?: string
+          method?: string | null
+          status?: string
+          transaction_id?: string | null
+          description?: string | null
+          created_at?: string
+        }
+      }
+      referral_codes: {
+        Row: {
+          id: string
+          code: string
+          type: string
+          value: number
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          code: string
+          type: string
+          value: number
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          code?: string
+          type?: string
+          value?: number
+          status?: string
+          created_at?: string
+        }
+      }
       whatsapp_sessions: {
         Row: {
           id: string
@@ -51,6 +112,7 @@ export interface Database {
         Row: {
           id: string
           user_id: string
+          balance: number | null
           ai_provider: string | null
           api_key: string | null
           model_name: string | null
@@ -66,6 +128,7 @@ export interface Database {
         Insert: {
           id?: string
           user_id: string
+          balance?: number | null
           ai_provider?: string | null
           api_key?: string | null
           model_name?: string | null
@@ -81,6 +144,7 @@ export interface Database {
         Update: {
           id?: string
           user_id?: string
+          balance?: number | null
           ai_provider?: string | null
           api_key?: string | null
           model_name?: string | null

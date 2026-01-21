@@ -71,8 +71,9 @@ export default function SessionManager() {
       
       await refreshSessions();
       setNewSessionName("");
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error(message);
     } finally {
       setIsCreating(false);
     }
@@ -83,19 +84,21 @@ export default function SessionManager() {
       setViewingSessionQr(sessionName);
       
       // 1. Try to get from Supabase first (Base64 is reliable)
-      const { data: sessionData } = await supabase
+      const { data } = await supabase
         .from('whatsapp_sessions')
         .select('qr_code')
         .eq('session_name', sessionName)
         .single();
+      
+      const sessionData = data as { qr_code: string | null } | null;
         
-      if (sessionData?.qr_code) {
+      if (sessionData && sessionData.qr_code) {
           setQrCodeUrl(sessionData.qr_code);
           return;
       }
 
       // 2. Fallback to backend fetch with Auth header
-      let { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`, {
           headers: {
               'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
@@ -125,7 +128,7 @@ export default function SessionManager() {
 
   const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
     try {
-      let { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
         method: action === 'delete' ? 'DELETE' : 'POST',
         headers: { 
@@ -152,7 +155,7 @@ export default function SessionManager() {
         setViewingSessionQr(null);
         setQrCodeUrl(null);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast.error(`Failed to ${action} session`);
     }
   };
@@ -214,7 +217,7 @@ export default function SessionManager() {
                   {session.status}
                 </Badge>
               </div>
-              <CardDescription className="text-xs font-mono">ID: {session.id}</CardDescription>
+              <CardDescription className="text-xs font-mono">ID: {String(session.id)}</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex gap-2 mb-4">

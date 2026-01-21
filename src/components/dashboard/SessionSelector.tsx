@@ -10,21 +10,9 @@ import { MessageSquare, PlusCircle, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export function SessionSelector() {
-  let context;
-  try {
-    context = useWhatsApp();
-  } catch (e) {
-    // Handle case where context is missing (e.g. rendered outside provider)
-    return (
-      <div className="px-2 mb-4 text-destructive text-xs flex items-center gap-1">
-        <AlertCircle size={12} />
-        <span>Context Error</span>
-      </div>
-    );
-  }
-
-  const { sessions, currentSession, setCurrentSession } = context;
+  const context = useWhatsApp();
   const navigate = useNavigate();
+  const { sessions, currentSession, setCurrentSession } = context;
 
   const handleValueChange = (value: string) => {
     if (value === "add_new") {

@@ -5,6 +5,7 @@ import * as z from "zod";
 import { Save, ExternalLink, ChevronDown, ChevronUp, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -58,18 +59,21 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('user_configs')
         .select('*')
         .eq('user_id', user.id)
         .single();
 
-      if (data) {
+      // Explicitly cast to the correct type to bypass 'never' inference
+      const config = data as Database['public']['Tables']['user_configs']['Row'] | null;
+
+      if (config) {
         form.reset({
-          ai_provider: data.ai_provider || "openrouter",
-          api_key: data.api_key || "",
-          model_name: data.model_name || "xiaomi/mimo-v2-flash:free",
-          system_prompt: data.system_prompt || "",
+          ai_provider: config.ai_provider || "openrouter",
+          api_key: config.api_key || "",
+          model_name: config.model_name || "xiaomi/mimo-v2-flash:free",
+          system_prompt: config.system_prompt || "",
         });
       }
     };
@@ -82,20 +86,23 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user found");
 
-      const { error } = await supabase.from('user_configs').upsert({
+      const updates: Database['public']['Tables']['user_configs']['Insert'] = {
         user_id: user.id,
         ai_provider: values.ai_provider,
         api_key: values.api_key,
         model_name: values.model_name,
         system_prompt: values.system_prompt,
         updated_at: new Date().toISOString(),
-      });
+      };
+
+      const { error } = await supabase.from('user_configs').upsert(updates as any);
 
       if (error) throw error;
       toast.success("Settings saved successfully");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving settings:", error);
-      toast.error(error.message || "Failed to save settings");
+      const message = error instanceof Error ? error.message : "Failed to save settings";
+      toast.error(message);
     } finally {
       setLoading(false);
     }

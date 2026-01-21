@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -5,160 +6,243 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Shield, Users, Settings, Database, Activity, AlertTriangle, Trash2, Edit, Ban, CheckCircle } from "lucide-react";
+import { Shield, Users, Settings, Database as DatabaseIcon, Activity, AlertTriangle, Trash2, Edit, Ban, CheckCircle, CreditCard, DollarSign, Loader2, XCircle } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { Database } from "@/integrations/supabase/types";
 
-const users = [
-  { id: 1, name: "Rahim Ahmed", email: "rahim@example.com", role: "User", status: "Active", lastLogin: "2 hours ago" },
-  { id: 2, name: "Karim Hossain", email: "karim@example.com", role: "Reseller", status: "Active", lastLogin: "1 day ago" },
-  { id: 3, name: "Fatima Begum", email: "fatima@example.com", role: "User", status: "Suspended", lastLogin: "1 week ago" },
-  { id: 4, name: "Jamal Uddin", email: "jamal@example.com", role: "Admin", status: "Active", lastLogin: "Just now" },
-];
-
-const systemLogs = [
-  { id: 1, action: "User login", user: "rahim@example.com", time: "2 mins ago", type: "info" },
-  { id: 2, action: "Payment received", user: "System", time: "5 mins ago", type: "success" },
-  { id: 3, action: "Failed login attempt", user: "unknown@example.com", time: "10 mins ago", type: "warning" },
-  { id: 4, action: "Database backup", user: "System", time: "1 hour ago", type: "info" },
-  { id: 5, action: "User suspended", user: "admin@example.com", time: "2 hours ago", type: "danger" },
-];
+type Transaction = Database['public']['Tables']['payment_transactions']['Row'];
+type Coupon = Database['public']['Tables']['referral_codes']['Row'];
 
 export default function AdminPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [loadingTxns, setLoadingTxns] = useState(false);
+  const [loadingCoupons, setLoadingCoupons] = useState(false);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
+  // Coupon Form
+  const [couponCode, setCouponCode] = useState("");
+  const [couponValue, setCouponValue] = useState("");
+
+  useEffect(() => {
+    fetchTransactions();
+    fetchCoupons();
+  }, []);
+
+  const fetchTransactions = async () => {
+    setLoadingTxns(true);
+    const { data } = await supabase
+      .from('payment_transactions')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setTransactions(data);
+    setLoadingTxns(false);
+  };
+
+  const fetchCoupons = async () => {
+    setLoadingCoupons(true);
+    const { data } = await supabase
+      .from('referral_codes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setCoupons(data);
+    setLoadingCoupons(false);
+  };
+
+  const handleApproveTxn = async (txn: Transaction) => {
+    try {
+      setProcessingId(txn.id);
+      
+      // 1. Update Transaction Status
+      const { error: txError } = await (supabase as any)
+        .from('payment_transactions')
+        .update({ status: 'completed' })
+        .eq('id', txn.id);
+      
+      if (txError) throw txError;
+
+      // 2. Add Balance to User
+      const { data: userConfigData } = await (supabase as any)
+        .from('user_configs')
+        .select('balance')
+        .eq('user_id', txn.user_id)
+        .maybeSingle();
+
+      const userConfig = userConfigData as { balance: number } | null;
+
+      const currentBalance = userConfig ? (userConfig.balance || 0) : 0;
+      const newBalance = currentBalance + Number(txn.amount);
+
+      if (userConfig) {
+        await (supabase as any)
+          .from('user_configs')
+          .update({ balance: newBalance })
+          .eq('user_id', txn.user_id);
+      } else {
+        await (supabase as any)
+          .from('user_configs')
+          .insert({ user_id: txn.user_id, balance: newBalance });
+      }
+
+      toast.success(`Transaction approved. Added ${txn.amount} BDT to user.`);
+      fetchTransactions();
+
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to approve: " + message);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleRejectTxn = async (txn: Transaction) => {
+    try {
+      setProcessingId(txn.id);
+      const { error } = await (supabase as any)
+        .from('payment_transactions')
+        .update({ status: 'failed' })
+        .eq('id', txn.id);
+      
+      if (error) throw error;
+      
+      toast.success("Transaction rejected.");
+      fetchTransactions();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to reject: " + message);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleCreateCoupon = async () => {
+    if (!couponCode || !couponValue) {
+      toast.error("Please fill all fields");
+      return;
+    }
+
+    try {
+      const { error } = await (supabase as any).from('referral_codes').insert({
+        code: couponCode,
+        value: Number(couponValue),
+        type: 'balance',
+        status: 'active'
+      });
+
+      if (error) throw error;
+
+      toast.success("Coupon created!");
+      setCouponCode("");
+      setCouponValue("");
+      fetchCoupons();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to create coupon: " + message);
+    }
+  };
+
+  const toggleCouponStatus = async (coupon: Coupon) => {
+    const newStatus = coupon.status === 'active' ? 'inactive' : 'active';
+    await (supabase as any).from('referral_codes').update({ status: newStatus }).eq('id', coupon.id);
+    fetchCoupons();
+  };
+
   return (
     <div className="space-y-6">
       {/* Header with Warning */}
       <div className="flex items-center gap-4 p-4 bg-destructive/10 rounded-lg border border-destructive/20">
-        <AlertTriangle className="h-8 w-8 text-destructive" />
+        <Shield className="h-8 w-8 text-destructive" />
         <div>
           <h2 className="text-xl font-bold text-foreground">Admin Control Panel</h2>
           <p className="text-sm text-muted-foreground">
-            ⚠️ Hidden admin area - Access restricted. All actions are logged.
+            Manage payments, users, and system settings.
           </p>
         </div>
       </div>
 
-      {/* Admin Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Users</p>
-                <p className="text-2xl font-bold text-foreground">1,234</p>
-              </div>
-              <Users className="h-8 w-8 text-primary" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border-border">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Active Sessions</p>
-                <p className="text-2xl font-bold text-chart-3">156</p>
-              </div>
-              <Activity className="h-8 w-8 text-chart-3" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border-border">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Database Size</p>
-                <p className="text-2xl font-bold text-chart-2">2.4 GB</p>
-              </div>
-              <Database className="h-8 w-8 text-chart-2" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-card border-border">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">System Status</p>
-                <p className="text-2xl font-bold text-chart-3">Healthy</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-chart-3" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Tabs */}
-      <Tabs defaultValue="users" className="space-y-4">
+      <Tabs defaultValue="payments" className="space-y-4">
         <TabsList className="bg-secondary">
+          <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="coupons">Coupons</TabsTrigger>
           <TabsTrigger value="users">User Management</TabsTrigger>
           <TabsTrigger value="system">System Settings</TabsTrigger>
-          <TabsTrigger value="logs">Activity Logs</TabsTrigger>
         </TabsList>
 
-        {/* Users Tab */}
-        <TabsContent value="users">
+        {/* Payments Tab */}
+        <TabsContent value="payments">
           <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle>User Management</CardTitle>
-              <CardDescription>View and manage all registered users</CardDescription>
+              <CardTitle>Transaction Requests</CardTitle>
+              <CardDescription>Approve or reject deposit requests</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>Role</TableHead>
+                      <TableHead>User ID</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Details</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Last Login</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-9 w-9">
-                              <AvatarImage src="" />
-                              <AvatarFallback className="bg-primary text-primary-foreground">
-                                {user.name.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{user.name}</p>
-                              <p className="text-sm text-muted-foreground">{user.email}</p>
+                    {loadingTxns ? (
+                       <TableRow><TableCell colSpan={6} className="text-center">Loading...</TableCell></TableRow>
+                    ) : transactions.length === 0 ? (
+                       <TableRow><TableCell colSpan={6} className="text-center">No transactions found</TableCell></TableRow>
+                    ) : (
+                      transactions.map((txn) => (
+                        <TableRow key={txn.id}>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{txn.user_id}</TableCell>
+                          <TableCell className="capitalize">{txn.method}</TableCell>
+                          <TableCell className="font-bold text-green-600">৳{txn.amount}</TableCell>
+                          <TableCell>
+                            <div className="text-xs">
+                              <p>TRX: {txn.transaction_id}</p>
+                              <p className="text-muted-foreground">{txn.description}</p>
+                              <p className="text-muted-foreground">{new Date(txn.created_at).toLocaleString()}</p>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={user.role === "Admin" ? "default" : "secondary"}>
-                            {user.role}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={user.status === "Active" ? "default" : "destructive"}
-                            className={user.status === "Active" ? "bg-chart-3 hover:bg-chart-3" : ""}
-                          >
-                            {user.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{user.lastLogin}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button variant="ghost" size="icon">
-                              <Edit size={16} />
-                            </Button>
-                            <Button variant="ghost" size="icon">
-                              <Ban size={16} />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="text-destructive">
-                              <Trash2 size={16} />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={txn.status === 'completed' ? 'default' : txn.status === 'pending' ? 'secondary' : 'destructive'}>
+                              {txn.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {txn.status === 'pending' && (
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                  onClick={() => handleApproveTxn(txn)}
+                                  disabled={processingId === txn.id}
+                                >
+                                  {processingId === txn.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <CheckCircle className="h-4 w-4" />}
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="text-red-600 border-red-200 hover:bg-red-50"
+                                  onClick={() => handleRejectTxn(txn)}
+                                  disabled={processingId === txn.id}
+                                >
+                                  {processingId === txn.id ? <Loader2 className="h-4 w-4 animate-spin"/> : <XCircle className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -166,105 +250,81 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
 
-        {/* System Settings Tab */}
-        <TabsContent value="system">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="bg-card border-border">
+        {/* Coupons Tab */}
+        <TabsContent value="coupons">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="bg-card border-border md:col-span-1">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
-                  General Settings
-                </CardTitle>
+                <CardTitle>Create Coupon</CardTitle>
+                <CardDescription>Add new balance codes</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Maintenance Mode</Label>
-                    <p className="text-sm text-muted-foreground">Disable public access</p>
-                  </div>
-                  <Switch />
+                <div className="space-y-2">
+                  <Label>Coupon Code</Label>
+                  <Input placeholder="e.g. WELCOME500" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} />
                 </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Registration</Label>
-                    <p className="text-sm text-muted-foreground">Allow new user signups</p>
-                  </div>
-                  <Switch defaultChecked />
+                <div className="space-y-2">
+                  <Label>Value (BDT)</Label>
+                  <Input type="number" placeholder="500" value={couponValue} onChange={(e) => setCouponValue(e.target.value)} />
                 </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Email Notifications</Label>
-                    <p className="text-sm text-muted-foreground">Send system emails</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
+                <Button className="w-full" onClick={handleCreateCoupon}>Create Code</Button>
               </CardContent>
             </Card>
 
-            <Card className="bg-card border-border">
+            <Card className="bg-card border-border md:col-span-2">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
-                  Security Settings
-                </CardTitle>
+                <CardTitle>Active Coupons</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Two-Factor Auth</Label>
-                    <p className="text-sm text-muted-foreground">Require 2FA for admins</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Session Timeout</Label>
-                    <p className="text-sm text-muted-foreground">Auto logout inactive users</p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                <div className="space-y-2">
-                  <Label>Max Login Attempts</Label>
-                  <Input type="number" defaultValue="5" />
-                </div>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Code</TableHead>
+                      <TableHead>Value</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loadingCoupons ? (
+                         <TableRow><TableCell colSpan={4}>Loading...</TableCell></TableRow>
+                    ) : coupons.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-mono font-bold">{c.code}</TableCell>
+                        <TableCell>৳{c.value}</TableCell>
+                        <TableCell>
+                          <Badge variant={c.status === 'active' ? 'default' : 'secondary'}>{c.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="ghost" onClick={() => toggleCouponStatus(c)}>
+                            {c.status === 'active' ? 'Deactivate' : 'Activate'}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        {/* Logs Tab */}
-        <TabsContent value="logs">
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle>Activity Logs</CardTitle>
-              <CardDescription>Recent system activities and user actions</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {systemLogs.map((log) => (
-                  <div key={log.id} className="flex items-center gap-4 p-3 rounded-lg bg-secondary">
-                    <div
-                      className={`h-2 w-2 rounded-full ${
-                        log.type === "success"
-                          ? "bg-chart-3"
-                          : log.type === "warning"
-                          ? "bg-chart-4"
-                          : log.type === "danger"
-                          ? "bg-chart-5"
-                          : "bg-chart-2"
-                      }`}
-                    />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">{log.action}</p>
-                      <p className="text-xs text-muted-foreground">{log.user}</p>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{log.time}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
+        {/* Users Tab (Placeholder) */}
+        <TabsContent value="users">
+          <Card>
+            <CardHeader><CardTitle>User Management</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">User management features coming soon.</p></CardContent>
           </Card>
         </TabsContent>
+
+        {/* System Tab (Placeholder) */}
+        <TabsContent value="system">
+           <Card>
+            <CardHeader><CardTitle>System Settings</CardTitle></CardHeader>
+            <CardContent><p className="text-muted-foreground">System settings coming soon.</p></CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
     </div>
   );

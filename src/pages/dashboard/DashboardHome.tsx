@@ -34,7 +34,6 @@ export default function DashboardHome() {
         if (isWhatsApp) {
           // Fetch simple stats for WhatsApp
           const { count: sessionCount } = await supabase.from('whatsapp_sessions').select('*', { count: 'exact', head: true });
-          // @ts-ignore
           setStats(prev => ({ ...prev, sessions: sessionCount || 0 }));
         }
       }

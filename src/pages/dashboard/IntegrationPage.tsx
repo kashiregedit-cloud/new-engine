@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ interface WhatsAppSession {
   qr_code?: string;
   plan_days?: number;
   user_email?: string;
+  user_id?: string;
   updated_at?: string;
 }
 
@@ -65,11 +66,37 @@ export default function IntegrationPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
 
+  const fetchSessions = React.useCallback(async () => {
+     setLoading(true);
+     try {
+       const { data: { user } } = await supabase.auth.getUser();
+       if (!user) return;
+       
+       // Relaxed query: match user_id OR user_email (if user_id is missing/null in DB)
+       const { data, error } = await supabase
+         .from('whatsapp_sessions')
+         .select('*')
+         .or(`user_id.eq.${user.id},user_email.eq.${user.email}`)
+         .order('created_at', { ascending: false });
+
+       if (error) throw error;
+       
+       if (data) {
+           setSessions(data as WhatsAppSession[]);
+       }
+     } catch (error: unknown) {
+       console.error('Error fetching sessions:', error);
+       toast.error('Failed to load sessions');
+     } finally {
+       setLoading(false);
+     }
+  }, []);
+
   useEffect(() => {
     if (platform === 'whatsapp') {
       fetchSessions();
     }
-  }, [platform]);
+  }, [platform, fetchSessions]);
 
   // Sync qrSession with sessions list when it updates
   useEffect(() => {
@@ -79,7 +106,7 @@ export default function IntegrationPage() {
         setQrSession(updatedSession);
       }
     }
-  }, [sessions]);
+  }, [sessions, qrSession]);
 
   // Poll for updates when QR dialog is open
   useEffect(() => {
@@ -88,34 +115,11 @@ export default function IntegrationPage() {
       interval = setInterval(fetchSessions, 3000); // Poll every 3s
     }
     return () => clearInterval(interval);
-  }, [qrSession?.status, qrSession?.id]); // Depend on status/id, not full object to avoid loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrSession?.status, qrSession?.id, fetchSessions]); // Depend on status/id, not full object to avoid loop
 
 
-  const fetchSessions = async () => {
-     setLoading(true);
-     try {
-       const { data: { user } } = await supabase.auth.getUser();
-       if (!user) return;
- 
-       // Relaxed query: match user_id OR user_email (if user_id is missing/null in DB)
-       const { data, error } = await supabase
-         .from('whatsapp_sessions')
-         .select('*')
-         .or(`user_id.eq.${user.id},user_email.eq.${user.email}`)
-         .order('created_at', { ascending: false });
-       
-       if (data) {
-           // No need to fetch from session_qr_link as backend now stores QR in whatsapp_sessions
-           setSessions(data);
-       }
- 
-       if (error) throw error;
-     } catch (error) {
-       console.error("Error fetching sessions:", error);
-     } finally {
-       setLoading(false);
-     }
-   };
+
 
   const createSession = async () => {
     if (!newSessionName.trim()) {
@@ -184,8 +188,9 @@ export default function IntegrationPage() {
       }
 
       fetchSessions(); 
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error(message);
     } finally {
       setCreating(false);
     }
@@ -228,8 +233,9 @@ export default function IntegrationPage() {
       } else {
          setTimeout(() => fetchSessions(), 2000);
       }
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error(message);
     }
   };
 

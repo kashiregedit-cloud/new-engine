@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { Database } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
 export default function ControlPage() {
@@ -28,12 +29,14 @@ export default function ControlPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      const { data: rawData, error } = await supabase
       .from('user_configs')
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
     
+    const data = rawData as Database['public']['Tables']['user_configs']['Row'] | null;
+
     if (data) {
       setConfig({
         auto_reply: data.auto_reply ?? true,
@@ -59,14 +62,15 @@ export default function ControlPage() {
         return;
       }
 
-      const { error } = await supabase.from('user_configs').upsert({
+      const { error } = await (supabase as any).from('user_configs').upsert({
         user_id: user.id,
         ...config
       });
       if (error) throw error;
       toast.success("Settings saved successfully");
-    } catch (error: any) {
-      toast.error("Failed to save settings: " + error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to save settings: " + message);
       console.error(error);
     } finally {
       setSaving(false);
