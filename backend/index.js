@@ -241,42 +241,38 @@ app.post('/session/create', async (req, res) => {
     let qrDataUri = null;
 
     // 3. Fetch QR Code (Blocking Retry Logic - n8n style)
-    // Wait for QR before inserting into DB or responding
-    for (let i = 0; i < 15; i++) { // 15 attempts * 2s = 30s max wait
-        try {
-            console.log(`Fetching QR for ${sessionName} (Attempt ${i + 1})...`);
-            // Wait 2s before each attempt (including first) to give WAHA time
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
-            const qrResponse = await fetch(qrUrl, { headers });
-            
-            if (qrResponse.ok) {
-                const contentType = qrResponse.headers.get('content-type');
-
-                if (contentType && contentType.includes('application/json')) {
+        // Wait for QR before inserting into DB or responding
+        for (let i = 0; i < 20; i++) { // Increased to 20 attempts
+            try {
+                console.log(`Fetching QR for ${sessionName} (Attempt ${i + 1})...`);
+                // Wait 2s before each attempt
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Use format=json for reliable base64
+                const qrUrl = `${WAHA_BASE_URL}/api/sessions/${encodeURIComponent(sessionName)}/auth/qr?format=json`;
+                const qrResponse = await fetch(qrUrl, { headers });
+                
+                if (qrResponse.ok) {
                     const json = await qrResponse.json();
-                    if (json.data) qrDataUri = `data:image/png;base64,${json.data}`;
-                    else if (json.qr) qrDataUri = json.qr;
-                } else {
-                    const buffer = await qrResponse.arrayBuffer();
-                    if (buffer.byteLength > 0) {
-                        const base64 = Buffer.from(buffer).toString('base64');
-                        qrDataUri = `data:image/png;base64,${base64}`;
+                    // Handle various JSON formats
+                    if (json.qr) {
+                        qrDataUri = json.qr;
+                    } else if (json.data) {
+                        // n8n style or other wrapper
+                         qrDataUri = json.data.startsWith('data:') ? json.data : `data:image/png;base64,${json.data}`;
                     }
-                }
 
-                if (qrDataUri) {
-                    console.log(`QR fetched for ${sessionName}`);
-                    break; // Stop retrying once found
+                    if (qrDataUri) {
+                        console.log(`QR fetched for ${sessionName}`);
+                        break; // Stop retrying once found
+                    }
+                } else {
+                     console.log(`QR not ready yet for ${sessionName} (${qrResponse.status})...`);
                 }
-            } else {
-                 console.log(`QR not ready yet for ${sessionName} (${qrResponse.status})...`);
+            } catch (e) {
+                console.error(`Retry failed for ${sessionName}:`, e);
             }
-        } catch (e) {
-            console.error(`Retry failed for ${sessionName}:`, e);
         }
-    }
 
     // 2. Save to DB (Create User/Session Row)
     // Now we insert EVERYTHING at once (session + qr)
