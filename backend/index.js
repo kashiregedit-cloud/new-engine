@@ -288,16 +288,20 @@ app.post('/session/create', async (req, res) => {
 
     if (qrDataUri) {
         // Also insert into session_qr_link
-        await supabase.from('session_qr_link').insert({
+        const { error: qrError } = await supabase.from('session_qr_link').insert({
            qr_link: qrDataUri,
            session_name: sessionName,
            session_used: false
         });
+        if (qrError) {
+            console.error('QR Link Insert Error:', qrError);
+            // Don't fail the whole request, just log it
+        }
     }
 
     if (upsertError) {
         console.error('DB Upsert Error:', upsertError);
-        return res.status(500).json({ error: 'Failed to save session to database' });
+        return res.status(500).json({ error: `Failed to save session to database: ${upsertError.message}` });
     }
 
     // Return final response with QR (or null if timed out)
