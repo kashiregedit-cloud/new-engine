@@ -270,8 +270,9 @@ app.post('/session/create', async (req, res) => {
         .upsert({
             session_id: data.id, 
             session_name: sessionName,
-            user_email: userEmail,
-            user_id: userId,
+            // Only update user_email if it's provided and not null
+            ...(userEmail ? { user_email: userEmail } : {}),
+            ...(userId ? { user_id: userId } : {}),
             status: 'created',
             qr_code: qrDataUri, // Save QR if we got it
             plan_days: req.body.plan || 30, // Default to 30 if not provided
