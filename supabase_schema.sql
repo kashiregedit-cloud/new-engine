@@ -64,3 +64,7 @@ alter table whatsapp_sessions add column if not exists status text default 'stop
 alter table whatsapp_sessions add column if not exists updated_at timestamp with time zone default now();
 alter table whatsapp_sessions add column if not exists created_at timestamp with time zone default now();
 
+-- 7. Add Unique Constraint to session_name (Required for Upsert)
+alter table whatsapp_sessions add constraint whatsapp_sessions_session_name_key unique (session_name);
+
+
