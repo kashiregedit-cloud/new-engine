@@ -77,10 +77,11 @@ export default function IntegrationPage() {
        const { data: { user } } = await supabase.auth.getUser();
        if (!user) return;
  
+       // Relaxed query: match user_id OR user_email (if user_id is missing/null in DB)
        const { data, error } = await supabase
          .from('whatsapp_sessions')
          .select('*')
-         .eq('user_id', user.id)
+         .or(`user_id.eq.${user.id},user_email.eq.${user.email}`)
          .order('created_at', { ascending: false });
        
        if (data) {

@@ -222,9 +222,14 @@ app.post('/session/create', async (req, res) => {
       }
   }
 
-  if (!userEmail || !userId) {
-      console.error('CRITICAL: User Identity missing even after recovery attempt. Aborting session creation.');
-      return res.status(401).json({ error: 'User identity verification failed. Please login again to create a session.' });
+  // RELAXED CHECK: Only fail if email is missing. UID is optional if missing.
+  if (!userEmail) {
+      console.error('CRITICAL: User Email missing even after recovery attempt. Aborting session creation.');
+      return res.status(401).json({ error: 'User email not found. Please login again.' });
+  }
+  
+  if (!userId) {
+      console.warn('Warning: userId missing. Proceeding with email only as per user request.');
   }
 
   try {
