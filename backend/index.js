@@ -192,11 +192,9 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
   console.log('Received /session/create request body:', req.body); // LOG REQUEST BODY
-  const { sessionName, userEmail, userId } = req.body;
+  let { sessionName, userEmail, userId } = req.body;
   
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
-  if (!userEmail) console.warn('Warning: userEmail is missing in request body');
-  if (!userId) console.warn('Warning: userId is missing in request body');
 
   // Create a scoped Supabase client if authorization header is provided
   // Use ANON KEY for scoped client to respect RLS policies
@@ -206,6 +204,26 @@ app.post('/session/create', async (req, res) => {
         global: { headers: { Authorization: authHeader } } 
       })
     : supabase;
+
+  // Attempt to recover missing user info from Token
+  if ((!userEmail || !userId) && authHeader) {
+      try {
+          console.log('Attempting to recover User Info from Token...');
+          const { data: { user }, error: userError } = await scopedSupabase.auth.getUser();
+          if (user && !userError) {
+              console.log('Recovered User from Token:', user.email, user.id);
+              if (!userEmail) userEmail = user.email;
+              if (!userId) userId = user.id;
+          } else {
+              console.warn('Failed to recover user from token:', userError);
+          }
+      } catch (e) {
+          console.error('Token recovery error:', e);
+      }
+  }
+
+  if (!userEmail) console.warn('Warning: userEmail is missing in request body and could not be recovered');
+  if (!userId) console.warn('Warning: userId is missing in request body and could not be recovered');
 
   try {
     const url = `${WAHA_BASE_URL}/api/sessions`;
