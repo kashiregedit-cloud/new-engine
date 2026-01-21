@@ -171,13 +171,28 @@ export default function IntegrationPage() {
 
   const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
     try {
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      // Strict check for session validity
+      if (!session || !session.user || !session.access_token) {
+        // Try to refresh session
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError || !refreshData.session) {
+             throw new Error("User session expired. Please logout and login again.");
+        }
+        session = refreshData.session;
+      }
+
       if (action === 'restart') {
          toast.info("Restarting session...");
       }
       
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        },
         body: JSON.stringify({ sessionName })
       });
       
@@ -185,7 +200,12 @@ export default function IntegrationPage() {
       
       toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
       
-      setTimeout(() => fetchSessions(), 2000);
+      if (action === 'restart') {
+         // Wait a bit longer for restart to propagate
+         setTimeout(() => fetchSessions(), 5000);
+      } else {
+         setTimeout(() => fetchSessions(), 2000);
+      }
     } catch (error: any) {
       toast.error(error.message);
     }
