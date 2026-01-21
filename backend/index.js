@@ -202,6 +202,7 @@ app.post('/session/create', async (req, res) => {
     // Configure WAHA with specific config requested by user
     const payload = {
       name: sessionName,
+      start: true, // Auto-start session immediately
       config: {
         metadata: {},
         debug: false,
@@ -230,49 +231,57 @@ app.post('/session/create', async (req, res) => {
       }
     };
 
-    // 1. Create Session
+    // 1. Create Session (and Start due to start: true)
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
     const data = await response.json();
 
     if (!response.ok) return res.status(response.status).json(data);
 
-    // 2. Start Session (User Requested Workflow: Create -> Start -> Get QR)
-    try {
-        console.log(`Starting session ${sessionName}...`);
-        const startUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;
-        await fetch(startUrl, { method: 'POST', headers });
-    } catch (startError) {
-        console.error(`Error starting session ${sessionName}:`, startError);
-        // We continue even if start fails, as it might already be started or auto-started
-    }
-
-    // 3. Fetch QR Code immediately
+    // 2. Fetch QR Code (Retry Logic)
     let qrDataUri = null;
-    try {
-        console.log(`Fetching QR for ${sessionName}...`);
-        // Wait a brief moment for WAHA to initialize the session after start
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
-        const qrResponse = await fetch(qrUrl, { headers });
-        
-        if (qrResponse.ok) {
-            const buffer = await qrResponse.arrayBuffer();
-            const base64 = Buffer.from(buffer).toString('base64');
-            qrDataUri = `data:image/png;base64,${base64}`;
-            
-            // Also save to session_qr_link immediately if found
-            await supabase.from('session_qr_link').insert({
-               qr_link: qrDataUri,
-               session_name: sessionName,
-               session_used: false
-            });
-        } else {
-            console.warn(`QR not ready immediately: ${qrResponse.status}`);
+    
+    // Start background retry loop immediately
+    (async () => {
+        // Initial delay to let WAHA start the browser (User said ~10s, we start checking after 3s)
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        for (let i = 0; i < 20; i++) { // 20 attempts * 2s = 40s total coverage
+            try {
+                console.log(`Fetching QR for ${sessionName} (Attempt ${i + 1})...`);
+                
+                const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+                const qrResponse = await fetch(qrUrl, { headers });
+                
+                if (qrResponse.ok) {
+                    const buffer = await qrResponse.arrayBuffer();
+                    const base64 = Buffer.from(buffer).toString('base64');
+                    const newQrUri = `data:image/png;base64,${base64}`;
+
+                    // 1. Update whatsapp_sessions
+                    await supabase
+                        .from('whatsapp_sessions')
+                        .update({ qr_code: newQrUri, updated_at: new Date().toISOString() })
+                        .eq('session_name', sessionName);
+                    
+                    // 2. Insert into session_qr_link (User Requested Table)
+                    await supabase.from('session_qr_link').insert({
+                       qr_link: newQrUri,
+                       session_name: sessionName,
+                       session_used: false
+                    });
+
+                    console.log(`QR fetched and saved for ${sessionName}`);
+                    break; // Stop retrying once found
+                } else {
+                     console.log(`QR not ready yet for ${sessionName} (${qrResponse.status})...`);
+                }
+            } catch (e) {
+                console.error(`Retry failed for ${sessionName}:`, e);
+            }
+            // Wait 2 seconds before next try
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
-    } catch (qrError) {
-        console.error('Error fetching QR:', qrError);
-    }
+    })();
 
     // 2. Save to DB (Create User/Session Row)
     // Upserting based on session_name to avoid duplicates if retrying
