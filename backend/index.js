@@ -248,8 +248,8 @@ app.post('/session/create', async (req, res) => {
                 // Wait 2s before each attempt
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                // Use format=json for reliable base64
-                const qrUrl = `${WAHA_BASE_URL}/api/sessions/${encodeURIComponent(sessionName)}/auth/qr?format=json`;
+                // Corrected URL: Removed /sessions/ as per testing
+                const qrUrl = `${WAHA_BASE_URL}/api/${encodeURIComponent(sessionName)}/auth/qr?format=json`;
                 const qrResponse = await fetch(qrUrl, { headers });
                 
                 if (qrResponse.ok) {
@@ -418,7 +418,7 @@ app.post('/session/restart', async (req, res) => {
              try {
                  console.log(`Fetching QR for ${sessionName} (Restart Attempt ${i + 1})...`);
                  
-                 const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+                 const qrUrl = `${WAHA_BASE_URL}/api/${sessionName}/auth/qr?format=image`;
                  const qrResponse = await fetch(qrUrl, { headers });
                  
                  if (qrResponse.ok) {
@@ -488,7 +488,7 @@ app.post('/session/delete', async (req, res) => {
 app.get('/session/qr/:sessionName', async (req, res) => {
   const { sessionName } = req.params;
   try {
-    const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+    const url = `${WAHA_BASE_URL}/api/${sessionName}/auth/qr?format=image`;
     const headers = {};
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
@@ -496,7 +496,7 @@ app.get('/session/qr/:sessionName', async (req, res) => {
     
     // Fallback: If WAHA fails, check DB
     if (!response.ok) {
-        console.log(`WAHA QR Fetch failed (${response.status}), checking DB...`);
+        console.log(`WAHA QR Fetch failed (${response.status}) using path /api/${sessionName}/auth/qr, checking DB...`);
         const { data: dbSession } = await supabase
             .from('whatsapp_sessions')
             .select('qr_code')
