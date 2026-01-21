@@ -7,6 +7,7 @@ create table if not exists whatsapp_sessions (
   session_id text not null unique,
   session_name text,
   user_email text,
+  user_id text, -- Supabase Auth User ID
   plan_days int,
   qr_code text,
   status text default 'stopped',
@@ -55,4 +56,7 @@ create table if not exists session_qr_link (
    session_used boolean null default false, 
    constraint session_qr_link_pkey primary key (id) 
  ) TABLESPACE pg_default;
+
+-- 6. Fix for existing whatsapp_sessions table
+alter table whatsapp_sessions add column if not exists user_id text;
 
