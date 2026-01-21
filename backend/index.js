@@ -249,28 +249,41 @@ app.post('/session/create', async (req, res) => {
       // For now, log it.
     }
 
-    // Immediately fetch QR Code to save to DB
-    try {
-        const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
-        const qrResponse = await fetch(qrUrl, { headers });
-        if (qrResponse.ok) {
-            const buffer = await qrResponse.arrayBuffer();
-            const base64 = Buffer.from(buffer).toString('base64');
-            const dataUri = `data:image/png;base64,${base64}`;
-
-            // Update DB with QR
-            await supabase
-              .from('whatsapp_sessions')
-              .update({ qr_code: dataUri, updated_at: new Date().toISOString() })
-              .eq('session_name', sessionName);
+    // Immediately fetch QR Code to save to DB (Retry mechanism)
+    let qrFound = false;
+    for (let i = 0; i < 5; i++) {
+        try {
+            console.log(`Attempting to fetch QR for ${sessionName} (Attempt ${i + 1})...`);
+            const qrUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/auth/qr?format=image`;
+            const qrResponse = await fetch(qrUrl, { headers });
             
-            // Add QR to response so frontend gets it immediately
-            data.qr_code = dataUri;
+            if (qrResponse.ok) {
+                const buffer = await qrResponse.arrayBuffer();
+                const base64 = Buffer.from(buffer).toString('base64');
+                const dataUri = `data:image/png;base64,${base64}`;
+
+                // Update DB with QR
+                await supabase
+                .from('whatsapp_sessions')
+                .update({ qr_code: dataUri, updated_at: new Date().toISOString() })
+                .eq('session_name', sessionName);
+                
+                // Add QR to response so frontend gets it immediately
+                data.qr_code = dataUri;
+                qrFound = true;
+                break; // Exit loop
+            } else {
+                console.log(`QR not ready yet: ${qrResponse.status}`);
+            }
+        } catch (qrError) {
+            console.error('Immediate QR Fetch Error:', qrError);
         }
-    } catch (qrError) {
-        console.error('Immediate QR Fetch Error:', qrError);
-        // Don't fail the whole request just because QR fetch failed, 
-        // the user can refresh or click "Show QR" later.
+        // Wait 2 seconds before retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    if (!qrFound) {
+        console.warn(`Could not fetch QR code for ${sessionName} after retries.`);
     }
 
     res.json(data);
@@ -373,7 +386,27 @@ app.get('/session/qr/:sessionName', async (req, res) => {
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
     const response = await fetch(url, { headers });
-    if (!response.ok) return res.status(response.status).send(await response.text());
+    
+    // Fallback: If WAHA fails, check DB
+    if (!response.ok) {
+        console.log(`WAHA QR Fetch failed (${response.status}), checking DB...`);
+        const { data: dbSession } = await supabase
+            .from('whatsapp_sessions')
+            .select('qr_code')
+            .eq('session_name', sessionName)
+            .maybeSingle();
+
+        if (dbSession && dbSession.qr_code) {
+             const matches = dbSession.qr_code.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+             if (matches && matches.length === 3) {
+                 const type = matches[1];
+                 const buffer = Buffer.from(matches[2], 'base64');
+                 res.set('Content-Type', type);
+                 return res.send(buffer);
+             }
+        }
+        return res.status(response.status).send(await response.text());
+    }
 
     // Pipe image back
     const buffer = await response.arrayBuffer();
