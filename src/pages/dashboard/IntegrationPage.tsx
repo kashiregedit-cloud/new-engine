@@ -38,17 +38,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
+  DialogClose
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+
 import {
   Tooltip,
   TooltipContent,
@@ -537,21 +530,22 @@ export default function IntegrationPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogDescription>
               Are you sure you want to delete this session? This action is permanent and cannot be undone. 
               The session will be removed from both the server and the database.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
                 setShowDeleteConfirm(false);
                 setSessionToDelete(null);
-            }}>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => {
+            }}>Cancel</Button>
+            <Button variant="destructive" onClick={() => {
               if (sessionToDelete) {
                   handleAction(sessionToDelete, 'delete');
               }
@@ -559,16 +553,17 @@ export default function IntegrationPage() {
               setSessionToDelete(null);
             }}>
               Confirm & Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <AlertDialog open={showPaymentConfirm} onOpenChange={setShowPaymentConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Payment Confirmation Dialog */}
+      <Dialog open={showPaymentConfirm} onOpenChange={setShowPaymentConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Payment</DialogTitle>
+            <DialogDescription>
               Creating a new session will deduct <strong>500 BDT</strong> from your account balance.
               <br /><br />
               {balance !== null && (
@@ -578,19 +573,19 @@ export default function IntegrationPage() {
                   </div>
               )}
               Are you sure you want to proceed?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setShowPaymentConfirm(false)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPaymentConfirm(false)}>Cancel</Button>
+            <Button onClick={() => {
               setShowPaymentConfirm(false);
               createSession();
             }}>
               Confirm & Pay 500 BDT
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
