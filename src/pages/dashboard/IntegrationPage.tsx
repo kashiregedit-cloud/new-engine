@@ -179,7 +179,7 @@ export default function IntegrationPage() {
   }, []);
 
   useEffect(() => {
-    console.log("IntegrationPage v1.4 (DEBUG MODE) loaded");
+    console.log("IntegrationPage v1.5 (NATIVE POPUP) loaded");
     if (platform === 'whatsapp') {
       fetchSessions();
       fetchBalance();
@@ -210,14 +210,19 @@ export default function IntegrationPage() {
 
 
   const handleStartNew = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent any form submission
-    // Debugging: Ensure button works
-    // alert("Start New Clicked"); 
+    e.preventDefault(); 
+    
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
-    setShowPaymentConfirm(true);
+
+    // Direct Browser Confirmation (Guaranteed to work)
+    const confirmed = window.confirm(`Confirm Payment?\n\nCreating a new session will deduct 500 BDT.\n\nCurrent Balance: ${balance || 0} BDT\nAfter Deduction: ${(balance || 0) - 500} BDT\n\nPress OK to Pay & Create.`);
+    
+    if (confirmed) {
+        createSession();
+    }
   };
 
   const createSession = async () => {
@@ -533,11 +538,13 @@ export default function IntegrationPage() {
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        // Force a browser alert to prove execution
-                        // window.alert("Delete Button Clicked: " + session.session_name);
-                        console.log("Delete clicked for:", session.session_name);
-                        setSessionToDelete(session.session_name);
-                        setShowDeleteConfirm(true);
+                        
+                        // Direct Browser Confirmation (Guaranteed to work)
+                        const confirmed = window.confirm(`WARNING!\n\nAre you sure you want to delete session "${session.session_name}"?\n\nThis action is PERMANENT.`);
+                        
+                        if (confirmed) {
+                             handleAction(session.session_name, 'delete');
+                        }
                     }}>
                         <Trash2 className="h-4 w-4" />
                     </Button>
