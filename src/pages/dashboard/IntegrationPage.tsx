@@ -76,6 +76,9 @@ export default function IntegrationPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [restartingId, setRestartingId] = useState<string | null>(null);
 
   const fetchSessions = React.useCallback(async () => {
      setLoading(true);
@@ -132,6 +135,14 @@ export default function IntegrationPage() {
 
 
 
+  const handleStartNew = () => {
+    if (!newSessionName.trim()) {
+      toast.error("Please enter a session name");
+      return;
+    }
+    setShowConfirm(true);
+  };
+
   const createSession = async () => {
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
@@ -158,8 +169,12 @@ export default function IntegrationPage() {
       
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
+      // Generate random suffix for unique session name (6 chars)
+      const suffix = Math.random().toString(36).substring(2, 8);
+      const finalSessionName = `${newSessionName.trim()}_${suffix}`;
+
       const payload = { 
-        sessionName: newSessionName, 
+        sessionName: finalSessionName, 
         userEmail: user.email, 
         userId: user.id,
         plan: 30 
@@ -222,7 +237,7 @@ export default function IntegrationPage() {
       }
 
       if (action === 'restart') {
-         toast.info("Restarting session...");
+         setRestartingId(sessionName);
       }
       
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
@@ -239,10 +254,10 @@ export default function IntegrationPage() {
       toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
       
       if (action === 'restart') {
-         // Show QR modal immediately so user sees the new code when it arrives
+         // Show QR modal immediately with loading state to trigger polling
          const session = sessions.find(s => s.session_name === sessionName);
          if (session) {
-             setQrSession(session);
+             setQrSession({ ...session, qr_code: undefined, status: 'RESTARTING' });
          }
          fetchSessions();
       } else {
@@ -251,6 +266,8 @@ export default function IntegrationPage() {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(message);
+    } finally {
+      if (action === 'restart') setRestartingId(null);
     }
   };
 
@@ -310,7 +327,7 @@ export default function IntegrationPage() {
                 className="w-[200px]"
               />
             </div>
-            <Button onClick={() => setShowConfirm(true)} disabled={creating} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={handleStartNew} disabled={creating} className="bg-green-600 hover:bg-green-700">
               {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               Start New
             </Button>
@@ -397,8 +414,8 @@ export default function IntegrationPage() {
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="outline" size="sm" className="h-8 border-orange-200 hover:bg-orange-50 text-orange-600" onClick={() => handleAction(session.session_name, 'restart')}>
-                                    <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                                <Button variant="outline" size="sm" className="h-8 border-orange-200 hover:bg-orange-50 text-orange-600" onClick={() => handleAction(session.session_name, 'restart')} disabled={restartingId === session.session_name}>
+                                    {restartingId === session.session_name ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
                                     Restart
                                 </Button>
                             </TooltipTrigger>
@@ -420,7 +437,10 @@ export default function IntegrationPage() {
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleAction(session.session_name, 'delete')}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                                    setSessionToDelete(session.session_name);
+                                    setShowDeleteConfirm(true);
+                                }}>
                                     <Trash2 className="h-4 w-4 text-gray-500" />
                                 </Button>
                             </TooltipTrigger>
@@ -450,6 +470,12 @@ export default function IntegrationPage() {
                 alt="QR Code" 
                 className="w-64 h-64 object-contain border rounded-lg bg-white"
               />
+            ) : qrSession?.status === 'WORKING' ? (
+                <div className="flex flex-col items-center justify-center h-64 w-64 bg-green-50 rounded-lg border border-green-200">
+                    <CheckCircle className="h-8 w-8 text-green-500 mb-2" />
+                    <p className="text-green-700 font-medium">Session Connected</p>
+                    <p className="text-xs text-green-600 text-center px-4 mt-1">To scan a new QR code, please click "Regenerate QR" below.</p>
+                </div>
             ) : (
                 <div className="flex flex-col items-center justify-center h-64 w-64 bg-secondary/20 rounded-lg border border-dashed">
                     <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
@@ -489,6 +515,33 @@ export default function IntegrationPage() {
               createSession();
             }}>
               Confirm & Pay
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this session? This action is permanent and cannot be undone. 
+              The session will be removed from both the server and the database.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+                setShowDeleteConfirm(false);
+                setSessionToDelete(null);
+            }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={() => {
+              if (sessionToDelete) {
+                  handleAction(sessionToDelete, 'delete');
+              }
+              setShowDeleteConfirm(false);
+              setSessionToDelete(null);
+            }}>
+              Confirm & Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

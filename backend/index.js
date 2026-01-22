@@ -351,6 +351,16 @@ app.post('/session/create', async (req, res) => {
               policy: "linear"
             },
             customHeaders: null
+          },
+          {
+            url: `http://ak4kcgcog0880g4owgwcss8c.72.62.196.104.sslip.io/webhook`,
+            events: ['message', 'session.status'],
+            retries: {
+              delaySeconds: 2,
+              attempts: 15,
+              policy: "linear"
+            },
+            customHeaders: null
           }
         ],
         client: {
