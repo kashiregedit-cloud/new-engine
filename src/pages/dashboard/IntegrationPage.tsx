@@ -49,6 +49,63 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// Internal Custom Alert Component to bypass library issues
+const CustomAlert = ({ 
+  open, 
+  title, 
+  message, 
+  onConfirm, 
+  onCancel, 
+  confirmText = "Yes", 
+  cancelText = "No",
+  type = 'warning' 
+}: {
+  open: boolean;
+  title: string;
+  message: React.ReactNode;
+  onConfirm: () => void;
+  onCancel: () => void;
+  confirmText?: string;
+  cancelText?: string;
+  type?: 'warning' | 'info';
+}) => {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+       <div className="bg-white rounded-lg shadow-2xl w-[90%] max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border-0">
+          <div className={`${type === 'warning' ? 'bg-[#ff5f5f]' : 'bg-blue-500'} p-6 flex justify-center items-center`}>
+             <div className="bg-white rounded-full p-3 shadow-sm">
+                {type === 'warning' ? (
+                   <div className="text-[#ff5f5f] font-bold text-2xl h-8 w-8 flex items-center justify-center">!</div>
+                ) : (
+                   <div className="text-blue-500 font-bold text-2xl h-8 w-8 flex items-center justify-center">i</div>
+                )}
+             </div>
+          </div>
+          <div className="p-6 text-center">
+             <h3 className="text-2xl font-bold text-gray-700 mb-2 uppercase tracking-wide">{title}</h3>
+             <div className="text-gray-500 mb-8 text-sm leading-relaxed">{message}</div>
+             <div className="flex gap-4 justify-center">
+                <button 
+                  onClick={onConfirm} 
+                  className={`flex-1 py-2.5 px-4 rounded font-semibold text-white shadow-md transition-transform active:scale-95 ${type === 'warning' ? 'bg-[#ff5f5f] hover:bg-[#ff4f4f]' : 'bg-blue-500 hover:bg-blue-600'}`}
+                >
+                  {confirmText}
+                </button>
+                <button 
+                  onClick={onCancel} 
+                  className="flex-1 py-2.5 px-4 rounded font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 shadow-sm transition-transform active:scale-95"
+                >
+                  {cancelText}
+                </button>
+             </div>
+          </div>
+       </div>
+    </div>
+  );
+};
+
 interface WhatsAppSession {
   id: string;
   session_name: string;
@@ -120,7 +177,7 @@ export default function IntegrationPage() {
   }, []);
 
   useEffect(() => {
-    console.log("IntegrationPage v1.2 loaded");
+    console.log("IntegrationPage v1.3 (Frontend Fixes) loaded");
     if (platform === 'whatsapp') {
       fetchSessions();
       fetchBalance();
@@ -530,62 +587,52 @@ export default function IntegrationPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this session? This action is permanent and cannot be undone. 
-              The session will be removed from both the server and the database.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-                setShowDeleteConfirm(false);
-                setSessionToDelete(null);
-            }}>Cancel</Button>
-            <Button variant="destructive" onClick={() => {
-              if (sessionToDelete) {
-                  handleAction(sessionToDelete, 'delete');
-              }
-              setShowDeleteConfirm(false);
-              setSessionToDelete(null);
-            }}>
-              Confirm & Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Confirmation Dialog - REPLACED WITH CUSTOM POPUP */}
+      <CustomAlert 
+        open={showDeleteConfirm}
+        title="WARNING!"
+        message={
+          <>
+            Are you sure you want to delete this session? <br/>
+            This action is permanent.
+          </>
+        }
+        onConfirm={() => {
+          if (sessionToDelete) {
+              handleAction(sessionToDelete, 'delete');
+          }
+          setShowDeleteConfirm(false);
+          setSessionToDelete(null);
+        }}
+        onCancel={() => {
+            setShowDeleteConfirm(false);
+            setSessionToDelete(null);
+        }}
+      />
 
-      {/* Payment Confirmation Dialog */}
-      <Dialog open={showPaymentConfirm} onOpenChange={setShowPaymentConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Payment</DialogTitle>
-            <DialogDescription>
-              Creating a new session will deduct <strong>500 BDT</strong> from your account balance.
-              <br /><br />
-              {balance !== null && (
-                  <div className="mb-2 p-2 bg-muted rounded text-sm">
-                      Current Balance: <strong>{balance} BDT</strong><br/>
-                      After Deduction: <strong>{balance - 500} BDT</strong>
-                  </div>
-              )}
-              Are you sure you want to proceed?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPaymentConfirm(false)}>Cancel</Button>
-            <Button onClick={() => {
-              setShowPaymentConfirm(false);
-              createSession();
-            }}>
-              Confirm & Pay 500 BDT
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Payment Confirmation Dialog - REPLACED WITH CUSTOM POPUP */}
+      <CustomAlert 
+        open={showPaymentConfirm}
+        title="Confirm Payment"
+        type="info"
+        message={
+          <>
+            Creating a new session will deduct <strong>500 BDT</strong>.
+            <br />
+            {balance !== null && (
+                <span className="block mt-2 text-xs bg-gray-100 p-2 rounded">
+                    Current: <strong>{balance} BDT</strong> → After: <strong>{balance - 500} BDT</strong>
+                </span>
+            )}
+          </>
+        }
+        confirmText="Confirm & Pay"
+        onConfirm={() => {
+          setShowPaymentConfirm(false);
+          createSession();
+        }}
+        onCancel={() => setShowPaymentConfirm(false)}
+      />
     </div>
   );
 }
