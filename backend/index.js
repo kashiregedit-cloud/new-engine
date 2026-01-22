@@ -615,11 +615,22 @@ app.post('/session/delete', async (req, res) => {
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
     const response = await fetch(url, { method: 'DELETE', headers });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json(data);
+    
+    // If session not found in WAHA (404), we should still delete from DB
+    if (!response.ok && response.status !== 404) {
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    }
 
     await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
-    res.json(data);
+    
+    if (response.ok) {
+        const data = await response.json();
+        res.json(data);
+    } else {
+        // Mock success for 404 case
+        res.json({ success: true, message: "Session deleted (was already missing in WAHA)" });
+    }
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete session' });
   }

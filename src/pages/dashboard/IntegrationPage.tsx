@@ -380,10 +380,6 @@ export default function IntegrationPage() {
                         <span className="text-muted-foreground">Server:</span>
                         <span className="font-medium">WAHA</span>
                     </div>
-                    <div className="flex justify-between">
-                        <span className="text-muted-foreground">Plan:</span>
-                        <span className="font-medium">{session.plan_days || 30} Days</span>
-                    </div>
                 </div>
               </CardContent>
               <div className="flex items-center justify-between p-4 bg-muted/20 border-t">

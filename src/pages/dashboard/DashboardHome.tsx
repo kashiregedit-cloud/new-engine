@@ -9,7 +9,10 @@ import {
   Plus,
   Zap,
   ExternalLink,
-  Smartphone
+  Smartphone,
+  Package,
+  Megaphone,
+  CreditCard
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -32,11 +35,11 @@ export default function DashboardHome() {
         setUserEmail(user.email);
         
         if (isWhatsApp) {
-          // Fetch simple stats for WhatsApp
+          // Fetch simple stats for WhatsApp (All sessions)
           const { count: sessionCount } = await supabase
             .from('whatsapp_sessions')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'WORKING');
+            .select('*', { count: 'exact', head: true });
+            
           setStats(prev => ({ ...prev, sessions: sessionCount || 0 }));
         }
       }
@@ -77,12 +80,12 @@ export default function DashboardHome() {
         <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-100 dark:border-blue-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-              {isWhatsApp ? 'Active Sessions' : 'Connected Pages'}
+              {isWhatsApp ? 'Total Sessions' : 'Connected Pages'}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-foreground">{stats.sessions}</div>
-            <p className="text-xs text-muted-foreground mt-1">Connected {platformName} Accounts</p>
+            <p className="text-xs text-muted-foreground mt-1">Total {platformName} Accounts</p>
           </CardContent>
         </Card>
 
@@ -121,21 +124,21 @@ export default function DashboardHome() {
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Link to="/dashboard/whatsapp/sessions" className="group">
+          <Link to={`/dashboard/${platform}/sessions`} className="group">
             <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-green-500 cursor-pointer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
                   <Smartphone className="h-5 w-5" />
-                  Connect WhatsApp
+                  Connect {platformName}
                 </CardTitle>
                 <CardDescription>
-                  Scan QR code to connect new numbers
+                  {isWhatsApp ? 'Scan QR code to connect new numbers' : 'Connect your pages'}
                 </CardDescription>
               </CardHeader>
             </Card>
           </Link>
 
-          <Link to="/dashboard/whatsapp/control" className="group">
+          <Link to={`/dashboard/${platform}/control`} className="group">
             <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-blue-500 cursor-pointer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
@@ -149,7 +152,7 @@ export default function DashboardHome() {
             </Card>
           </Link>
 
-          <Link to="/dashboard/whatsapp/settings" className="group">
+          <Link to={`/dashboard/${platform}/settings`} className="group">
             <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-purple-500 cursor-pointer">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
@@ -159,6 +162,63 @@ export default function DashboardHome() {
                 <CardDescription>
                   Change AI provider (GPT, Gemini, Claude)
                 </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        </div>
+      </div>
+
+      {/* Global Tools Section */}
+      <div>
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <Package className="h-5 w-5 text-blue-500" />
+          Global Tools
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Link to={`/dashboard/${platform}/products`} className="group">
+            <Card className="h-full hover:shadow-md transition-all border-t-4 border-t-blue-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors text-base">
+                  <Package className="h-5 w-5" />
+                  Product Entry
+                </CardTitle>
+                <CardDescription>Manage your product inventory</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+          
+          <Link to={`/dashboard/${platform}/ads`} className="group">
+            <Card className="h-full hover:shadow-md transition-all border-t-4 border-t-orange-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors text-base">
+                  <Megaphone className="h-5 w-5" />
+                  Ads Library
+                </CardTitle>
+                <CardDescription>Manage your ad campaigns</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link to={`/dashboard/${platform}/reseller`} className="group">
+            <Card className="h-full hover:shadow-md transition-all border-t-4 border-t-purple-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors text-base">
+                  <Users className="h-5 w-5" />
+                  Reseller
+                </CardTitle>
+                <CardDescription>Manage reseller accounts</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link to={`/dashboard/${platform}/payment`} className="group">
+            <Card className="h-full hover:shadow-md transition-all border-t-4 border-t-green-500 cursor-pointer">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors text-base">
+                  <CreditCard className="h-5 w-5" />
+                  Payment / Topup
+                </CardTitle>
+                <CardDescription>Manage payments and billing</CardDescription>
               </CardHeader>
             </Card>
           </Link>
