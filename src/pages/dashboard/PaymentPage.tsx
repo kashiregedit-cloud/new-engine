@@ -435,8 +435,8 @@ export default function PaymentPage() {
                                 </div>
                             </TableCell>
                             <TableCell className="text-right">
-                                <span className="font-mono font-bold text-green-600">
-                                    +৳{txn.amount}
+                                <span className={`font-mono font-bold ${txn.method === 'plan_purchase' ? 'text-red-600' : 'text-green-600'}`}>
+                                    {txn.method === 'plan_purchase' ? '-' : '+'}৳{txn.amount}
                                 </span>
                             </TableCell>
                         </TableRow>

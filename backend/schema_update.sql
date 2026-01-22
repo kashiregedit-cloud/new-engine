@@ -43,9 +43,9 @@ CREATE TABLE IF NOT EXISTS public.payment_transactions (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   user_email text NOT NULL,
   amount numeric NOT NULL,
-  method text NOT NULL,
-  trx_id text NOT NULL,
-  sender_number text NOT NULL,
+  method text NOT NULL, -- 'bkash', 'nagad', 'manual', 'system' (for debits)
+  trx_id text NOT NULL, -- For debits, use generated ID
+  sender_number text NOT NULL, -- For debits, use 'System'
   status text NULL DEFAULT 'pending'::text,
   created_at timestamp with time zone NULL DEFAULT now()
 );
@@ -53,22 +53,22 @@ CREATE TABLE IF NOT EXISTS public.payment_transactions (
 -- RLS Policies (Optional but good practice)
 ALTER TABLE public.payment_transactions ENABLE ROW LEVEL SECURITY;
 
--- Allow users to view their own transactions
+DROP POLICY IF EXISTS "Users can view own transactions" ON public.payment_transactions;
 CREATE POLICY "Users can view own transactions" 
 ON public.payment_transactions FOR SELECT 
 USING (auth.email() = user_email);
 
--- Allow users to insert deposit requests
+DROP POLICY IF EXISTS "Users can insert deposit requests" ON public.payment_transactions;
 CREATE POLICY "Users can insert deposit requests" 
 ON public.payment_transactions FOR INSERT 
 WITH CHECK (true); 
 
--- Allow Admin (or anyone for now, since we have app_users protection on frontend) to view all transactions
--- WARNING: Ideally this should be restricted, but for this app's logic:
+DROP POLICY IF EXISTS "Allow public read for admin panel" ON public.payment_transactions;
 CREATE POLICY "Allow public read for admin panel"
 ON public.payment_transactions FOR SELECT
 USING (true);
 
+DROP POLICY IF EXISTS "Allow public update for admin panel" ON public.payment_transactions;
 CREATE POLICY "Allow public update for admin panel"
 ON public.payment_transactions FOR UPDATE
 USING (true);
@@ -154,13 +154,44 @@ $$;
 -- ==========================================
 ALTER TABLE public.user_configs ENABLE ROW LEVEL SECURITY;
 
--- Allow users to view their own config
--- We cast auth.uid() to text because user_configs.user_id is text
+DROP POLICY IF EXISTS "Users can view own config" ON public.user_configs;
 CREATE POLICY "Users can view own config" 
 ON public.user_configs FOR SELECT 
 USING (auth.uid()::text = user_id);
 
--- Allow users to update their own config (if needed)
+DROP POLICY IF EXISTS "Users can update own config" ON public.user_configs;
 CREATE POLICY "Users can update own config" 
 ON public.user_configs FOR UPDATE
 USING (auth.uid()::text = user_id);
+
+-- ==========================================
+--  6. WhatsApp Sessions Updates (Expiry)
+-- ==========================================
+ALTER TABLE public.whatsapp_sessions 
+ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone,
+ADD COLUMN IF NOT EXISTS plan_days integer DEFAULT 30;
+
+-- Ensure RLS allows insert/update/delete for backend (or users if needed)
+ALTER TABLE public.whatsapp_sessions ENABLE ROW LEVEL SECURITY;
+
+-- Allow users to view their own sessions
+DROP POLICY IF EXISTS "Users can view own sessions" ON public.whatsapp_sessions;
+CREATE POLICY "Users can view own sessions" 
+ON public.whatsapp_sessions FOR SELECT 
+USING (auth.uid()::text = user_id OR auth.email() = user_email);
+
+-- Allow users/backend to insert/update their own sessions
+DROP POLICY IF EXISTS "Users can insert own sessions" ON public.whatsapp_sessions;
+CREATE POLICY "Users can insert own sessions" 
+ON public.whatsapp_sessions FOR INSERT 
+WITH CHECK (auth.uid()::text = user_id OR auth.email() = user_email);
+
+DROP POLICY IF EXISTS "Users can update own sessions" ON public.whatsapp_sessions;
+CREATE POLICY "Users can update own sessions" 
+ON public.whatsapp_sessions FOR UPDATE
+USING (auth.uid()::text = user_id OR auth.email() = user_email);
+
+DROP POLICY IF EXISTS "Users can delete own sessions" ON public.whatsapp_sessions;
+CREATE POLICY "Users can delete own sessions" 
+ON public.whatsapp_sessions FOR DELETE
+USING (auth.uid()::text = user_id OR auth.email() = user_email);

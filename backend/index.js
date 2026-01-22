@@ -213,10 +213,18 @@ app.get('/session/qr/:sessionName', async (req, res) => {
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
   console.log('Received /session/create request body:', req.body); // LOG REQUEST BODY
-  let { sessionName, userEmail, userId } = req.body;
+  let { sessionName, userEmail, userId, planDays } = req.body;
   
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
 
+  // Default plan if not provided (fallback)
+  const days = planDays ? parseInt(planDays) : 30;
+  
+  // Pricing Logic
+  let price = 500;
+  if (days === 60) price = 900;
+  if (days === 90) price = 800;
+  
   // Create a scoped Supabase client if authorization header is provided
   // Use ANON KEY for scoped client to respect RLS policies
   const authHeader = req.headers.authorization;
@@ -278,7 +286,7 @@ app.post('/session/create', async (req, res) => {
   }
 
   // --- PRICING LOGIC ---
-  const SESSION_PRICE = 500;
+  const SESSION_PRICE = price;
   
   if (userId) {
       // Check balance
@@ -313,6 +321,16 @@ app.post('/session/create', async (req, res) => {
           return res.status(500).json({ error: 'Failed to process payment' });
       }
       
+      // Log Transaction
+      await supabase.from('payment_transactions').insert({
+          user_email: userEmail,
+          amount: SESSION_PRICE, // Positive amount, method indicates deduction
+          method: 'plan_purchase',
+          status: 'completed',
+          trx_id: `PLAN-${days}D-${Date.now()}`,
+          sender_number: 'System'
+      });
+      
       console.log(`Deducted ${SESSION_PRICE} BDT from user ${userId}. New Balance: ${currentBalance - SESSION_PRICE}`);
   } else {
       console.warn('Skipping payment check for unknown user (email-only auth).');
@@ -329,7 +347,10 @@ app.post('/session/create', async (req, res) => {
       name: sessionName,
       start: true, // Auto-start session immediately
       config: {
-        metadata: {},
+        metadata: {
+            "user_email": userEmail,
+            "plan_days": days
+        },
         debug: false,
         noweb: {
           markOnline: true,
@@ -418,6 +439,10 @@ app.post('/session/create', async (req, res) => {
     // 2. Save to DB (Create User/Session Row)
     // Now we insert EVERYTHING at once (session + qr)
     const finalSessionId = data.id || sessionName;
+    
+    // Calculate Expiry
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
 
     try {
         const payload = {
@@ -427,7 +452,9 @@ app.post('/session/create', async (req, res) => {
             user_id: userId || null,       // Explicitly set even if null
             status: 'created',
           qr_code: qrDataUri,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          expires_at: expiresAt.toISOString(),
+          plan_days: days
       };
         console.log('Upserting to DB:', payload);
 

@@ -419,7 +419,36 @@ export default function IntegrationPage() {
       </div>
       
       {/* Controls Bar */}
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-end md:items-center bg-card p-4 rounded-lg border">
+      <div className="flex flex-col gap-4 bg-card p-4 rounded-lg border">
+         {/* Plan Selection */}
+         <div className="w-full">
+            <Label className="mb-2 block">Select Plan</Label>
+            <div className="flex flex-wrap gap-4">
+                <div 
+                  className={`border p-3 rounded-lg cursor-pointer transition-colors ${selectedPlan === "30" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                  onClick={() => setSelectedPlan("30")}
+                >
+                    <div className="font-bold">30 Days</div>
+                    <div className="text-sm text-gray-500">500 BDT</div>
+                </div>
+                <div 
+                  className={`border p-3 rounded-lg cursor-pointer transition-colors ${selectedPlan === "60" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                  onClick={() => setSelectedPlan("60")}
+                >
+                    <div className="font-bold">60 Days</div>
+                    <div className="text-sm text-gray-500">900 BDT</div>
+                </div>
+                <div 
+                  className={`border p-3 rounded-lg cursor-pointer transition-colors ${selectedPlan === "90" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                  onClick={() => setSelectedPlan("90")}
+                >
+                    <div className="font-bold">90 Days</div>
+                    <div className="text-sm text-gray-500">800 BDT</div>
+                </div>
+            </div>
+         </div>
+
+        <div className="flex flex-col md:flex-row gap-4 justify-between items-end md:items-center">
         {/* Create Session Form */}
         <div className="flex gap-2 w-full md:w-auto items-end">
              <div className="grid w-full max-w-sm items-center gap-1.5">
@@ -447,6 +476,7 @@ export default function IntegrationPage() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+        </div>
         </div>
       </div>
 
