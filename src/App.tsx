@@ -42,6 +42,13 @@ const App = () => (
             <Route index element={<PlatformSelection />} />
             <Route path="abcadmin" element={<AdminPage />} />
             
+            {/* Global Tools Routes (Direct access) */}
+            <Route path="products" element={<ProductsPage />} />
+            <Route path="ads" element={<AdsPage />} />
+            <Route path="reseller" element={<ResellerPage />} />
+            <Route path="payment" element={<PaymentPage />} />
+            <Route path="profile" element={<ProfilePage />} />
+
             {/* Platform Specific Routes */}
             <Route path=":platform" element={<Outlet />}>
               <Route index element={<DashboardHome />} />

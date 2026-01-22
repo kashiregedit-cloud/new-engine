@@ -33,14 +33,22 @@ export function DashboardSidebar() {
   const platform = ['whatsapp', 'messenger', 'instagram'].includes(pathParts[2]) ? pathParts[2] : null;
 
   const getMenuItems = () => {
+    // Define Global Tools
+    const globalTools = [
+      { title: "Product Entry", icon: Package, path: platform ? `/dashboard/${platform}/products` : "/dashboard/products" },
+      { title: "Ads Library", icon: Megaphone, path: platform ? `/dashboard/${platform}/ads` : "/dashboard/ads" },
+      { title: "Reseller", icon: Users, path: platform ? `/dashboard/${platform}/reseller` : "/dashboard/reseller" },
+      { title: "Payment / Topup", icon: CreditCard, path: platform ? `/dashboard/${platform}/payment` : "/dashboard/payment" },
+    ];
+
     if (!platform) {
       return {
         switchItem: null,
-        platformItems: [
-          { title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" },
-          { title: "Profile", icon: User, path: "/dashboard/profile" },
-        ],
-        fixedItems: []
+        sections: [
+          { title: null, items: [{ title: "Select Platform", icon: LayoutDashboard, path: "/dashboard" }] },
+          { title: "Global Tools", items: globalTools },
+          { title: null, items: [{ title: "Profile", icon: User, path: "/dashboard/profile" }] }
+        ]
       };
     }
 
@@ -58,18 +66,16 @@ export function DashboardSidebar() {
       platformItems.push({ title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
     }
 
-    // Fixed / Common Sections (Always visible)
-    const fixedItems = [
-      { title: "Product Entry", icon: Package, path: `${base}/products` },
-      { title: "Ads Library", icon: Megaphone, path: `${base}/ads` },
-      { title: "Reseller", icon: Users, path: `${base}/reseller` },
-      { title: "Payment / Topup", icon: CreditCard, path: `${base}/payment` },
-      { title: "Profile", icon: User, path: `${base}/profile` },
-    ];
-
     const switchItem = { title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" };
 
-    return { switchItem, platformItems, fixedItems };
+    return {
+      switchItem,
+      sections: [
+        { title: "Global Tools", items: globalTools },
+        { title: "Platform Menu", items: platformItems },
+        { title: null, items: [{ title: "Profile", icon: User, path: `${base}/profile` }] }
+      ]
+    };
   };
 
   const menu = getMenuItems();
@@ -137,45 +143,19 @@ export function DashboardSidebar() {
             </li>
           )}
 
-          {/* Platform Specific Items */}
-          {menu.platformItems && menu.platformItems.length > 0 && (
-             <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-4">
-               {!collapsed && "Platform Menu"}
-             </div>
-          )}
-          
-          {menu.platformItems && menu.platformItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <li key={item.path}>
-                <Link
-                  to={item.path}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
-                    isActive
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  )}
-                >
-                  <item.icon size={20} className="shrink-0" />
-                  {!collapsed && (
-                    <span className="text-sm font-medium">{item.title}</span>
-                  )}
-                </Link>
-              </li>
-            );
-          })}
-
-          {menu.fixedItems && menu.fixedItems.length > 0 && (
-            <>
-               <div className="my-2 border-t border-sidebar-border/50 mx-2" />
-               <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-2">
-                 {!collapsed && "Global Tools"}
-               </div>
-               {menu.fixedItems.map((item) => {
+          {/* Sections */}
+          {menu.sections.map((section, sectionIndex) => (
+            <div key={sectionIndex}>
+              {section.title && (
+                 <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-4">
+                   {!collapsed && section.title}
+                 </div>
+              )}
+              
+              {section.items.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
-                  <li key={item.path}>
+                  <li key={item.path} className="mb-1">
                     <Link
                       to={item.path}
                       className={cn(
@@ -193,8 +173,13 @@ export function DashboardSidebar() {
                   </li>
                 );
               })}
-            </>
-          )}
+              
+              {/* Separator between sections */}
+              {sectionIndex < menu.sections.length - 1 && (
+                 <div className="my-2 border-t border-sidebar-border/50 mx-2" />
+              )}
+            </div>
+          ))}
         </ul>
       </nav>
 

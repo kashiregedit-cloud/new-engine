@@ -75,8 +75,25 @@ export default function IntegrationPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
+
+  const fetchBalance = React.useCallback(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data, error } = await supabase
+        .from('user_configs')
+        .select('balance')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (data) {
+          setBalance(data.balance);
+      }
+  }, []);
 
   const fetchSessions = React.useCallback(async () => {
      setLoading(true);
@@ -107,8 +124,9 @@ export default function IntegrationPage() {
   useEffect(() => {
     if (platform === 'whatsapp') {
       fetchSessions();
+      fetchBalance();
     }
-  }, [platform, fetchSessions]);
+  }, [platform, fetchSessions, fetchBalance]);
 
   // Sync qrSession with sessions list when it updates
   useEffect(() => {
@@ -135,14 +153,16 @@ export default function IntegrationPage() {
 
   const handleStartNew = (e: React.MouseEvent) => {
     e.preventDefault(); // Prevent any form submission
-    createSession();
-  };
-
-  const createSession = async () => {
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
+    setShowPaymentConfirm(true);
+  };
+
+  const createSession = async () => {
+    // Check moved to handleStartNew, but safe to keep basic check
+    if (!newSessionName.trim()) return;
 
     setCreating(true);
     try {
@@ -206,7 +226,8 @@ export default function IntegrationPage() {
           setQrSession(newSession);
       }
 
-      fetchSessions(); 
+      fetchSessions();
+      fetchBalance(); // Update balance after deduction
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(message);
@@ -301,8 +322,13 @@ export default function IntegrationPage() {
            <h1 className="text-2xl font-bold">WhatsApp Sessions</h1>
            <p className="text-muted-foreground">Manage your WhatsApp connections and sessions.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchSessions} disabled={loading}>
+        <div className="flex gap-2 items-center">
+          {balance !== null && (
+              <Badge variant="outline" className="text-base px-3 py-1 border-green-200 bg-green-50 text-green-700">
+                  Balance: {balance} BDT
+              </Badge>
+          )}
+          <Button variant="outline" onClick={() => { fetchSessions(); fetchBalance(); }} disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
@@ -513,6 +539,34 @@ export default function IntegrationPage() {
               setSessionToDelete(null);
             }}>
               Confirm & Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showPaymentConfirm} onOpenChange={setShowPaymentConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
+            <AlertDialogDescription>
+              Creating a new session will deduct <strong>500 BDT</strong> from your account balance.
+              <br /><br />
+              {balance !== null && (
+                  <div className="mb-2 p-2 bg-muted rounded text-sm">
+                      Current Balance: <strong>{balance} BDT</strong><br/>
+                      After Deduction: <strong>{balance - 500} BDT</strong>
+                  </div>
+              )}
+              Are you sure you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowPaymentConfirm(false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              setShowPaymentConfirm(false);
+              createSession();
+            }}>
+              Confirm & Pay 500 BDT
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -277,9 +277,46 @@ app.post('/session/create', async (req, res) => {
       console.warn('Warning: userId missing. Proceeding with email only as per user request.');
   }
 
-  // --- PRICING LOGIC REMOVED ---
-  // const SESSION_PRICE = 500;
-  // ... (Balance deduction logic commented out)
+  // --- PRICING LOGIC ---
+  const SESSION_PRICE = 500;
+  
+  if (userId) {
+      // Check balance
+      const { data: userConfig, error: configError } = await supabase
+        .from('user_configs')
+        .select('balance')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (configError) {
+          console.error('Balance check error:', configError);
+          // Optional: Fail safe or strict? Let's be strict for payments.
+          return res.status(500).json({ error: 'Failed to check balance' });
+      }
+
+      const currentBalance = userConfig?.balance || 0;
+
+      if (currentBalance < SESSION_PRICE) {
+          return res.status(402).json({ 
+              error: `Insufficient balance. Required: ${SESSION_PRICE} BDT, Available: ${currentBalance} BDT` 
+          });
+      }
+
+      // Deduct balance
+      const { error: deductionError } = await supabase
+        .from('user_configs')
+        .update({ balance: currentBalance - SESSION_PRICE })
+        .eq('user_id', userId);
+
+      if (deductionError) {
+          console.error('Balance deduction error:', deductionError);
+          return res.status(500).json({ error: 'Failed to process payment' });
+      }
+      
+      console.log(`Deducted ${SESSION_PRICE} BDT from user ${userId}. New Balance: ${currentBalance - SESSION_PRICE}`);
+  } else {
+      console.warn('Skipping payment check for unknown user (email-only auth).');
+  }
   // ---------------------
 
   try {
