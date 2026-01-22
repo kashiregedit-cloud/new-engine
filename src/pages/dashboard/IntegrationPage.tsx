@@ -50,63 +50,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-// Internal Custom Alert Component to bypass library issues
-const CustomAlert = ({ 
-  open, 
-  title, 
-  message, 
-  onConfirm, 
-  onCancel, 
-  confirmText = "Yes", 
-  cancelText = "No",
-  type = 'warning' 
-}: {
-  open: boolean;
-  title: string;
-  message: React.ReactNode;
-  onConfirm: () => void;
-  onCancel: () => void;
-  confirmText?: string;
-  cancelText?: string;
-  type?: 'warning' | 'info';
-}) => {
-  if (!open) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
-       <div className="bg-white rounded-lg shadow-2xl w-[90%] max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border-0 relative z-[100000]">
-          <div className={`${type === 'warning' ? 'bg-[#ff5f5f]' : 'bg-blue-500'} p-6 flex justify-center items-center`}>
-             <div className="bg-white rounded-full p-3 shadow-sm">
-                {type === 'warning' ? (
-                   <div className="text-[#ff5f5f] font-bold text-2xl h-8 w-8 flex items-center justify-center">!</div>
-                ) : (
-                   <div className="text-blue-500 font-bold text-2xl h-8 w-8 flex items-center justify-center">i</div>
-                )}
-             </div>
-          </div>
-          <div className="p-6 text-center">
-             <h3 className="text-2xl font-bold text-gray-700 mb-2 uppercase tracking-wide">{title}</h3>
-             <div className="text-gray-500 mb-8 text-sm leading-relaxed">{message}</div>
-             <div className="flex gap-4 justify-center">
-                <button 
-                  onClick={onConfirm} 
-                  className={`flex-1 py-2.5 px-4 rounded font-semibold text-white shadow-md transition-transform active:scale-95 ${type === 'warning' ? 'bg-[#ff5f5f] hover:bg-[#ff4f4f]' : 'bg-blue-500 hover:bg-blue-600'}`}
-                >
-                  {confirmText}
-                </button>
-                <button 
-                  onClick={onCancel} 
-                  className="flex-1 py-2.5 px-4 rounded font-semibold text-gray-600 bg-gray-200 hover:bg-gray-300 shadow-sm transition-transform active:scale-95"
-                >
-                  {cancelText}
-                </button>
-             </div>
-          </div>
-       </div>
-    </div>,
-    document.body
-  );
-};
+// CustomAlert Removed
 
 interface WhatsAppSession {
   id: string;
@@ -127,9 +71,6 @@ export default function IntegrationPage() {
   const [creating, setCreating] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
-  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("30");
@@ -302,6 +243,11 @@ export default function IntegrationPage() {
   };
 
   const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
+    if (action === 'delete') {
+      const confirmed = window.confirm("Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete.");
+      if (!confirmed) return;
+    }
+
     try {
       let { data: { session } } = await supabase.auth.getSession();
       
@@ -316,9 +262,6 @@ export default function IntegrationPage() {
       }
 
       if (action === 'delete') {
-      const confirmed = window.confirm("Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete.");
-      if (!confirmed) return;
-
       // Don't wait for response, just optimistic update immediately
       setSessions(prev => prev.filter(s => s.session_name !== sessionName));
       
@@ -568,17 +511,7 @@ export default function IntegrationPage() {
                         </Tooltip>
                     </TooltipProvider>
                     
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        // Direct Browser Confirmation (Guaranteed to work)
-                        const confirmed = window.confirm(`WARNING!\n\nAre you sure you want to delete session "${session.session_name}"?\n\nThis action is PERMANENT.`);
-                        
-                        if (confirmed) {
-                             handleAction(session.session_name, 'delete');
-                        }
-                    }}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleAction(session.session_name, 'delete')}>
                         <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -633,52 +566,7 @@ export default function IntegrationPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog - REPLACED WITH CUSTOM POPUP */}
-      <CustomAlert 
-        open={showDeleteConfirm}
-        title="WARNING!"
-        message={
-          <>
-            Are you sure you want to delete this session? <br/>
-            This action is permanent.
-          </>
-        }
-        onConfirm={() => {
-          if (sessionToDelete) {
-              handleAction(sessionToDelete, 'delete');
-          }
-          setShowDeleteConfirm(false);
-          setSessionToDelete(null);
-        }}
-        onCancel={() => {
-            setShowDeleteConfirm(false);
-            setSessionToDelete(null);
-        }}
-      />
 
-      {/* Payment Confirmation Dialog - REPLACED WITH CUSTOM POPUP */}
-      <CustomAlert 
-        open={showPaymentConfirm}
-        title="Confirm Payment"
-        type="info"
-        message={
-          <>
-            Creating a new session will deduct <strong>500 BDT</strong>.
-            <br />
-            {balance !== null && (
-                <span className="block mt-2 text-xs bg-gray-100 p-2 rounded">
-                    Current: <strong>{balance} BDT</strong> → After: <strong>{balance - 500} BDT</strong>
-                </span>
-            )}
-          </>
-        }
-        confirmText="Confirm & Pay"
-        onConfirm={() => {
-          setShowPaymentConfirm(false);
-          createSession();
-        }}
-        onCancel={() => setShowPaymentConfirm(false)}
-      />
     </div>
   );
 }
