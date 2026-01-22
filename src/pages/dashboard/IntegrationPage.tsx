@@ -132,6 +132,7 @@ export default function IntegrationPage() {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState("30");
 
   const fetchBalance = React.useCallback(async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -209,25 +210,24 @@ export default function IntegrationPage() {
 
 
 
-  const handleStartNew = (e: React.MouseEvent) => {
-    e.preventDefault(); 
-    
+  const handleStartNew = async (e: React.MouseEvent) => {
+    e.preventDefault();
+
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
 
-    // Direct Browser Confirmation (Guaranteed to work)
-    const confirmed = window.confirm(`Confirm Payment?\n\nCreating a new session will deduct 500 BDT.\n\nCurrent Balance: ${balance || 0} BDT\nAfter Deduction: ${(balance || 0) - 500} BDT\n\nPress OK to Pay & Create.`);
-    
-    if (confirmed) {
-        createSession();
-    }
-  };
+    // Determine price based on plan
+    let price = 500;
+    if (selectedPlan === "60") price = 900;
+    if (selectedPlan === "90") price = 800;
 
-  const createSession = async () => {
-    // Check moved to handleStartNew, but safe to keep basic check
-    if (!newSessionName.trim()) return;
+    // Confirm Popup
+    const confirmed = window.confirm(
+        `Confirm Payment?\n\nPlan: ${selectedPlan} Days\nPrice: ${price} BDT\n\nBalance will be deducted. Press OK to Pay & Create.`
+    );
+    if (!confirmed) return;
 
     setCreating(true);
     try {
@@ -242,11 +242,10 @@ export default function IntegrationPage() {
         }
         session = refreshData.session;
       }
-
-      // Re-fetch user after potential refresh
+      
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const user = authUser || session.user; // Fallback to session user if getUser fails
-      
+
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
       // Generate random suffix for unique session name (6 chars)
@@ -256,7 +255,8 @@ export default function IntegrationPage() {
       const payload = { 
         sessionName: finalSessionName, 
         userEmail: user.email, 
-        userId: user.id
+        userId: user.id,
+        planDays: selectedPlan // Send plan days to backend
       };
       console.log("Sending payload to /session/create:", payload);
 
@@ -316,6 +316,9 @@ export default function IntegrationPage() {
       }
 
       if (action === 'delete') {
+      const confirmed = window.confirm("Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete.");
+      if (!confirmed) return;
+
       // Don't wait for response, just optimistic update immediately
       setSessions(prev => prev.filter(s => s.session_name !== sessionName));
       
