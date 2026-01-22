@@ -302,6 +302,7 @@ app.post('/session/create', async (req, res) => {
 
   // --- PRICING LOGIC ---
   const SESSION_PRICE = price;
+  let currentBalance = 0;
   
   if (userId) {
       // Check balance
@@ -313,11 +314,10 @@ app.post('/session/create', async (req, res) => {
 
       if (configError) {
           console.error('Balance check error:', configError);
-          // Optional: Fail safe or strict? Let's be strict for payments.
           return res.status(500).json({ error: 'Failed to check balance' });
       }
 
-      const currentBalance = userConfig?.balance || 0;
+      currentBalance = userConfig?.balance || 0;
 
       if (currentBalance < SESSION_PRICE) {
           return res.status(402).json({ 
@@ -336,10 +336,10 @@ app.post('/session/create', async (req, res) => {
           return res.status(500).json({ error: 'Failed to process payment' });
       }
       
-      // Log Transaction
+      // Log Transaction (Pending/Completed)
       await supabase.from('payment_transactions').insert({
           user_email: userEmail,
-          amount: SESSION_PRICE, // Positive amount, method indicates deduction
+          amount: SESSION_PRICE,
           method: 'plan_purchase',
           status: 'completed',
           trx_id: `PLAN-${days}D-${Date.now()}`,
@@ -347,8 +347,6 @@ app.post('/session/create', async (req, res) => {
       });
       
       console.log(`Deducted ${SESSION_PRICE} BDT from user ${userId}. New Balance: ${currentBalance - SESSION_PRICE}`);
-  } else {
-      console.warn('Skipping payment check for unknown user (email-only auth).');
   }
   // ---------------------
 
@@ -395,7 +393,7 @@ app.post('/session/create', async (req, res) => {
         ],
         client: {
           deviceName: "salesmanchatbot.online || wp : +880195687140.",
-          browserName: "Chrome" // Changed to Chrome for better compatibility
+          browserName: "Chrome"
         }
       }
     };
@@ -404,7 +402,30 @@ app.post('/session/create', async (req, res) => {
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
     const data = await response.json();
 
-    if (!response.ok) return res.status(response.status).json(data);
+    if (!response.ok) {
+        console.error('WAHA Creation Failed:', data);
+        
+        // --- REFUND LOGIC ---
+        if (userId) {
+            console.log(`Refunding ${SESSION_PRICE} BDT to user ${userId} due to failure...`);
+            await supabase
+                .from('user_configs')
+                .update({ balance: currentBalance }) // Restore original balance
+                .eq('user_id', userId);
+                
+            await supabase.from('payment_transactions').insert({
+                user_email: userEmail,
+                amount: SESSION_PRICE,
+                method: 'refund',
+                status: 'completed',
+                trx_id: `REFUND-${Date.now()}`,
+                sender_number: 'System'
+            });
+        }
+        // --------------------
+        
+        return res.status(response.status).json(data);
+    }
 
     // 1.5. Ensure Session is Started (Fix for STOPPED status)
     if (data.status === 'STOPPED') {

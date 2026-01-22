@@ -104,7 +104,9 @@ export default function SessionManager() {
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
       const suffix = Math.random().toString(36).substring(2, 8);
-      const finalSessionName = `${newSessionName.trim()}_${suffix}`;
+      // Sanitize session name: remove spaces, special chars
+      const sanitizedName = newSessionName.trim().replace(/[^a-zA-Z0-9]/g, '_');
+      const finalSessionName = `${sanitizedName}_${suffix}`;
 
       const payload = { 
         sessionName: finalSessionName,
@@ -269,15 +271,18 @@ export default function SessionManager() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {/* New Session Trigger Card */}
-        <Card className="border-dashed border-2 border-slate-200 hover:border-green-500 hover:bg-green-50/10 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center min-h-[300px] group shadow-sm hover:shadow-md" onClick={() => setShowCreateModal(true)}>
-          <CardContent className="flex flex-col items-center gap-4 py-10">
-              <div className="p-4 rounded-full bg-green-50 group-hover:bg-green-100 transition-colors">
-                <Plus className="h-8 w-8 text-green-600" />
+        <Card className="border-dashed border-2 border-slate-300 hover:border-green-600 hover:bg-green-50 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center min-h-[300px] group shadow-sm hover:shadow-xl bg-white/50" onClick={() => setShowCreateModal(true)}>
+          <CardContent className="flex flex-col items-center gap-6 py-10">
+              <div className="p-5 rounded-full bg-green-100 group-hover:bg-green-600 transition-colors duration-300 shadow-sm">
+                <Plus className="h-10 w-10 text-green-600 group-hover:text-white transition-colors duration-300" />
               </div>
-              <div className="text-center">
-                <h3 className="font-semibold text-lg text-slate-900">Create New Session</h3>
-                <p className="text-sm text-muted-foreground mt-1">Add a new WhatsApp connection</p>
+              <div className="text-center space-y-2">
+                <h3 className="font-bold text-xl text-slate-800 group-hover:text-green-700 transition-colors">Add WhatsApp Connection</h3>
+                <p className="text-sm text-muted-foreground px-4">Click here to configure a new WhatsApp session with our premium engines.</p>
               </div>
+              <Button variant="ghost" className="mt-2 text-green-700 font-medium group-hover:bg-green-100">
+                  Get Started
+              </Button>
           </CardContent>
         </Card>
 
@@ -337,38 +342,43 @@ export default function SessionManager() {
 
       {/* CREATE SESSION MODAL */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Create New WhatsApp Session</DialogTitle>
-            <DialogDescription>
-              Configure your engine and subscription plan.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-[600px] bg-white shadow-2xl border-0 rounded-2xl overflow-hidden p-0 gap-0">
+          <div className="bg-slate-900 text-white p-6">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                 <Zap className="h-6 w-6 text-green-400" />
+                 Create New Session
+              </DialogTitle>
+              <DialogDescription className="text-slate-300">
+                Configure your engine and subscription plan to start automating.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
           
-          <div className="grid gap-6 py-4">
+          <div className="grid gap-6 p-6">
             {/* Engine Selection */}
             <div className="space-y-3">
-                <Label>Select Engine</Label>
+                <Label className="text-base font-semibold text-slate-700">Select Engine</Label>
                 <Tabs defaultValue="WEBJS" onValueChange={(v) => setSelectedEngine(v as any)} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="WEBJS" className="flex gap-2">
+                    <TabsList className="grid w-full grid-cols-2 p-1 bg-slate-100 rounded-xl h-12">
+                        <TabsTrigger value="WEBJS" className="flex gap-2 data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm rounded-lg h-10 transition-all">
                             <Zap className="w-4 h-4" /> WEBJS (Premium)
                         </TabsTrigger>
-                        <TabsTrigger value="NOWEB" className="flex gap-2">
+                        <TabsTrigger value="NOWEB" className="flex gap-2 data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm rounded-lg h-10 transition-all">
                             <Server className="w-4 h-4" /> NOWAB (Lite)
                         </TabsTrigger>
                     </TabsList>
                 </Tabs>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
                     {selectedEngine === "WEBJS" 
-                        ? "High performance, full browser simulation. Best for heavy usage." 
-                        : "Lightweight, stable connection. Good for standard usage."}
+                        ? "🚀 High performance, full browser simulation. Supports all features including heavy media." 
+                        : "⚡ Lightweight, stable connection via WebSocket. Best for simple text/image automation."}
                 </p>
             </div>
 
             {/* Plan Selection */}
             <div className="space-y-3">
-                <Label>Select Duration</Label>
+                <Label className="text-base font-semibold text-slate-700">Select Duration</Label>
                 <div className="grid grid-cols-3 gap-3">
                     {["30", "60", "90"].map((plan) => {
                         const isSelected = selectedPlan === plan;
@@ -380,12 +390,14 @@ export default function SessionManager() {
                             <div 
                                 key={plan}
                                 onClick={() => setSelectedPlan(plan)}
-                                className={`cursor-pointer rounded-lg border-2 p-4 text-center transition-all hover:border-green-500 ${
-                                    isSelected ? "border-green-600 bg-green-50" : "border-muted"
+                                className={`cursor-pointer rounded-xl border-2 p-3 text-center transition-all duration-200 hover:scale-[1.02] ${
+                                    isSelected 
+                                    ? "border-green-600 bg-green-50 shadow-md ring-1 ring-green-600" 
+                                    : "border-slate-200 hover:border-green-300 hover:bg-slate-50"
                                 }`}
                             >
-                                <div className="text-lg font-bold">{plan} Days</div>
-                                <div className="text-sm text-muted-foreground">{price} BDT</div>
+                                <div className="text-lg font-bold text-slate-800">{plan} Days</div>
+                                <div className="text-sm font-medium text-green-700">{price} BDT</div>
                             </div>
                         );
                     })}
@@ -394,60 +406,68 @@ export default function SessionManager() {
 
             {/* Session Name */}
             <div className="space-y-2">
-                <Label>Session Name</Label>
+                <Label className="text-base font-semibold text-slate-700">Session Name</Label>
                 <Input 
                     placeholder="e.g. Support Bot 1" 
                     value={newSessionName}
                     onChange={(e) => setNewSessionName(e.target.value)}
+                    className="h-11 border-slate-300 focus:border-green-500 focus:ring-green-500 rounded-lg"
                 />
             </div>
 
             {/* Total Price */}
-            <div className="flex items-center justify-between rounded-lg border p-4 bg-slate-50">
+            <div className="flex items-center justify-between rounded-xl border border-green-200 p-5 bg-green-50/50">
                 <div className="flex flex-col">
-                    <span className="text-sm font-medium">Total Cost</span>
-                    <span className="text-xs text-muted-foreground">Deducted from balance</span>
+                    <span className="text-sm font-semibold text-slate-700">Total Cost</span>
+                    <span className="text-xs text-slate-500">Deducted from your balance</span>
                 </div>
-                <div className="text-2xl font-bold text-green-700">
-                    {getPrice()} BDT
+                <div className="text-3xl font-black text-green-700">
+                    {getPrice()} <span className="text-sm font-medium text-green-600">BDT</span>
                 </div>
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>Cancel</Button>
-            <Button onClick={handleCreateSession} disabled={isCreating} className="bg-green-600 hover:bg-green-700">
-                {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Pay & Create"}
+          <div className="p-6 bg-slate-50 border-t flex justify-end gap-3">
+            <Button variant="outline" size="lg" onClick={() => setShowCreateModal(false)} className="border-slate-300 hover:bg-slate-100">Cancel</Button>
+            <Button size="lg" onClick={handleCreateSession} disabled={isCreating} className="bg-slate-900 hover:bg-slate-800 text-white min-w-[150px]">
+                {isCreating ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Pay & Create"}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* DELETE CONFIRMATION MODAL */}
       <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="text-red-600 flex items-center gap-2">
-                <Trash2 className="h-5 w-5" /> Delete Session?
-            </DialogTitle>
-            <DialogDescription className="pt-2">
-              Are you sure you want to delete <strong>{sessionToDelete}</strong>? 
+        <DialogContent className="sm:max-w-[425px] bg-white shadow-2xl border-0 rounded-2xl overflow-hidden p-0 gap-0">
+          <div className="bg-red-50 p-6 border-b border-red-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-red-700 flex items-center gap-2">
+                  <Trash2 className="h-6 w-6" /> Delete Session?
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+          
+          <div className="p-6">
+            <DialogDescription className="text-base text-slate-600">
+              Are you sure you want to delete <strong className="text-slate-900 bg-slate-100 px-2 py-0.5 rounded">{sessionToDelete}</strong>? 
               <br /><br />
-              This action cannot be undone. It will disconnect the WhatsApp session and remove all associated data.
+              This action cannot be undone. It will disconnect the WhatsApp session and remove all associated data immediately.
             </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={isDeleting}>
+          </div>
+
+          <div className="p-6 bg-slate-50 border-t flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={isDeleting} className="border-slate-300 hover:bg-white">
                 Cancel
             </Button>
             <Button 
                 variant="destructive" 
                 onClick={() => sessionToDelete && executeAction('delete', sessionToDelete)}
                 disabled={isDeleting}
+                className="bg-red-600 hover:bg-red-700 min-w-[120px]"
             >
                 {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Delete Session"}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
