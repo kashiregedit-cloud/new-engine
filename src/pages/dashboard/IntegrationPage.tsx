@@ -475,20 +475,15 @@ export default function IntegrationPage() {
                         </Tooltip>
                     </TooltipProvider>
                     
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSessionToDelete(session.session_name);
-                                    setShowDeleteConfirm(true);
-                                }}>
-                                    <Trash2 className="h-4 w-4 text-gray-500" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Delete Session</TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log("Delete clicked for:", session.session_name);
+                        setSessionToDelete(session.session_name);
+                        setShowDeleteConfirm(true);
+                    }}>
+                        <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
               </div>
             </Card>
