@@ -213,18 +213,30 @@ app.get('/session/qr/:sessionName', async (req, res) => {
 // 1. Session Management API (Automatic Setup)
 app.post('/session/create', async (req, res) => {
   console.log('Received /session/create request body:', req.body); // LOG REQUEST BODY
-  let { sessionName, userEmail, userId, planDays } = req.body;
+  let { sessionName, userEmail, userId, planDays, engine } = req.body;
   
   if (!sessionName) return res.status(400).json({ error: 'sessionName is required' });
 
-  // Default plan if not provided (fallback)
+  // Default values
   const days = planDays ? parseInt(planDays) : 30;
+  const selectedEngine = engine || 'NOWEB'; // Default to NOWEB (NOWAB) if not specified
   
   // Pricing Logic
-  let price = 500;
-  if (days === 60) price = 900;
-  if (days === 90) price = 800;
+  let price = 0;
+  if (selectedEngine === 'WEBJS') {
+      if (days === 30) price = 2000;
+      if (days === 60) price = 3500;
+      if (days === 90) price = 4000;
+  } else {
+      // NOWAB / NOWEB (Default)
+      if (days === 30) price = 500;
+      if (days === 60) price = 900;
+      if (days === 90) price = 1500;
+  }
   
+  // Fallback if price is 0 (invalid days)
+  if (price === 0) price = (selectedEngine === 'WEBJS') ? 2000 : 500;
+
   // Create a scoped Supabase client if authorization header is provided
   // Use ANON KEY for scoped client to respect RLS policies
   const authHeader = req.headers.authorization;
@@ -652,10 +664,17 @@ app.post('/session/delete', async (req, res) => {
     if (!response.ok && response.status !== 404) {
         console.error(`WAHA Delete Failed (${response.status}):`, wahaData);
         // We continue to DB delete...
+    } else {
+        console.log(`WAHA Session ${sessionName} deleted successfully (or not found).`);
     }
 
-    await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
+    const { error: dbError } = await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
     
+    if (dbError) {
+        console.error('DB Delete Error:', dbError);
+        throw new Error('Failed to delete from database');
+    }
+
     res.json({ success: true, message: "Session deleted from DB (and WAHA if available)" });
   } catch (error) {
     console.error('Delete Session Error:', error);
@@ -840,6 +859,63 @@ app.get('/stats/total-sessions', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
+
+// --- Auto-Delete Expired Sessions ---
+async function checkExpiredSessions() {
+  console.log('Checking for expired sessions...');
+  try {
+    const now = new Date().toISOString();
+    const { data: expiredSessions, error } = await supabase
+      .from('whatsapp_sessions')
+      .select('*')
+      .lt('expires_at', now);
+
+    if (error) {
+      console.error('Error fetching expired sessions:', error);
+      return;
+    }
+
+    if (!expiredSessions || expiredSessions.length === 0) {
+      console.log('No expired sessions found.');
+      return;
+    }
+
+    console.log(`Found ${expiredSessions.length} expired sessions. Deleting...`);
+
+    for (const session of expiredSessions) {
+      const sessionName = session.session_name;
+      console.log(`Deleting expired session: ${sessionName}`);
+
+      // 1. Delete from WAHA
+      try {
+        const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+        
+        await fetch(url, { method: 'DELETE', headers });
+      } catch (e) {
+        console.error(`Failed to delete ${sessionName} from WAHA (might already be gone):`, e);
+      }
+
+      // 2. Delete from Supabase
+      const { error: dbError } = await supabase
+        .from('whatsapp_sessions')
+        .delete()
+        .eq('session_name', sessionName);
+      
+      if (dbError) console.error(`Failed to delete ${sessionName} from DB:`, dbError);
+      else console.log(`Successfully deleted ${sessionName} from DB.`);
+    }
+
+  } catch (err) {
+    console.error('Auto-Delete Loop Error:', err);
+  }
+}
+
+// Run check every 1 hour (3600000 ms)
+setInterval(checkExpiredSessions, 3600000);
+// Run once on startup
+checkExpiredSessions();
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

@@ -4,11 +4,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw } from "lucide-react";
+import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw, Server, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/config";
 import { supabase } from "@/integrations/supabase/client";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function SessionManager() {
   const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();
@@ -17,13 +27,22 @@ export default function SessionManager() {
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [viewingSessionQr, setViewingSessionQr] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
+  
+  // Modal States
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Selection States
+  const [selectedEngine, setSelectedEngine] = useState<"WEBJS" | "NOWEB">("WEBJS");
   const [selectedPlan, setSelectedPlan] = useState("30");
 
   const fetchBalance = useCallback(async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('user_configs')
         .select('balance')
         .eq('user_id', user.id)
@@ -38,36 +57,38 @@ export default function SessionManager() {
     fetchBalance();
   }, [fetchBalance]);
 
-  const handleStartNew = async () => {
+  // Calculate Price
+  const getPrice = () => {
+    if (selectedEngine === "WEBJS") {
+      if (selectedPlan === "30") return 2000;
+      if (selectedPlan === "60") return 3500;
+      if (selectedPlan === "90") return 4000;
+    } else {
+      // NOWAB (NOWEB)
+      if (selectedPlan === "30") return 500;
+      if (selectedPlan === "60") return 900;
+      if (selectedPlan === "90") return 1500;
+    }
+    return 0;
+  };
+
+  const handleCreateSession = async () => {
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
 
-    // Determine price based on plan
-    let price = 500;
-    if (selectedPlan === "60") price = 900;
-    if (selectedPlan === "90") price = 800;
+    const price = getPrice();
+    if (balance !== null && balance < price) {
+        toast.error(`Insufficient Balance. You need ${price} BDT.`);
+        return;
+    }
 
-    // Force Browser Native Popup
-    setTimeout(() => {
-        const confirmed = window.confirm(
-            `Confirm Payment?\n\nPlan: ${selectedPlan} Days\nPrice: ${price} BDT\n\nBalance will be deducted. Press OK to Pay & Create.`
-        );
-        
-        if (confirmed) {
-            createSession();
-        }
-    }, 100);
-  };
-
-  const createSession = async () => {
     setIsCreating(true);
     setQrCodeUrl(null);
     try {
       let { data: { session } } = await supabase.auth.getSession();
       
-      // Strict check for session validity
       if (!session || !session.user || !session.access_token) {
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         if (refreshError || !refreshData.session) {
@@ -81,7 +102,6 @@ export default function SessionManager() {
       
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
-      // Generate random suffix for unique session name (6 chars) to avoid collisions
       const suffix = Math.random().toString(36).substring(2, 8);
       const finalSessionName = `${newSessionName.trim()}_${suffix}`;
 
@@ -89,7 +109,8 @@ export default function SessionManager() {
         sessionName: finalSessionName,
         userEmail: user.email,
         userId: user.id,
-        planDays: selectedPlan
+        planDays: selectedPlan,
+        engine: selectedEngine
       };
 
       const res = await fetch(`${BACKEND_URL}/session/create`, {
@@ -105,9 +126,10 @@ export default function SessionManager() {
       if (!res.ok) throw new Error(data.error || 'Failed to create session');
       
       toast.success("Session created! Fetching QR Code...");
-      fetchBalance(); // Update balance
+      fetchBalance(); 
+      setShowCreateModal(false);
+      setNewSessionName("");
       
-      // Use the QR code returned directly from creation response if available
       if (data.qr_code) {
           setQrCodeUrl(data.qr_code);
           setViewingSessionQr(finalSessionName);
@@ -116,7 +138,6 @@ export default function SessionManager() {
       }
       
       await refreshSessions();
-      setNewSessionName("");
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(message);
@@ -129,7 +150,6 @@ export default function SessionManager() {
     try {
       setViewingSessionQr(sessionName);
       
-      // 1. Try to get from Supabase first (Base64 is reliable)
       const { data } = await supabase
         .from('whatsapp_sessions')
         .select('qr_code')
@@ -143,7 +163,6 @@ export default function SessionManager() {
           return;
       }
 
-      // 2. Fallback to backend fetch with Auth header
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`, {
           headers: {
@@ -174,12 +193,18 @@ export default function SessionManager() {
 
   const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
     if (action === 'delete') {
-        const confirmed = window.confirm(
-            "Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete."
-        );
-        if (!confirmed) return;
+        setSessionToDelete(sessionName);
+        setShowDeleteModal(true);
+        return;
     }
 
+    // Direct action for start/stop/restart
+    executeAction(action, sessionName);
+  };
+
+  const executeAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
+    if (action === 'delete') setIsDeleting(true);
+    
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
@@ -190,12 +215,12 @@ export default function SessionManager() {
         },
         body: JSON.stringify({ sessionName })
       });
+      
       if (!res.ok) throw new Error('Action failed');
       
       toast.success(`Session ${action}ed successfully`);
       
       if (action === 'restart') {
-          // Wait and refresh to show new status/QR
           setTimeout(async () => {
               await refreshSessions();
               fetchQr(sessionName);
@@ -204,12 +229,18 @@ export default function SessionManager() {
           await refreshSessions();
       }
 
-      if (action === 'delete' && viewingSessionQr === sessionName) {
-        setViewingSessionQr(null);
-        setQrCodeUrl(null);
+      if (action === 'delete') {
+          if (viewingSessionQr === sessionName) {
+            setViewingSessionQr(null);
+            setQrCodeUrl(null);
+          }
+          setShowDeleteModal(false);
+          setSessionToDelete(null);
       }
     } catch (error: unknown) {
       toast.error(`Failed to ${action} session`);
+    } finally {
+      if (action === 'delete') setIsDeleting(false);
     }
   };
 
@@ -234,61 +265,16 @@ export default function SessionManager() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {/* Create New Session Card */}
-        <Card className="border-dashed">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              New Session
-            </CardTitle>
-            <CardDescription>
-              Select plan, enter name, and pay to create.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Plan Selection */}
-            <div className="space-y-2">
-                <Label>Select Plan</Label>
-                <div className="grid grid-cols-3 gap-2">
-                    <div 
-                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "30" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
-                      onClick={() => setSelectedPlan("30")}
-                    >
-                        <div className="font-bold text-sm">30 Days</div>
-                        <div className="text-xs text-gray-500">500 BDT</div>
-                    </div>
-                    <div 
-                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "60" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
-                      onClick={() => setSelectedPlan("60")}
-                    >
-                        <div className="font-bold text-sm">60 Days</div>
-                        <div className="text-xs text-gray-500">900 BDT</div>
-                    </div>
-                    <div 
-                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "90" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
-                      onClick={() => setSelectedPlan("90")}
-                    >
-                        <div className="font-bold text-sm">90 Days</div>
-                        <div className="text-xs text-gray-500">800 BDT</div>
-                    </div>
-                </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Session Name</label>
-              <Input 
-                placeholder="e.g. Sales Bot 1" 
-                value={newSessionName}
-                onChange={(e) => setNewSessionName(e.target.value)}
-              />
-            </div>
-            <Button 
-              className="w-full bg-green-600 hover:bg-green-700" 
-              onClick={handleStartNew} 
-              disabled={isCreating}
-            >
-              {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Pay & Create"}
-            </Button>
+        {/* New Session Trigger Card */}
+        <Card className="border-dashed border-2 hover:border-green-500 cursor-pointer transition-colors flex flex-col items-center justify-center min-h-[300px]" onClick={() => setShowCreateModal(true)}>
+          <CardContent className="flex flex-col items-center gap-4 py-10">
+              <div className="p-4 rounded-full bg-green-50">
+                <Plus className="h-8 w-8 text-green-600" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-semibold text-lg">Create New Session</h3>
+                <p className="text-sm text-muted-foreground mt-1">Add a new WhatsApp connection</p>
+              </div>
           </CardContent>
         </Card>
 
@@ -345,6 +331,122 @@ export default function SessionManager() {
           </Card>
         ))}
       </div>
+
+      {/* CREATE SESSION MODAL */}
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Create New WhatsApp Session</DialogTitle>
+            <DialogDescription>
+              Configure your engine and subscription plan.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-6 py-4">
+            {/* Engine Selection */}
+            <div className="space-y-3">
+                <Label>Select Engine</Label>
+                <Tabs defaultValue="WEBJS" onValueChange={(v) => setSelectedEngine(v as any)} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="WEBJS" className="flex gap-2">
+                            <Zap className="w-4 h-4" /> WEBJS (Premium)
+                        </TabsTrigger>
+                        <TabsTrigger value="NOWEB" className="flex gap-2">
+                            <Server className="w-4 h-4" /> NOWAB (Lite)
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
+                <p className="text-xs text-muted-foreground">
+                    {selectedEngine === "WEBJS" 
+                        ? "High performance, full browser simulation. Best for heavy usage." 
+                        : "Lightweight, stable connection. Good for standard usage."}
+                </p>
+            </div>
+
+            {/* Plan Selection */}
+            <div className="space-y-3">
+                <Label>Select Duration</Label>
+                <div className="grid grid-cols-3 gap-3">
+                    {["30", "60", "90"].map((plan) => {
+                        const isSelected = selectedPlan === plan;
+                        const price = selectedEngine === "WEBJS" 
+                            ? (plan === "30" ? 2000 : plan === "60" ? 3500 : 4000)
+                            : (plan === "30" ? 500 : plan === "60" ? 900 : 1500);
+
+                        return (
+                            <div 
+                                key={plan}
+                                onClick={() => setSelectedPlan(plan)}
+                                className={`cursor-pointer rounded-lg border-2 p-4 text-center transition-all hover:border-green-500 ${
+                                    isSelected ? "border-green-600 bg-green-50" : "border-muted"
+                                }`}
+                            >
+                                <div className="text-lg font-bold">{plan} Days</div>
+                                <div className="text-sm text-muted-foreground">{price} BDT</div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Session Name */}
+            <div className="space-y-2">
+                <Label>Session Name</Label>
+                <Input 
+                    placeholder="e.g. Support Bot 1" 
+                    value={newSessionName}
+                    onChange={(e) => setNewSessionName(e.target.value)}
+                />
+            </div>
+
+            {/* Total Price */}
+            <div className="flex items-center justify-between rounded-lg border p-4 bg-slate-50">
+                <div className="flex flex-col">
+                    <span className="text-sm font-medium">Total Cost</span>
+                    <span className="text-xs text-muted-foreground">Deducted from balance</span>
+                </div>
+                <div className="text-2xl font-bold text-green-700">
+                    {getPrice()} BDT
+                </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>Cancel</Button>
+            <Button onClick={handleCreateSession} disabled={isCreating} className="bg-green-600 hover:bg-green-700">
+                {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Pay & Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-red-600 flex items-center gap-2">
+                <Trash2 className="h-5 w-5" /> Delete Session?
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Are you sure you want to delete <strong>{sessionToDelete}</strong>? 
+              <br /><br />
+              This action cannot be undone. It will disconnect the WhatsApp session and remove all associated data.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={isDeleting}>
+                Cancel
+            </Button>
+            <Button 
+                variant="destructive" 
+                onClick={() => sessionToDelete && executeAction('delete', sessionToDelete)}
+                disabled={isDeleting}
+            >
+                {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Delete Session"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
