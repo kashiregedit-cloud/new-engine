@@ -255,36 +255,54 @@ export default function IntegrationPage() {
         session = refreshData.session;
       }
 
-      if (action === 'restart') {
-         setRestartingId(sessionName);
-      }
-      
-      const res = await fetch(`${BACKEND_URL}/session/${action}`, {
-        method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
-        },
-        body: JSON.stringify({ sessionName })
-      });
-      
-      if (!res.ok) throw new Error(`Failed to ${action} session`);
-      
-      toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
-      
       if (action === 'delete') {
-          // Optimistic update: Remove immediately
-          setSessions(prev => prev.filter(s => s.session_name !== sessionName));
-      } else if (action === 'restart') {
-         // Show QR modal immediately with loading state to trigger polling
-         const session = sessions.find(s => s.session_name === sessionName);
-         if (session) {
-             setQrSession({ ...session, qr_code: undefined, status: 'RESTARTING' });
-         }
-         fetchSessions();
-      } else {
-         setTimeout(() => fetchSessions(), 2000);
+      // Don't wait for response, just optimistic update immediately
+      setSessions(prev => prev.filter(s => s.session_name !== sessionName));
+      
+      try {
+        await fetch(`${BACKEND_URL}/session/${action}`, {
+          method: 'POST',
+          headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+          },
+          body: JSON.stringify({ sessionName })
+        });
+        toast.success(`Session ${action}ed successfully`);
+      } catch (e) {
+        console.error("Delete failed but removed from UI:", e);
+        // Don't re-add to UI to avoid confusion, user wants it gone
       }
+      return;
+    }
+
+    if (action === 'restart') {
+       setRestartingId(sessionName);
+    }
+    
+    const res = await fetch(`${BACKEND_URL}/session/${action}`, {
+      method: 'POST',
+      headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+      },
+      body: JSON.stringify({ sessionName })
+    });
+    
+    if (!res.ok) throw new Error(`Failed to ${action} session`);
+    
+    toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
+    
+    if (action === 'restart') {
+       // Show QR modal immediately with loading state to trigger polling
+       const session = sessions.find(s => s.session_name === sessionName);
+       if (session) {
+           setQrSession({ ...session, qr_code: undefined, status: 'RESTARTING' });
+       }
+       fetchSessions();
+    } else {
+       setTimeout(() => fetchSessions(), 2000);
+    }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(message);
