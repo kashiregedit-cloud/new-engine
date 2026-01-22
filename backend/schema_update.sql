@@ -1,28 +1,166 @@
 
--- Add balance to user_configs
-ALTER TABLE public.user_configs 
-ADD COLUMN IF NOT EXISTS balance NUMERIC DEFAULT 0;
+-- ==========================================
+--  1. Create user_configs table if it doesn't exist
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.user_configs (
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id text NOT NULL, -- Storing as text to match potential varied auth sources
+  balance numeric DEFAULT 0,
+  ai_provider text,
+  api_key text,
+  model_name text,
+  system_prompt text,
+  auto_reply boolean DEFAULT true,
+  ai_enabled boolean DEFAULT true,
+  media_enabled boolean DEFAULT true,
+  response_language text,
+  response_tone text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
+);
 
--- Create payment transactions table
+-- ==========================================
+--  2. Add balance column if table existed but column didn't
+-- ==========================================
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'user_configs' 
+        AND column_name = 'balance'
+    ) THEN
+        ALTER TABLE public.user_configs ADD COLUMN balance NUMERIC DEFAULT 0;
+    END IF;
+END $$;
+
+
+-- ==========================================
+--  3. Create payment transactions table (New Schema)
+-- ==========================================
 CREATE TABLE IF NOT EXISTS public.payment_transactions (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id uuid REFERENCES auth.users(id),
-  amount NUMERIC NOT NULL,
-  type TEXT NOT NULL, -- 'credit', 'debit'
-  method TEXT,        -- 'bkash', 'nagad', 'manual', 'system'
-  status TEXT DEFAULT 'completed', -- 'pending', 'completed', 'failed'
-  transaction_id TEXT, -- For manual verification (TrxID)
-  description TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_email text NOT NULL,
+  amount numeric NOT NULL,
+  method text NOT NULL,
+  trx_id text NOT NULL,
+  sender_number text NOT NULL,
+  status text NULL DEFAULT 'pending'::text,
+  created_at timestamp with time zone NULL DEFAULT now()
 );
 
 -- RLS Policies (Optional but good practice)
 ALTER TABLE public.payment_transactions ENABLE ROW LEVEL SECURITY;
 
+-- Allow users to view their own transactions
 CREATE POLICY "Users can view own transactions" 
 ON public.payment_transactions FOR SELECT 
-USING (auth.uid() = user_id);
+USING (auth.email() = user_email);
 
+-- Allow users to insert deposit requests
 CREATE POLICY "Users can insert deposit requests" 
 ON public.payment_transactions FOR INSERT 
-WITH CHECK (auth.uid() = user_id AND type = 'credit' AND status = 'pending');
+WITH CHECK (true); 
+
+-- Allow Admin (or anyone for now, since we have app_users protection on frontend) to view all transactions
+-- WARNING: Ideally this should be restricted, but for this app's logic:
+CREATE POLICY "Allow public read for admin panel"
+ON public.payment_transactions FOR SELECT
+USING (true);
+
+CREATE POLICY "Allow public update for admin panel"
+ON public.payment_transactions FOR UPDATE
+USING (true);
+
+
+-- ==========================================
+--  4. RPC Function to Approve Deposit (Fixes Balance Issue)
+-- ==========================================
+CREATE OR REPLACE FUNCTION approve_deposit(txn_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER -- This allows the function to bypass RLS and update user_configs
+AS $$
+DECLARE
+    v_amount numeric;
+    v_user_email text;
+    v_user_id uuid;
+    v_current_balance numeric;
+    v_txn_status text;
+BEGIN
+    -- 1. Get transaction details
+    SELECT amount, user_email, status INTO v_amount, v_user_email, v_txn_status
+    FROM public.payment_transactions
+    WHERE id = txn_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Transaction not found';
+    END IF;
+
+    IF v_txn_status = 'completed' THEN
+        RAISE EXCEPTION 'Transaction already completed';
+    END IF;
+
+    -- 2. Find user_id from auth.users (Reliable)
+    SELECT id INTO v_user_id
+    FROM auth.users
+    WHERE email = v_user_email;
+
+    IF v_user_id IS NULL THEN
+        -- Fallback: Try to find in whatsapp_sessions if auth lookup fails
+        -- (This handles cases where email casing might differ or auth table is restricted)
+        BEGIN
+            SELECT user_id::uuid INTO v_user_id
+            FROM public.whatsapp_sessions
+            WHERE user_email = v_user_email
+            LIMIT 1;
+        EXCEPTION WHEN OTHERS THEN
+            v_user_id := NULL;
+        END;
+    END IF;
+
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'User ID not found for email: %. User must be registered.', v_user_email;
+    END IF;
+
+    -- 3. Update Balance (user_configs)
+    -- Check if config exists
+    SELECT balance INTO v_current_balance
+    FROM public.user_configs
+    WHERE user_id = v_user_id::text;
+
+    IF v_current_balance IS NULL THEN
+        -- Create config if missing
+        INSERT INTO public.user_configs (user_id, balance)
+        VALUES (v_user_id::text, v_amount);
+    ELSE
+        -- Update existing balance
+        UPDATE public.user_configs
+        SET balance = v_current_balance + v_amount
+        WHERE user_id = v_user_id::text;
+    END IF;
+
+    -- 4. Mark transaction as completed
+    UPDATE public.payment_transactions
+    SET status = 'completed'
+    WHERE id = txn_id;
+
+END;
+$$;
+
+-- ==========================================
+--  5. User Configs RLS (Ensure users can see their balance)
+-- ==========================================
+ALTER TABLE public.user_configs ENABLE ROW LEVEL SECURITY;
+
+-- Allow users to view their own config
+-- We cast auth.uid() to text because user_configs.user_id is text
+CREATE POLICY "Users can view own config" 
+ON public.user_configs FOR SELECT 
+USING (auth.uid()::text = user_id);
+
+-- Allow users to update their own config (if needed)
+CREATE POLICY "Users can update own config" 
+ON public.user_configs FOR UPDATE
+USING (auth.uid()::text = user_id);

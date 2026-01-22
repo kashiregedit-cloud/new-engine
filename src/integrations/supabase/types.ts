@@ -12,36 +12,50 @@ export interface Database {
       payment_transactions: {
         Row: {
           id: string
-          user_id: string
+          user_email: string
           amount: number
-          type: string
-          method: string | null
-          status: string
-          transaction_id: string | null
-          description: string | null
-          created_at: string
+          method: string
+          trx_id: string
+          sender_number: string
+          status: string | null
+          created_at: string | null
         }
         Insert: {
           id?: string
-          user_id: string
+          user_email: string
           amount: number
-          type: string
-          method?: string | null
-          status?: string
-          transaction_id?: string | null
-          description?: string | null
-          created_at?: string
+          method: string
+          trx_id: string
+          sender_number: string
+          status?: string | null
+          created_at?: string | null
         }
         Update: {
           id?: string
-          user_id?: string
+          user_email?: string
           amount?: number
-          type?: string
-          method?: string | null
-          status?: string
-          transaction_id?: string | null
-          description?: string | null
-          created_at?: string
+          method?: string
+          trx_id?: string
+          sender_number?: string
+          status?: string | null
+          created_at?: string | null
+        }
+      }
+      app_users: {
+        Row: {
+          id: number
+          key: string
+          pas: string | null
+        }
+        Insert: {
+          id?: never
+          key: string
+          pas?: string | null
+        }
+        Update: {
+          id?: never
+          key?: string
+          pas?: string | null
         }
       }
       referral_codes: {

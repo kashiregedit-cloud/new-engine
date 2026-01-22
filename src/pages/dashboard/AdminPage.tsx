@@ -107,55 +107,18 @@ export default function AdminPage() {
     try {
       setProcessingId(txn.id);
       
-      // 1. Find User ID using email (Lookup from whatsapp_sessions)
-      const { data: sessionData } = await supabase
-        .from('whatsapp_sessions')
-        .select('user_id')
-        .eq('user_email', txn.user_email)
-        .limit(1)
-        .maybeSingle();
+      // Use RPC function to securely update balance and status in one transaction
+      // This bypasses RLS issues on user_configs
+      const { error } = await (supabase as any).rpc('approve_deposit', { txn_id: txn.id });
 
-      let userId = null;
-      if (sessionData) {
-          userId = (sessionData as any).user_id;
-      }
-
-      if (!userId) {
-          // Try to see if maybe user_id is actually stored in the txn (if schema was mixed)
-          // But based on user input, it's not there.
-          toast.error(`Could not find User ID for ${txn.user_email}. User needs active session.`);
-          return;
-      }
-
-      // 2. Update Transaction Status
-      const { error: txError } = await (supabase as any)
-        .from('payment_transactions')
-        .update({ status: 'completed' })
-        .eq('id', txn.id);
-      
-      if (txError) throw txError;
-
-      // 3. Add Balance to User
-      const { data: userConfigData } = await (supabase as any)
-        .from('user_configs')
-        .select('balance')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      const userConfig = userConfigData as { balance: number } | null;
-
-      const currentBalance = userConfig ? (userConfig.balance || 0) : 0;
-      const newBalance = currentBalance + Number(txn.amount);
-
-      if (userConfig) {
-        await (supabase as any)
-          .from('user_configs')
-          .update({ balance: newBalance })
-          .eq('user_id', userId);
-      } else {
-        await (supabase as any)
-          .from('user_configs')
-          .insert({ user_id: userId, balance: newBalance });
+      if (error) {
+        console.error("RPC Error:", error);
+        // Fallback for legacy support (if function not created yet)
+        if (error.message?.includes('function') && error.message?.includes('does not exist')) {
+            toast.error("Database function missing. Please run the provided SQL script.");
+            return;
+        }
+        throw error;
       }
 
       toast.success(`Transaction approved. Added ${txn.amount} BDT to user.`);
