@@ -64,6 +64,7 @@ interface WhatsAppSession {
   user_email?: string;
   user_id?: string;
   updated_at?: string;
+  session_id?: string;
 }
 
 export default function IntegrationPage() {
@@ -90,8 +91,12 @@ export default function IntegrationPage() {
         .eq('user_id', user.id)
         .maybeSingle();
       
+      if (error) {
+          console.error("Error fetching balance:", error);
+      }
+
       if (data) {
-          setBalance(data.balance);
+          setBalance((data as any).balance);
       }
   }, []);
 
@@ -387,7 +392,7 @@ export default function IntegrationPage() {
                 <div className="flex justify-between items-start">
                     <div>
                         <CardTitle className="text-lg">{session.session_name}</CardTitle>
-                        <CardDescription className="text-xs mt-1">ID: {session.id.slice(0, 8)}...</CardDescription>
+                        <CardDescription className="text-xs mt-1">ID: {(session.id || session.session_id || 'N/A').slice(0, 8)}...</CardDescription>
                     </div>
                     {getStatusBadge(session.status)}
                 </div>
@@ -455,7 +460,8 @@ export default function IntegrationPage() {
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => {
+                                    e.stopPropagation();
                                     setSessionToDelete(session.session_name);
                                     setShowDeleteConfirm(true);
                                 }}>
