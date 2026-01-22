@@ -151,25 +151,7 @@ export default function IntegrationPage() {
 
 
 
-  const handleStartNew = async (e: React.MouseEvent) => {
-    e.preventDefault();
-
-    if (!newSessionName.trim()) {
-      toast.error("Please enter a session name");
-      return;
-    }
-
-    // Determine price based on plan
-    let price = 500;
-    if (selectedPlan === "60") price = 900;
-    if (selectedPlan === "90") price = 800;
-
-    // Confirm Popup
-    const confirmed = window.confirm(
-        `Confirm Payment?\n\nPlan: ${selectedPlan} Days\nPrice: ${price} BDT\n\nBalance will be deducted. Press OK to Pay & Create.`
-    );
-    if (!confirmed) return;
-
+  const createSession = async () => {
     setCreating(true);
     try {
       let { data: { session } } = await supabase.auth.getSession();
@@ -242,13 +224,52 @@ export default function IntegrationPage() {
     }
   };
 
-  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
-    if (action === 'delete') {
-      const confirmed = window.confirm("Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete.");
-      if (!confirmed) return;
+  const handleStartNew = async (e: React.MouseEvent) => {
+    // Force prevent default submission
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!newSessionName.trim()) {
+      toast.error("Please enter a session name");
+      return;
     }
 
-    try {
+    // Determine price based on plan
+    let price = 500;
+    if (selectedPlan === "60") price = 900;
+    if (selectedPlan === "90") price = 800;
+
+    // 1. Force Browser Native Popup (Unstoppable)
+    // Adding a slight delay to ensure event propagation is done
+    setTimeout(() => {
+        const confirmed = window.confirm(
+            `Confirm Payment?\n\nPlan: ${selectedPlan} Days\nPrice: ${price} BDT\n\nBalance will be deducted. Press OK to Pay & Create.`
+        );
+        
+        if (confirmed) {
+            createSession();
+        }
+    }, 100);
+  };
+
+  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
+        if (action === 'delete') {
+            // Force delay to prevent UI race conditions
+            setTimeout(() => {
+                const confirmed = window.confirm(
+                    "Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete."
+                );
+                if (confirmed) {
+                    performAction(sessionName, action);
+                }
+            }, 100);
+            return;
+        }
+
+        performAction(sessionName, action);
+    };
+
+    const performAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
       let { data: { session } } = await supabase.auth.getSession();
       
       // Strict check for session validity
@@ -282,33 +303,34 @@ export default function IntegrationPage() {
       return;
     }
 
-    if (action === 'restart') {
-       setRestartingId(sessionName);
-    }
-    
-    const res = await fetch(`${BACKEND_URL}/session/${action}`, {
-      method: 'POST',
-      headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
-      },
-      body: JSON.stringify({ sessionName })
-    });
-    
-    if (!res.ok) throw new Error(`Failed to ${action} session`);
-    
-    toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
-    
-    if (action === 'restart') {
-       // Show QR modal immediately with loading state to trigger polling
-       const session = sessions.find(s => s.session_name === sessionName);
-       if (session) {
-           setQrSession({ ...session, qr_code: undefined, status: 'RESTARTING' });
-       }
-       fetchSessions();
-    } else {
-       setTimeout(() => fetchSessions(), 2000);
-    }
+    try {
+      if (action === 'restart') {
+         setRestartingId(sessionName);
+      }
+      
+      const res = await fetch(`${BACKEND_URL}/session/${action}`, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        },
+        body: JSON.stringify({ sessionName })
+      });
+      
+      if (!res.ok) throw new Error(`Failed to ${action} session`);
+      
+      toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
+      
+      if (action === 'restart') {
+         // Show QR modal immediately with loading state to trigger polling
+         const session = sessions.find(s => s.session_name === sessionName);
+         if (session) {
+             setQrSession({ ...session, qr_code: undefined, status: 'RESTARTING' });
+         }
+         fetchSessions();
+      } else {
+         setTimeout(() => fetchSessions(), 2000);
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(message);
@@ -348,8 +370,8 @@ export default function IntegrationPage() {
     <div className="space-y-6 p-2">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-           <h1 className="text-2xl font-bold">WhatsApp Sessions</h1>
-           <p className="text-muted-foreground">Manage your WhatsApp connections and sessions.</p>
+           <h1 className="text-2xl font-bold">WhatsApp Integration (v1.5)</h1>
+           <p className="text-muted-foreground">Connect your WhatsApp number to start automating conversations</p>
         </div>
         <div className="flex gap-2 items-center">
           {balance !== null && (
