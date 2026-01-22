@@ -11,7 +11,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Database } from "@/integrations/supabase/types";
 
-type Transaction = Database['public']['Tables']['payment_transactions']['Row'];
+// Override Transaction type to match the new schema
+type Transaction = {
+  id: string;
+  user_email: string;
+  amount: number;
+  method: string;
+  trx_id: string;
+  sender_number: string;
+  status: string;
+  created_at: string;
+};
 
 const topupAmounts = [500, 1000, 2000, 5000, 10000];
 
@@ -54,10 +64,10 @@ export default function PaymentPage() {
       const { data: txns } = await supabase
         .from('payment_transactions')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_email', user.email)
         .order('created_at', { ascending: false });
       
-      if (txns) setTransactions(txns);
+      if (txns) setTransactions(txns as unknown as Transaction[]);
 
     } catch (error) {
       console.error(error);
@@ -97,13 +107,12 @@ export default function PaymentPage() {
         if (!user) throw new Error("User not found");
 
         const { error } = await (supabase as any).from('payment_transactions').insert({
-            user_id: user.id,
+            user_email: user.email,
             amount: amount,
-            type: 'credit',
             method: selectedMethod,
             status: 'pending',
-            transaction_id: transactionId,
-            description: `Topup via ${selectedMethod} (Sender: ${senderNumber})`
+            trx_id: transactionId,
+            sender_number: senderNumber
         });
 
         if (error) throw error;
@@ -174,12 +183,12 @@ export default function PaymentPage() {
 
       // Log transaction
       await (supabase as any).from('payment_transactions').insert({
-        user_id: user.id,
+        user_email: user.email,
         amount: amount,
-        type: 'credit',
         method: 'coupon',
         status: 'completed',
-        description: `Redeemed code: ${redeemCode}`
+        trx_id: `COUPON-${redeemCode}`,
+        sender_number: 'System'
       });
 
       toast.success(`Successfully redeemed ${amount} BDT!`);
@@ -405,10 +414,10 @@ export default function PaymentPage() {
                             <TableCell>
                                 <div className="flex flex-col gap-1">
                                     <div className="flex items-center gap-2">
-                                        <Badge variant={txn.type === "credit" ? "outline" : "secondary"} className="text-[10px] px-1 py-0 h-5">
+                                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-5">
                                             {txn.method}
                                         </Badge>
-                                        <span className="text-sm font-medium">{txn.transaction_id || "System"}</span>
+                                        <span className="text-sm font-medium">{txn.trx_id || "System"}</span>
                                     </div>
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <span>{new Date(txn.created_at).toLocaleDateString()}</span>
@@ -426,8 +435,8 @@ export default function PaymentPage() {
                                 </div>
                             </TableCell>
                             <TableCell className="text-right">
-                                <span className={`font-mono font-bold ${txn.type === "credit" ? "text-green-600" : "text-red-500"}`}>
-                                    {txn.type === "credit" ? "+" : "-"}৳{txn.amount}
+                                <span className="font-mono font-bold text-green-600">
+                                    +৳{txn.amount}
                                 </span>
                             </TableCell>
                         </TableRow>

@@ -13,7 +13,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Database } from "@/integrations/supabase/types";
 
-type Transaction = Database['public']['Tables']['payment_transactions']['Row'];
+// Override Transaction type to match the new schema provided by user
+type Transaction = {
+  id: string;
+  user_email: string;
+  amount: number;
+  method: string;
+  trx_id: string;
+  sender_number: string;
+  status: string;
+  created_at: string;
+};
+
 type Coupon = Database['public']['Tables']['referral_codes']['Row'];
 
 export default function AdminPage() {
@@ -23,14 +34,54 @@ export default function AdminPage() {
   const [loadingCoupons, setLoadingCoupons] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
+  // Login State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
   // Coupon Form
   const [couponCode, setCouponCode] = useState("");
   const [couponValue, setCouponValue] = useState("");
 
   useEffect(() => {
-    fetchTransactions();
-    fetchCoupons();
-  }, []);
+    if (isAuthenticated) {
+      fetchTransactions();
+      fetchCoupons();
+    }
+  }, [isAuthenticated]);
+
+  const handleLogin = async () => {
+    if (!usernameInput || !passwordInput) {
+      toast.error("Please enter username and password");
+      return;
+    }
+
+    setLoginLoading(true);
+    try {
+      // Query 'app_users' table
+      const { data, error } = await (supabase as any)
+        .from('app_users')
+        .select('*')
+        .eq('key', usernameInput)
+        .eq('pas', passwordInput)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data) {
+        setIsAuthenticated(true);
+        toast.success("Login successful");
+      } else {
+        toast.error("Invalid credentials");
+      }
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Login failed: " + (error.message || "Unknown error"));
+    } finally {
+      setLoginLoading(false);
+    }
+  };
 
   const fetchTransactions = async () => {
     setLoadingTxns(true);
@@ -38,7 +89,7 @@ export default function AdminPage() {
       .from('payment_transactions')
       .select('*')
       .order('created_at', { ascending: false });
-    if (data) setTransactions(data);
+    if (data) setTransactions(data as unknown as Transaction[]);
     setLoadingTxns(false);
   };
 
@@ -52,11 +103,31 @@ export default function AdminPage() {
     setLoadingCoupons(false);
   };
 
-  const handleApproveTxn = async (txn: Transaction) => {
+  const handleApproveTxn = async (txn: any) => {
     try {
       setProcessingId(txn.id);
       
-      // 1. Update Transaction Status
+      // 1. Find User ID using email (Lookup from whatsapp_sessions)
+      const { data: sessionData } = await supabase
+        .from('whatsapp_sessions')
+        .select('user_id')
+        .eq('user_email', txn.user_email)
+        .limit(1)
+        .maybeSingle();
+
+      let userId = null;
+      if (sessionData) {
+          userId = (sessionData as any).user_id;
+      }
+
+      if (!userId) {
+          // Try to see if maybe user_id is actually stored in the txn (if schema was mixed)
+          // But based on user input, it's not there.
+          toast.error(`Could not find User ID for ${txn.user_email}. User needs active session.`);
+          return;
+      }
+
+      // 2. Update Transaction Status
       const { error: txError } = await (supabase as any)
         .from('payment_transactions')
         .update({ status: 'completed' })
@@ -64,11 +135,11 @@ export default function AdminPage() {
       
       if (txError) throw txError;
 
-      // 2. Add Balance to User
+      // 3. Add Balance to User
       const { data: userConfigData } = await (supabase as any)
         .from('user_configs')
         .select('balance')
-        .eq('user_id', txn.user_id)
+        .eq('user_id', userId)
         .maybeSingle();
 
       const userConfig = userConfigData as { balance: number } | null;
@@ -80,11 +151,11 @@ export default function AdminPage() {
         await (supabase as any)
           .from('user_configs')
           .update({ balance: newBalance })
-          .eq('user_id', txn.user_id);
+          .eq('user_id', userId);
       } else {
         await (supabase as any)
           .from('user_configs')
-          .insert({ user_id: txn.user_id, balance: newBalance });
+          .insert({ user_id: userId, balance: newBalance });
       }
 
       toast.success(`Transaction approved. Added ${txn.amount} BDT to user.`);
@@ -151,6 +222,44 @@ export default function AdminPage() {
     fetchCoupons();
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] animate-in fade-in duration-500">
+        <Card className="w-full max-w-md shadow-lg border-t-4 border-t-primary">
+          <CardHeader className="text-center space-y-2">
+            <Shield className="h-12 w-12 mx-auto text-primary" />
+            <CardTitle className="text-2xl">Admin Login</CardTitle>
+            <CardDescription>Secure Area. Please authenticate.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Username (Key)</Label>
+              <Input 
+                value={usernameInput} 
+                onChange={e => setUsernameInput(e.target.value)} 
+                placeholder="Enter admin key"
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Password</Label>
+              <Input 
+                type="password" 
+                value={passwordInput} 
+                onChange={e => setPasswordInput(e.target.value)} 
+                placeholder="Enter password"
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              />
+            </div>
+            <Button className="w-full font-bold" onClick={handleLogin} disabled={loginLoading}>
+              {loginLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Access Dashboard"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header with Warning */}
@@ -185,7 +294,7 @@ export default function AdminPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>User ID</TableHead>
+                      <TableHead>User Email</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Amount</TableHead>
                       <TableHead>Details</TableHead>
@@ -199,15 +308,15 @@ export default function AdminPage() {
                     ) : transactions.length === 0 ? (
                        <TableRow><TableCell colSpan={6} className="text-center">No transactions found</TableCell></TableRow>
                     ) : (
-                      transactions.map((txn) => (
+                      transactions.map((txn: any) => (
                         <TableRow key={txn.id}>
-                          <TableCell className="font-mono text-xs text-muted-foreground">{txn.user_id}</TableCell>
+                          <TableCell className="font-medium text-sm">{txn.user_email}</TableCell>
                           <TableCell className="capitalize">{txn.method}</TableCell>
                           <TableCell className="font-bold text-green-600">৳{txn.amount}</TableCell>
                           <TableCell>
                             <div className="text-xs">
-                              <p>TRX: {txn.transaction_id}</p>
-                              <p className="text-muted-foreground">{txn.description}</p>
+                              <p>TRX: {txn.trx_id}</p>
+                              <p className="text-muted-foreground">Sender: {txn.sender_number}</p>
                               <p className="text-muted-foreground">{new Date(txn.created_at).toLocaleString()}</p>
                             </div>
                           </TableCell>
