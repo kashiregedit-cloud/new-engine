@@ -223,7 +223,10 @@ app.post('/session/create', async (req, res) => {
   
   // Pricing Logic
   let price = 0;
-  if (selectedEngine === 'WEBJS') {
+  // Ensure selectedEngine is uppercase for consistency
+  const engineCode = selectedEngine === 'WEBJS' ? 'WEBJS' : 'NOWEB';
+
+  if (engineCode === 'WEBJS') {
       if (days === 30) price = 2000;
       if (days === 60) price = 3500;
       if (days === 90) price = 4000;
@@ -235,7 +238,7 @@ app.post('/session/create', async (req, res) => {
   }
   
   // Fallback if price is 0 (invalid days)
-  if (price === 0) price = (selectedEngine === 'WEBJS') ? 2000 : 500;
+  if (price === 0) price = (engineCode === 'WEBJS') ? 2000 : 500;
 
   // Create a scoped Supabase client if authorization header is provided
   // Use ANON KEY for scoped client to respect RLS policies
@@ -355,35 +358,32 @@ app.post('/session/create', async (req, res) => {
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
 
     // Configure WAHA with specific config requested by user
+    const isNoweb = engineCode !== 'WEBJS';
+    
     const payload = {
       name: sessionName,
       start: true, // Auto-start session immediately
       config: {
+        engine: engineCode, // Explicitly send engine to WAHA
         metadata: {
             "user_email": userEmail,
-            "plan_days": days
+            "plan_days": days,
+            "engine": engineCode
         },
         debug: false,
-        noweb: {
-          markOnline: true,
-          store: {
-            enabled: true,
-            fullSync: false
-          }
-        },
+        // Only include noweb config if engine is NOWEB
+        ...(isNoweb ? {
+            noweb: {
+              markOnline: true,
+              store: {
+                enabled: true,
+                fullSync: false
+              }
+            }
+        } : {}),
         webhooks: [
           {
             url: `https://n8n.salesmanchatbot.online/webhook/webhook`,
-            events: ['message', 'session.status'],
-            retries: {
-              delaySeconds: 2,
-              attempts: 15,
-              policy: "linear"
-            },
-            customHeaders: null
-          },
-          {
-            url: `http://ak4kcgcog0880g4owgwcss8c.72.62.196.104.sslip.io/webhook`,
             events: ['message', 'session.status'],
             retries: {
               delaySeconds: 2,
@@ -395,7 +395,7 @@ app.post('/session/create', async (req, res) => {
         ],
         client: {
           deviceName: "salesmanchatbot.online || wp : +880195687140.",
-          browserName: "IE"
+          browserName: "Chrome" // Changed to Chrome for better compatibility
         }
       }
     };

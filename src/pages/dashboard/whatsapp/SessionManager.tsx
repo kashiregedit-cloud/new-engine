@@ -59,6 +59,7 @@ export default function SessionManager() {
 
   // Calculate Price
   const getPrice = () => {
+    // Determine price based on selected engine and plan
     if (selectedEngine === "WEBJS") {
       if (selectedPlan === "30") return 2000;
       if (selectedPlan === "60") return 3500;
@@ -109,9 +110,11 @@ export default function SessionManager() {
         sessionName: finalSessionName,
         userEmail: user.email,
         userId: user.id,
-        planDays: selectedPlan,
+        planDays: parseInt(selectedPlan), // Ensure number
         engine: selectedEngine
       };
+
+      console.log("Creating session with payload:", payload);
 
       const res = await fetch(`${BACKEND_URL}/session/create`, {
         method: 'POST',
@@ -266,13 +269,13 @@ export default function SessionManager() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {/* New Session Trigger Card */}
-        <Card className="border-dashed border-2 hover:border-green-500 cursor-pointer transition-colors flex flex-col items-center justify-center min-h-[300px]" onClick={() => setShowCreateModal(true)}>
+        <Card className="border-dashed border-2 border-slate-200 hover:border-green-500 hover:bg-green-50/10 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center min-h-[300px] group shadow-sm hover:shadow-md" onClick={() => setShowCreateModal(true)}>
           <CardContent className="flex flex-col items-center gap-4 py-10">
-              <div className="p-4 rounded-full bg-green-50">
+              <div className="p-4 rounded-full bg-green-50 group-hover:bg-green-100 transition-colors">
                 <Plus className="h-8 w-8 text-green-600" />
               </div>
               <div className="text-center">
-                <h3 className="font-semibold text-lg">Create New Session</h3>
+                <h3 className="font-semibold text-lg text-slate-900">Create New Session</h3>
                 <p className="text-sm text-muted-foreground mt-1">Add a new WhatsApp connection</p>
               </div>
           </CardContent>
@@ -280,9 +283,9 @@ export default function SessionManager() {
 
         {/* Existing Sessions List */}
         {sessions.map((session) => (
-          <Card key={session.name} className="relative overflow-hidden">
+          <Card key={session.name} className="relative overflow-hidden border-slate-200 shadow-sm hover:shadow-md transition-shadow">
             <div className={`absolute top-0 left-0 w-1 h-full ${session.status === 'WORKING' ? 'bg-green-500' : 'bg-yellow-500'}`} />
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 bg-slate-50/50">
               <div className="flex justify-between items-start">
                 <CardTitle className="text-xl">{session.name}</CardTitle>
                 <Badge variant={session.status === 'WORKING' ? 'default' : 'secondary'}>
