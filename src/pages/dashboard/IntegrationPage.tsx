@@ -61,7 +61,6 @@ interface WhatsAppSession {
   session_name: string;
   status: string;
   qr_code?: string;
-  plan_days?: number;
   user_email?: string;
   user_id?: string;
   updated_at?: string;
@@ -75,7 +74,6 @@ export default function IntegrationPage() {
   const [creating, setCreating] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [qrSession, setQrSession] = useState<WhatsAppSession | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [restartingId, setRestartingId] = useState<string | null>(null);
@@ -137,12 +135,7 @@ export default function IntegrationPage() {
 
   const handleStartNew = (e: React.MouseEvent) => {
     e.preventDefault(); // Prevent any form submission
-    if (!newSessionName.trim()) {
-      toast.error("Please enter a session name");
-      return;
-    }
-    console.log("Opening confirmation dialog...");
-    setShowConfirm(true);
+    createSession();
   };
 
   const createSession = async () => {
@@ -178,8 +171,7 @@ export default function IntegrationPage() {
       const payload = { 
         sessionName: finalSessionName, 
         userEmail: user.email, 
-        userId: user.id,
-        plan: 30 
+        userId: user.id
       };
       console.log("Sending payload to /session/create:", payload);
 
@@ -204,7 +196,6 @@ export default function IntegrationPage() {
           session_name: data.session_name,
           status: 'created',
           qr_code: data.qr_code,
-          plan_days: data.plan_days,
           user_email: user.email,
           user_id: user.id
       };
@@ -499,27 +490,6 @@ export default function IntegrationPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
-            <AlertDialogDescription>
-              Creating a new WhatsApp session will deduct 500 BDT from your balance. 
-              Are you sure you want to proceed?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
-              setShowConfirm(false);
-              createSession();
-            }}>
-              Confirm & Pay
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>

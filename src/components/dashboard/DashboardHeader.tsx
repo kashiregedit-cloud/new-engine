@@ -55,21 +55,6 @@ export function DashboardHeader({ title, onMenuClick }: DashboardHeaderProps) {
       </div>
 
       <div className="flex items-center gap-2 lg:gap-4">
-        {/* Search - Hidden on mobile */}
-        <div className="relative hidden md:block">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-          <Input
-            placeholder="Search..."
-            className="pl-9 w-48 lg:w-64 bg-secondary border-input"
-          />
-        </div>
-
-        {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell size={20} />
-          <span className="absolute top-1 right-1 h-2 w-2 bg-primary rounded-full" />
-        </Button>
-
         {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

@@ -4,11 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Facebook, Instagram, ArrowRight, Zap, Activity, ShieldCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { BACKEND_URL } from "@/config";
 
 export default function PlatformSelection() {
   const navigate = useNavigate();
   const [userName, setUserName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeSessions, setActiveSessions] = useState<number | string>("--");
 
   useEffect(() => {
     async function getUser() {
@@ -21,6 +23,20 @@ export default function PlatformSelection() {
       setLoading(false);
     }
     getUser();
+
+    // Fetch Global Active Sessions
+    async function fetchStats() {
+        try {
+            const res = await fetch(`${BACKEND_URL}/stats/total-sessions`);
+            if (res.ok) {
+                const data = await res.json();
+                setActiveSessions(data.count);
+            }
+        } catch (e) {
+            console.error("Failed to fetch global stats", e);
+        }
+    }
+    fetchStats();
   }, []);
 
   const platforms = [
@@ -84,7 +100,7 @@ export default function PlatformSelection() {
       </div>
 
       {/* Stats/Overview Section */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card className="bg-card/50 backdrop-blur-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">System Status</CardTitle>
@@ -101,18 +117,8 @@ export default function PlatformSelection() {
             <ShieldCheck className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">--</div>
+            <div className="text-2xl font-bold">{activeSessions}</div>
             <p className="text-xs text-muted-foreground">Across all platforms</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50 backdrop-blur-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Subscription Plan</CardTitle>
-            <Zap className="h-4 w-4 text-yellow-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">Pro Plan</div>
-            <p className="text-xs text-muted-foreground">Valid until next month</p>
           </CardContent>
         </Card>
       </div>

@@ -277,49 +277,9 @@ app.post('/session/create', async (req, res) => {
       console.warn('Warning: userId missing. Proceeding with email only as per user request.');
   }
 
-  // --- PRICING LOGIC ---
-  const SESSION_PRICE = 500;
-  
-  // Check Balance
-  if (userId) {
-      const { data: userConfig, error: configError } = await supabase
-          .from('user_configs')
-          .select('balance')
-          .eq('user_id', userId)
-          .maybeSingle();
-      
-      if (configError) {
-          console.error('Balance check error:', configError);
-          // Proceed cautiously or fail? Let's assume 0 if error/missing
-      }
-
-      const currentBalance = userConfig?.balance || 0;
-      
-      if (currentBalance < SESSION_PRICE) {
-          return res.status(402).json({ 
-              error: `Insufficient balance. Cost: ${SESSION_PRICE} BDT. Current: ${currentBalance} BDT. Please recharge.` 
-          });
-      }
-
-      // Deduct Balance
-      const { error: deductError } = await supabase
-          .from('user_configs')
-          .update({ balance: currentBalance - SESSION_PRICE })
-          .eq('user_id', userId);
-
-      if (deductError) {
-          console.error('Failed to deduct balance:', deductError);
-          return res.status(500).json({ error: 'Payment processing failed. Please try again.' });
-      }
-      
-      // Log Transaction (Optional, best effort)
-      await supabase.from('payment_transactions').insert({
-          user_id: userId,
-          amount: SESSION_PRICE,
-          type: 'debit',
-          description: `Session Creation: ${sessionName}`
-      });
-  }
+  // --- PRICING LOGIC REMOVED ---
+  // const SESSION_PRICE = 500;
+  // ... (Balance deduction logic commented out)
   // ---------------------
 
   try {
@@ -429,10 +389,9 @@ app.post('/session/create', async (req, res) => {
             user_email: userEmail || null, // Explicitly set even if null
             user_id: userId || null,       // Explicitly set even if null
             status: 'created',
-            qr_code: qrDataUri,
-            plan_days: req.body.plan || 30,
-            updated_at: new Date().toISOString()
-        };
+          qr_code: qrDataUri,
+          updated_at: new Date().toISOString()
+      };
         console.log('Upserting to DB:', payload);
 
         const { error: upsertError } = await scopedSupabase
@@ -479,8 +438,8 @@ app.get('/sessions', async (req, res) => {
       return {
         ...session,
         qr_code: dbSession?.qr_code || null,
-        plan_days: dbSession?.plan_days || null,
-        user_email: dbSession?.user_email || null
+        user_email: dbSession?.user_email || null,
+        user_id: dbSession?.user_id || null
       };
     });
 
@@ -639,10 +598,10 @@ app.post('/session/delete', async (req, res) => {
             res.json({ success: true, message: "Session deleted" });
         }
     } else {
-        // Mock success for 404 case
-        res.json({ success: true, message: "Session deleted (was already missing in WAHA)" });
+        res.json({ success: true, message: "Session deleted from DB" });
     }
   } catch (error) {
+    console.error('Delete Session Error:', error);
     res.status(500).json({ error: 'Failed to delete session' });
   }
 });
@@ -808,6 +767,20 @@ app.post('/webhook', async (req, res) => {
   } catch (error) {
     console.error('Webhook Error:', error);
     res.status(500).send({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/stats/total-sessions', async (req, res) => {
+  try {
+    const { count, error } = await supabase
+      .from('whatsapp_sessions')
+      .select('*', { count: 'exact', head: true });
+    
+    if (error) throw error;
+    res.json({ count: count || 0 });
+  } catch (error) {
+    console.error('Stats Error:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 

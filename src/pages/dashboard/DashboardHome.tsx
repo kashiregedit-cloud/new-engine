@@ -35,10 +35,11 @@ export default function DashboardHome() {
         setUserEmail(user.email);
         
         if (isWhatsApp) {
-          // Fetch simple stats for WhatsApp (All sessions)
+          // Fetch simple stats for WhatsApp (Only user's sessions)
           const { count: sessionCount } = await supabase
             .from('whatsapp_sessions')
-            .select('*', { count: 'exact', head: true });
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id);
             
           setStats(prev => ({ ...prev, sessions: sessionCount || 0 }));
         }
