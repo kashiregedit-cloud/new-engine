@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,9 +72,9 @@ const CustomAlert = ({
 }) => {
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-       <div className="bg-white rounded-lg shadow-2xl w-[90%] max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border-0">
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+       <div className="bg-white rounded-lg shadow-2xl w-[90%] max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 border-0 relative z-[100000]">
           <div className={`${type === 'warning' ? 'bg-[#ff5f5f]' : 'bg-blue-500'} p-6 flex justify-center items-center`}>
              <div className="bg-white rounded-full p-3 shadow-sm">
                 {type === 'warning' ? (
@@ -102,7 +103,8 @@ const CustomAlert = ({
              </div>
           </div>
        </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -177,7 +179,7 @@ export default function IntegrationPage() {
   }, []);
 
   useEffect(() => {
-    console.log("IntegrationPage v1.3 (Frontend Fixes) loaded");
+    console.log("IntegrationPage v1.4 (DEBUG MODE) loaded");
     if (platform === 'whatsapp') {
       fetchSessions();
       fetchBalance();
@@ -209,6 +211,8 @@ export default function IntegrationPage() {
 
   const handleStartNew = (e: React.MouseEvent) => {
     e.preventDefault(); // Prevent any form submission
+    // Debugging: Ensure button works
+    // alert("Start New Clicked"); 
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
@@ -529,6 +533,8 @@ export default function IntegrationPage() {
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        // Force a browser alert to prove execution
+                        // window.alert("Delete Button Clicked: " + session.session_name);
                         console.log("Delete clicked for:", session.session_name);
                         setSessionToDelete(session.session_name);
                         setShowDeleteConfirm(true);
