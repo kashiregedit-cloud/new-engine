@@ -135,11 +135,13 @@ export default function IntegrationPage() {
 
 
 
-  const handleStartNew = () => {
+  const handleStartNew = (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent any form submission
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
+    console.log("Opening confirmation dialog...");
     setShowConfirm(true);
   };
 
