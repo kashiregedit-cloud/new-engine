@@ -618,15 +618,26 @@ app.post('/session/delete', async (req, res) => {
     
     // If session not found in WAHA (404), we should still delete from DB
     if (!response.ok && response.status !== 404) {
-        const data = await response.json();
-        return res.status(response.status).json(data);
+        const text = await response.text();
+        try {
+            const data = JSON.parse(text);
+            return res.status(response.status).json(data);
+        } catch (e) {
+            return res.status(response.status).json({ error: text || 'Unknown WAHA Error' });
+        }
     }
 
     await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
     
     if (response.ok) {
-        const data = await response.json();
-        res.json(data);
+        const text = await response.text();
+        try {
+            const data = text ? JSON.parse(text) : { success: true };
+            res.json(data);
+        } catch (e) {
+            // If response is not JSON (e.g. empty string), just return success
+            res.json({ success: true, message: "Session deleted" });
+        }
     } else {
         // Mock success for 404 case
         res.json({ success: true, message: "Session deleted (was already missing in WAHA)" });

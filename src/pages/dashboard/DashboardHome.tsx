@@ -80,12 +80,12 @@ export default function DashboardHome() {
         <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-100 dark:border-blue-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-              {isWhatsApp ? 'Total Active Sessions' : 'Connected Pages'}
+              {isWhatsApp ? 'Total Sessions' : 'Connected Pages'}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold text-foreground">{stats.sessions}</div>
-            <p className="text-xs text-muted-foreground mt-1">Active {platformName} Sessions</p>
+            <p className="text-xs text-muted-foreground mt-1">Total {platformName} Sessions</p>
           </CardContent>
         </Card>
 

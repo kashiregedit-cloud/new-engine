@@ -255,7 +255,10 @@ export default function IntegrationPage() {
       
       toast.success(action === 'restart' ? "Session restarting. Check QR shortly." : `Session ${action}ed successfully`);
       
-      if (action === 'restart') {
+      if (action === 'delete') {
+          // Optimistic update: Remove immediately
+          setSessions(prev => prev.filter(s => s.session_name !== sessionName));
+      } else if (action === 'restart') {
          // Show QR modal immediately with loading state to trigger polling
          const session = sessions.find(s => s.session_name === sessionName);
          if (session) {
