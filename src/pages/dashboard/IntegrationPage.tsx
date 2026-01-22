@@ -127,6 +127,7 @@ export default function IntegrationPage() {
   }, []);
 
   useEffect(() => {
+    console.log("IntegrationPage v1.2 loaded");
     if (platform === 'whatsapp') {
       fetchSessions();
       fetchBalance();
