@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useWhatsApp } from "@/context/WhatsAppContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw } from "lucide-re
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/config";
 import { supabase } from "@/integrations/supabase/client";
+import { Label } from "@/components/ui/label";
 
 export default function SessionManager() {
   const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();
@@ -15,12 +16,52 @@ export default function SessionManager() {
   const [isCreating, setIsCreating] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [viewingSessionQr, setViewingSessionQr] = useState<string | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState("30");
 
-  const createSession = async () => {
+  const fetchBalance = useCallback(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data, error } = await supabase
+        .from('user_configs')
+        .select('balance')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (data) {
+          setBalance((data as any).balance);
+      }
+  }, []);
+
+  useEffect(() => {
+    fetchBalance();
+  }, [fetchBalance]);
+
+  const handleStartNew = async () => {
     if (!newSessionName.trim()) {
       toast.error("Please enter a session name");
       return;
     }
+
+    // Determine price based on plan
+    let price = 500;
+    if (selectedPlan === "60") price = 900;
+    if (selectedPlan === "90") price = 800;
+
+    // Force Browser Native Popup
+    setTimeout(() => {
+        const confirmed = window.confirm(
+            `Confirm Payment?\n\nPlan: ${selectedPlan} Days\nPrice: ${price} BDT\n\nBalance will be deducted. Press OK to Pay & Create.`
+        );
+        
+        if (confirmed) {
+            createSession();
+        }
+    }, 100);
+  };
+
+  const createSession = async () => {
     setIsCreating(true);
     setQrCodeUrl(null);
     try {
@@ -40,11 +81,15 @@ export default function SessionManager() {
       
       if (!user?.email) throw new Error("User email not found. Please contact support.");
 
+      // Generate random suffix for unique session name (6 chars) to avoid collisions
+      const suffix = Math.random().toString(36).substring(2, 8);
+      const finalSessionName = `${newSessionName.trim()}_${suffix}`;
+
       const payload = { 
-        sessionName: newSessionName,
+        sessionName: finalSessionName,
         userEmail: user.email,
         userId: user.id,
-        plan: 30
+        planDays: selectedPlan
       };
 
       const res = await fetch(`${BACKEND_URL}/session/create`, {
@@ -60,13 +105,14 @@ export default function SessionManager() {
       if (!res.ok) throw new Error(data.error || 'Failed to create session');
       
       toast.success("Session created! Fetching QR Code...");
+      fetchBalance(); // Update balance
       
       // Use the QR code returned directly from creation response if available
       if (data.qr_code) {
           setQrCodeUrl(data.qr_code);
-          setViewingSessionQr(newSessionName);
+          setViewingSessionQr(finalSessionName);
       } else {
-          fetchQr(newSessionName);
+          fetchQr(finalSessionName);
       }
       
       await refreshSessions();
@@ -127,6 +173,13 @@ export default function SessionManager() {
   };
 
   const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
+    if (action === 'delete') {
+        const confirmed = window.confirm(
+            "Are you sure you want to DELETE this session?\n\nThis will disconnect your WhatsApp and cannot be undone.\n\nPress OK to Delete."
+        );
+        if (!confirmed) return;
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${BACKEND_URL}/session/${action}`, {
@@ -167,10 +220,17 @@ export default function SessionManager() {
            <h2 className="text-3xl font-bold tracking-tight">WhatsApp Sessions</h2>
            <p className="text-muted-foreground">Create and manage your WhatsApp connections.</p>
         </div>
-        <Button onClick={() => refreshSessions()} variant="outline" size="sm">
-          <RefreshCw className={`mr-2 h-4 w-4 ${listLoading ? 'animate-spin' : ''}`} />
-          Refresh List
-        </Button>
+        <div className="flex gap-2 items-center">
+          {balance !== null && (
+              <Badge variant="outline" className="text-base px-3 py-1 border-green-200 bg-green-50 text-green-700">
+                  Balance: {balance} BDT
+              </Badge>
+          )}
+          <Button onClick={() => refreshSessions()} variant="outline" size="sm">
+            <RefreshCw className={`mr-2 h-4 w-4 ${listLoading ? 'animate-spin' : ''}`} />
+            Refresh List
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -182,12 +242,38 @@ export default function SessionManager() {
               New Session
             </CardTitle>
             <CardDescription>
-              Step 1: Enter a name and click create.<br/>
-              Step 2: Wait for QR Code to appear.<br/>
-              Step 3: Scan with WhatsApp.
+              Select plan, enter name, and pay to create.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Plan Selection */}
+            <div className="space-y-2">
+                <Label>Select Plan</Label>
+                <div className="grid grid-cols-3 gap-2">
+                    <div 
+                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "30" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                      onClick={() => setSelectedPlan("30")}
+                    >
+                        <div className="font-bold text-sm">30 Days</div>
+                        <div className="text-xs text-gray-500">500 BDT</div>
+                    </div>
+                    <div 
+                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "60" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                      onClick={() => setSelectedPlan("60")}
+                    >
+                        <div className="font-bold text-sm">60 Days</div>
+                        <div className="text-xs text-gray-500">900 BDT</div>
+                    </div>
+                    <div 
+                      className={`border p-2 rounded-lg text-center cursor-pointer transition-colors ${selectedPlan === "90" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-green-200"}`}
+                      onClick={() => setSelectedPlan("90")}
+                    >
+                        <div className="font-bold text-sm">90 Days</div>
+                        <div className="text-xs text-gray-500">800 BDT</div>
+                    </div>
+                </div>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium">Session Name</label>
               <Input 
@@ -197,11 +283,11 @@ export default function SessionManager() {
               />
             </div>
             <Button 
-              className="w-full" 
-              onClick={createSession} 
+              className="w-full bg-green-600 hover:bg-green-700" 
+              onClick={handleStartNew} 
               disabled={isCreating}
             >
-              {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Create & Get QR"}
+              {isCreating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Pay & Create"}
             </Button>
           </CardContent>
         </Card>
