@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Settings, Database, Plus, Facebook } from "lucide-react";
+import { Loader2, Settings, Database, Plus, Facebook, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 // Declare Facebook SDK types globally
@@ -79,6 +79,62 @@ export default function MessengerIntegrationPage() {
         }
       );
     });
+  };
+
+  const unsubscribeAppFromPage = (pageId: string, accessToken: string) => {
+    return new Promise((resolve) => {
+      window.FB.api(
+        `/${pageId}/subscribed_apps`,
+        'delete',
+        {
+          access_token: accessToken
+        },
+        function(response: any) {
+          if (!response || response.error) {
+            console.error('Error unsubscribing app from page:', response?.error);
+            resolve(false);
+          } else {
+            console.log('Successfully unsubscribed app from page:', response);
+            resolve(true);
+          }
+        }
+      );
+    });
+  };
+
+  const handleRemovePage = async (page: any) => {
+      if (!confirm(`Are you sure you want to disconnect ${page.name}? This will stop the bot from replying.`)) {
+          return;
+      }
+
+      try {
+          // 1. Try to unsubscribe from Facebook (best effort)
+          if (page.page_access_token && window.FB) {
+              await unsubscribeAppFromPage(page.page_id, page.page_access_token);
+          }
+
+          // 2. Remove from page_access_token_message
+          const { error } = await supabase
+              .from('page_access_token_message')
+              .delete()
+              .eq('page_id', page.page_id);
+
+          if (error) throw error;
+
+          // 3. Clear from local storage if active
+          const activeId = localStorage.getItem("active_fb_page_id");
+          if (activeId === page.page_id) {
+              localStorage.removeItem("active_fb_db_id");
+              localStorage.removeItem("active_fb_page_id");
+          }
+          
+          toast.success(`Disconnected ${page.name}`);
+          fetchPages();
+
+      } catch (error) {
+          console.error("Error removing page:", error);
+          toast.error("Failed to disconnect page");
+      }
   };
 
   const fetchPages = async () => {
@@ -319,10 +375,13 @@ export default function MessengerIntegrationPage() {
                        </Badge>
                     </TableCell>
                     <TableCell>{page.subscription_plan || 'Free'}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-2">
                       <Button variant="outline" size="sm" onClick={() => handleManage(page)}>
                         <Settings className="mr-2 h-4 w-4" />
                         Manage
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
