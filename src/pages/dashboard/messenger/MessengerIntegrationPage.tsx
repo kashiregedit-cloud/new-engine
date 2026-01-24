@@ -59,6 +59,28 @@ export default function MessengerIntegrationPage() {
     fetchPages();
   }, [userEmail]);
 
+  const subscribeAppToPage = (pageId: string, accessToken: string) => {
+    return new Promise((resolve, reject) => {
+      window.FB.api(
+        `/${pageId}/subscribed_apps`,
+        'post',
+        {
+          access_token: accessToken,
+          subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
+        },
+        function(response: any) {
+          if (!response || response.error) {
+            console.error('Error subscribing app to page:', response?.error);
+            reject(response?.error);
+          } else {
+            console.log('Successfully subscribed app to page:', response);
+            resolve(response);
+          }
+        }
+      );
+    });
+  };
+
   const fetchPages = async () => {
     if (!userEmail) return;
     
@@ -86,17 +108,38 @@ export default function MessengerIntegrationPage() {
 
     if (!import.meta.env.VITE_FACEBOOK_APP_ID) {
         toast.warning("Facebook App ID not configured. Please set VITE_FACEBOOK_APP_ID in your environment variables.");
-        // Continue anyway to show the dialog (it will fail or show error from FB side if ID is invalid)
     }
 
     setConnecting(true);
-    window.FB.login(function(response: any) {
+    window.FB.login(async function(response: any) {
       if (response.authResponse) {
-        console.log('Successfully logged in, fetching pages...');
-        const userAccessToken = response.authResponse.accessToken;
+        console.log('Successfully logged in, exchanging token...');
+        const shortLivedToken = response.authResponse.accessToken;
+        let finalToken = shortLivedToken;
+
+        // Exchange for Long-Lived Token via Backend
+        try {
+            const exchangeResponse = await fetch('http://localhost:3001/api/auth/facebook/exchange-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shortLivedToken })
+            });
+            const exchangeData = await exchangeResponse.json();
+            
+            if (exchangeData.access_token) {
+                console.log('Obtained long-lived token');
+                finalToken = exchangeData.access_token;
+            } else {
+                console.warn('Failed to exchange token, using short-lived one:', exchangeData.error);
+                toast.warning("Using short-lived token (1 hour). Configure backend secrets for 60-day token.");
+            }
+        } catch (err) {
+            console.error('Error contacting backend for token exchange:', err);
+            toast.warning("Backend connection failed. Using short-lived token.");
+        }
         
-        // Fetch User's Pages
-        window.FB.api('/me/accounts', function(pageResponse: any) {
+        // Fetch User's Pages using the (hopefully) Long-Lived Token
+        window.FB.api('/me/accounts', 'get', { access_token: finalToken }, function(pageResponse: any) {
           console.log('Pages fetched:', pageResponse);
           if (pageResponse && pageResponse.data) {
              savePagesToSupabase(pageResponse.data);
@@ -136,6 +179,16 @@ export default function MessengerIntegrationPage() {
               } else {
                   // Generate random 6-digit code
                   dbId = Math.floor(100000 + Math.random() * 900000);
+              }
+
+              // 1.5 Subscribe App to Page (Critical for Webhooks/n8n)
+              try {
+                await subscribeAppToPage(page.id, page.access_token);
+                console.log(`Subscribed app to page ${page.name}`);
+              } catch (subError) {
+                console.error(`Failed to subscribe app to page ${page.name}`, subError);
+                toast.error(`Could not enable bot for ${page.name}. Check permissions.`);
+                // Continue saving to DB even if subscription fails, but warn user
               }
 
               // 2. Upsert into page_access_token_message

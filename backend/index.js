@@ -15,6 +15,8 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'http://localhost:3000';
 const WAHA_API_KEY = process.env.WAHA_API_KEY;
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`;
+const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
+const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const DEBOUNCE_TIME = 2000; // 2 seconds
 
 // Default System Prompt (Fallback)
@@ -192,6 +194,37 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 }
 
 // --- Routes ---
+
+app.post('/api/auth/facebook/exchange-token', async (req, res) => {
+  const { shortLivedToken } = req.body;
+
+  if (!shortLivedToken) {
+    return res.status(400).json({ error: 'Short-lived token is required' });
+  }
+
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    console.error('Facebook App ID or Secret not configured in backend');
+    return res.status(500).json({ error: 'Server configuration error: Facebook credentials missing' });
+  }
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${FACEBOOK_APP_ID}&client_secret=${FACEBOOK_APP_SECRET}&fb_exchange_token=${shortLivedToken}`
+    );
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Error exchanging token:', data.error);
+      return res.status(400).json({ error: data.error.message });
+    }
+
+    res.json({ access_token: data.access_token });
+  } catch (error) {
+    console.error('Server error exchanging token:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 app.get('/session/qr/:sessionName', async (req, res) => {
   const { sessionName } = req.params;
