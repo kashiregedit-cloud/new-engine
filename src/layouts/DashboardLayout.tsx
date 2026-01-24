@@ -13,6 +13,8 @@ const pageTitles: Record<string, string> = {
   "/dashboard/integration": "Integration",
   "/dashboard/database": "Database Connect",
   "/dashboard/control": "Control Page",
+  "/dashboard/settings": "AI Settings",
+  "/dashboard/orders": "Order Tracking",
   "/dashboard/products": "Product Entry",
   "/dashboard/ads": "Ads Library",
   "/dashboard/reseller": "Reseller",
@@ -73,7 +75,16 @@ export function DashboardLayout() {
     );
   }
 
-  const currentTitle = pageTitles[location.pathname] || "Dashboard";
+  // Smart title lookup handling platform routes
+  let currentTitle = pageTitles[location.pathname];
+  if (!currentTitle && platform) {
+     // Try to find generic title by removing platform from path
+     // e.g. /dashboard/whatsapp/control -> /dashboard/control
+     const genericPath = location.pathname.replace(`/${platform}`, '');
+     currentTitle = pageTitles[genericPath];
+  }
+  
+  if (!currentTitle) currentTitle = "Dashboard";
 
   const LayoutContent = (
     <div className="min-h-screen bg-background flex w-full">

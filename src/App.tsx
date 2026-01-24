@@ -20,7 +20,13 @@ import PaymentPage from "./pages/dashboard/PaymentPage";
 import AdminPage from "./pages/dashboard/AdminPage";
 import PlatformSelection from "./pages/dashboard/PlatformSelection";
 import SettingsPage from "./pages/dashboard/SettingsPage";
+import OrderTrackingPage from "./pages/dashboard/OrderTrackingPage";
 import SessionManager from "./pages/dashboard/whatsapp/SessionManager";
+import MessengerIntegrationPage from "./pages/dashboard/messenger/MessengerIntegrationPage";
+import MessengerControlPage from "./pages/dashboard/messenger/MessengerControlPage";
+import MessengerOrderTrackingPage from "./pages/dashboard/messenger/MessengerOrderTrackingPage";
+import MessengerSettingsPage from "./pages/dashboard/messenger/MessengerSettingsPage";
+import MessengerDatabasePage from "./pages/dashboard/messenger/MessengerDatabasePage";
 import { WhatsAppProvider } from "./context/WhatsAppContext";
 import { Outlet, useParams } from "react-router-dom";
 
@@ -49,7 +55,37 @@ const App = () => (
             <Route path="payment" element={<PaymentPage />} />
             <Route path="profile" element={<ProfilePage />} />
 
-            {/* Platform Specific Routes */}
+            {/* WhatsApp Routes */}
+            <Route path="whatsapp" element={<Outlet />}>
+              <Route index element={<DashboardHome />} />
+              <Route path="sessions" element={<SessionManager />} />
+              <Route path="control" element={<ControlPage />} />
+              <Route path="orders" element={<OrderTrackingPage />} />
+              <Route path="database" element={<DatabasePage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="ads" element={<AdsPage />} />
+              <Route path="reseller" element={<ResellerPage />} />
+              <Route path="profile" element={<ProfilePage />} />
+              <Route path="payment" element={<PaymentPage />} />
+            </Route>
+
+            {/* Messenger Routes */}
+            <Route path="messenger" element={<Outlet />}>
+              <Route index element={<DashboardHome />} />
+              <Route path="integration" element={<MessengerIntegrationPage />} />
+              <Route path="control" element={<MessengerControlPage />} />
+              <Route path="orders" element={<MessengerOrderTrackingPage />} />
+              <Route path="database" element={<MessengerDatabasePage />} />
+              <Route path="settings" element={<MessengerSettingsPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="ads" element={<AdsPage />} />
+              <Route path="reseller" element={<ResellerPage />} />
+              <Route path="profile" element={<ProfilePage />} />
+              <Route path="payment" element={<PaymentPage />} />
+            </Route>
+
+            {/* Platform Specific Routes (Fallback) */}
             <Route path=":platform" element={<Outlet />}>
               <Route index element={<DashboardHome />} />
               <Route path="integration" element={<IntegrationPage />} />
@@ -57,6 +93,7 @@ const App = () => (
               <Route path="database" element={<DatabasePage />} />
               <Route path="control" element={<ControlPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="orders" element={<OrderTrackingPage />} />
               <Route path="products" element={<ProductsPage />} />
               <Route path="ads" element={<AdsPage />} />
               <Route path="reseller" element={<ResellerPage />} />

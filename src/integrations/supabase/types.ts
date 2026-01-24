@@ -192,6 +192,129 @@ export interface Database {
           is_processing?: boolean | null
         }
       }
+      fb_message_database: {
+        Row: {
+          id: number
+          reply_message: boolean
+          swipe_reply: boolean
+          image_detection: boolean
+          image_send: boolean
+          template: boolean
+          order_tracking: boolean
+          text_prompt: string | null
+          image_prompt: string | null
+          template_prompt_x1: string | null
+          template_prompt_x2: string | null
+          page_id: string | null
+          verified: boolean | null
+        }
+        Insert: {
+          id: number
+          reply_message?: boolean
+          swipe_reply?: boolean
+          image_detection?: boolean
+          image_send?: boolean
+          template?: boolean
+          order_tracking?: boolean
+          text_prompt?: string | null
+          image_prompt?: string | null
+          template_prompt_x1?: string | null
+          template_prompt_x2?: string | null
+          page_id?: string | null
+          verified?: boolean | null
+        }
+        Update: {
+          id?: number
+          reply_message?: boolean
+          swipe_reply?: boolean
+          image_detection?: boolean
+          image_send?: boolean
+          template?: boolean
+          order_tracking?: boolean
+          text_prompt?: string | null
+          image_prompt?: string | null
+          template_prompt_x1?: string | null
+          template_prompt_x2?: string | null
+          page_id?: string | null
+          verified?: boolean | null
+        }
+      }
+      page_access_token_message: {
+        Row: {
+          name: string
+          page_id: string
+          data_sheet: string | null
+          page_access_token: string | null
+          secret_key: string | null
+          found_id: string | null
+          subscription_plan: string | null
+          subscription_expiry: string | null
+          subscription_status: string | null
+          api_key: string | null
+          chat_model: string | null
+          ai: string | null
+          email: string | null
+        }
+        Insert: {
+          name: string
+          page_id: string
+          data_sheet?: string | null
+          page_access_token?: string | null
+          secret_key?: string | null
+          found_id?: string | null
+          subscription_plan?: string | null
+          subscription_expiry?: string | null
+          subscription_status?: string | null
+          api_key?: string | null
+          chat_model?: string | null
+          ai?: string | null
+          email?: string | null
+        }
+        Update: {
+          name?: string
+          page_id?: string
+          data_sheet?: string | null
+          page_access_token?: string | null
+          secret_key?: string | null
+          found_id?: string | null
+          subscription_plan?: string | null
+          subscription_expiry?: string | null
+          subscription_status?: string | null
+          api_key?: string | null
+          chat_model?: string | null
+          ai?: string | null
+          email?: string | null
+        }
+      }
+      fb_order_tracking: {
+        Row: {
+          id: number
+          product_name: string | null
+          number: number | null
+          location: string | null
+          product_quantity: string | null
+          price: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          product_name?: string | null
+          number?: number | null
+          location?: string | null
+          product_quantity?: string | null
+          price?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          product_name?: string | null
+          number?: number | null
+          location?: string | null
+          product_quantity?: string | null
+          price?: string | null
+          created_at?: string
+        }
+      }
       wp_chats: {
         Row: {
           id: number

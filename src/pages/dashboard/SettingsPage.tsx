@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Save, ExternalLink, ChevronDown, ChevronUp, Settings2 } from "lucide-react";
+import { Save, ExternalLink, ChevronDown, ChevronUp, Settings2, Bot, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Database } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import {
   Card,
   CardContent,
@@ -34,79 +34,142 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 const formSchema = z.object({
-  ai_provider: z.string().min(1, "Please select a provider"),
+  provider: z.string().min(1, "Please select a provider"),
   api_key: z.string().min(1, "API Key is required"),
-  model_name: z.string().min(1, "Model name is required"),
-  system_prompt: z.string().optional(),
+  chatmodel: z.string().min(1, "Model name is required"),
+  text_prompt: z.string().optional(),
 });
 
 export default function SettingsPage() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [dbId, setDbId] = useState<string | null>(null);
+  const [verified, setVerified] = useState(true);
   
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      ai_provider: "openrouter",
+      provider: "openrouter",
       api_key: "",
-      model_name: "xiaomi/mimo-v2-flash:free",
-      system_prompt: "You are a helpful assistant for a WhatsApp store.",
+      chatmodel: "xiaomi/mimo-v2-flash:free",
+      text_prompt: "You are a helpful assistant for a WhatsApp store.",
     },
   });
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data } = await supabase
-        .from('user_configs')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      // Explicitly cast to the correct type to bypass 'never' inference
-      const config = data as Database['public']['Tables']['user_configs']['Row'] | null;
-
-      if (config) {
-        form.reset({
-          ai_provider: config.ai_provider || "openrouter",
-          api_key: config.api_key || "",
-          model_name: config.model_name || "xiaomi/mimo-v2-flash:free",
-          system_prompt: config.system_prompt || "",
-        });
+    const checkConnection = () => {
+      const storedDbId = localStorage.getItem("active_wp_db_id");
+      if (storedDbId) {
+        setDbId(storedDbId);
+        fetchConfig(storedDbId);
+      } else {
+        setDbId(null);
+        setLoading(false);
       }
     };
-    fetchConfig();
+
+    checkConnection();
+
+    window.addEventListener("storage", checkConnection);
+    window.addEventListener("db-connection-changed", checkConnection);
+
+    return () => {
+      window.removeEventListener("storage", checkConnection);
+      window.removeEventListener("db-connection-changed", checkConnection);
+    };
   }, [form]);
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    setLoading(true);
+  const fetchConfig = async (id: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user found");
-
-      const updates: Database['public']['Tables']['user_configs']['Insert'] = {
-        user_id: user.id,
-        ai_provider: values.ai_provider,
-        api_key: values.api_key,
-        model_name: values.model_name,
-        system_prompt: values.system_prompt,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase.from('user_configs').upsert(updates as any);
+      const { data, error } = await supabase
+        .from('wp_message_database')
+        .select('*')
+        .eq('id', parseInt(id))
+        .single();
 
       if (error) throw error;
-      toast.success("Settings saved successfully");
-    } catch (error: unknown) {
-      console.error("Error saving settings:", error);
-      const message = error instanceof Error ? error.message : "Failed to save settings";
-      toast.error(message);
+
+      if (data) {
+        // Explicitly cast data to any to bypass 'never' type inference
+        const row = data as any;
+        setVerified(row.verified !== false);
+        form.reset({
+          provider: row.provider || "openrouter",
+          api_key: row.api_key || "",
+          chatmodel: row.chatmodel || "xiaomi/mimo-v2-flash:free",
+          text_prompt: row.text_prompt || "",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching config:", error);
+      toast.error("Failed to load AI settings");
     } finally {
       setLoading(false);
     }
   };
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (!dbId) return;
+    setLoading(true);
+    try {
+      const { error } = await (supabase
+        .from('wp_message_database') as any)
+        .update({
+            provider: values.provider,
+            api_key: values.api_key,
+            chatmodel: values.chatmodel,
+            text_prompt: values.text_prompt
+        })
+        .eq('id', parseInt(dbId));
+
+      if (error) throw error;
+      toast.success("AI settings saved successfully");
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error("Failed to save settings: " + message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+     return (
+        <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+        </div>
+     );
+  }
+
+  if (!dbId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
+        <Bot className="h-16 w-16 text-muted-foreground" />
+        <h2 className="text-2xl font-bold">No Database Connected</h2>
+        <p className="text-muted-foreground">Please connect to a database to manage AI settings.</p>
+        <Button asChild>
+            <Link to="/dashboard/database">Go to Database</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (!verified) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm p-4">
+        <div className="max-w-md w-full text-center space-y-6 p-8 rounded-xl border bg-card shadow-2xl">
+          <div className="mx-auto w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center">
+            <Lock className="w-8 h-8 text-destructive" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-destructive">Account Locked</h2>
+            <p className="text-muted-foreground">
+              Your session has expired or is unverified. Please reactivate your account to access AI settings.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -132,7 +195,7 @@ export default function SettingsPage() {
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                 <FormField
                   control={form.control}
-                  name="ai_provider"
+                  name="provider"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-base">Select Provider</FormLabel>
@@ -140,11 +203,11 @@ export default function SettingsPage() {
                         onValueChange={(val) => {
                             field.onChange(val);
                             // Auto-set recommended models
-                            if (val === 'openai') form.setValue('model_name', 'openai/gpt-4o');
-                            if (val === 'google') form.setValue('model_name', 'google/gemini-2.0-flash-lite-preview-02-05:free');
-                            if (val === 'groq') form.setValue('model_name', 'groq/llama-3.3-70b-versatile');
-                            if (val === 'openrouter') form.setValue('model_name', 'xiaomi/mimo-v2-flash:free');
-                            if (val === 'xai') form.setValue('model_name', 'xai/grok-beta');
+                            if (val === 'openai') form.setValue('chatmodel', 'openai/gpt-4o');
+                            if (val === 'google') form.setValue('chatmodel', 'google/gemini-2.0-flash-lite-preview-02-05:free');
+                            if (val === 'groq') form.setValue('chatmodel', 'groq/llama-3.3-70b-versatile');
+                            if (val === 'openrouter') form.setValue('chatmodel', 'xiaomi/mimo-v2-flash:free');
+                            if (val === 'xai') form.setValue('chatmodel', 'xai/grok-beta');
                         }} 
                         defaultValue={field.value} 
                         value={field.value}
@@ -201,7 +264,7 @@ export default function SettingsPage() {
                         <div className="mt-4 space-y-4 animate-in fade-in slide-in-from-top-2">
                              <FormField
                                 control={form.control}
-                                name="model_name"
+                                name="chatmodel"
                                 render={({ field }) => (
                                   <FormItem>
                                     <FormLabel>Model Name</FormLabel>
@@ -218,7 +281,7 @@ export default function SettingsPage() {
 
                             <FormField
                               control={form.control}
-                              name="system_prompt"
+                              name="text_prompt"
                               render={({ field }) => (
                                 <FormItem>
                                   <FormLabel>System Instruction (Prompt)</FormLabel>

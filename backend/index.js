@@ -39,6 +39,10 @@ About You :
 
 // --- Helpers ---
 
+function generateRandomId() {
+  return Math.floor(100000 + Math.random() * 900000); // 6 digit random number
+}
+
 // Get AI Configuration from DB or Env
 async function getAIConfig(sessionName) {
   let userId = null;
@@ -227,11 +231,13 @@ app.post('/session/create', async (req, res) => {
   const engineCode = selectedEngine === 'WEBJS' ? 'WEBJS' : 'NOWEB';
 
   if (engineCode === 'WEBJS') {
+      if (days === 2) price = 200; // New Demo Plan
       if (days === 30) price = 2000;
       if (days === 60) price = 3500;
       if (days === 90) price = 4000;
   } else {
       // NOWAB / NOWEB (Default)
+      if (days === 2) price = 100; // New Demo Plan
       if (days === 30) price = 500;
       if (days === 60) price = 900;
       if (days === 90) price = 1500;
@@ -365,7 +371,7 @@ app.post('/session/create', async (req, res) => {
         engine: engineCode, // Explicitly send engine to WAHA
         metadata: {
             "user_email": userEmail,
-            "plan_days": days,
+            "plan_days": String(days), // WAHA requires string values for metadata
             "engine": engineCode
         },
         debug: false,
@@ -393,10 +399,13 @@ app.post('/session/create', async (req, res) => {
         ],
         client: {
           deviceName: "salesmanchatbot.online || wp : +880195687140.",
-          browserName: "Chrome"
+          browserName: isNoweb ? "IE" : "Chrome"
         }
       }
     };
+    
+    // Log the payload to debug engine selection
+    console.log('Sending WAHA Payload:', JSON.stringify(payload, null, 2));
 
     // 1. Create Session (and Start due to start: true)
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
@@ -477,6 +486,8 @@ app.post('/session/create', async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + days);
 
+    let wpMessageId = null; // Defined in outer scope
+
     try {
         const payload = {
             session_id: finalSessionId, 
@@ -503,12 +514,81 @@ app.post('/session/create', async (req, res) => {
                  await supabase.from('whatsapp_sessions').upsert(payload, { onConflict: 'session_name' });
              }
         }
+
+        // --- NEW: Insert or Update wp_message_database ---
+        try {
+            // Check if row exists for this session
+            const { data: existingWp } = await scopedSupabase
+                .from('wp_message_database')
+                .select('id')
+                .eq('session', sessionName)
+                .maybeSingle();
+
+            if (existingWp) {
+                wpMessageId = existingWp.id;
+                console.log(`Reactivating existing wp_message_database row for ${sessionName} (ID: ${existingWp.id})`);
+                const { error: updateError } = await scopedSupabase
+                    .from('wp_message_database')
+                    .update({ verified: true })
+                    .eq('id', existingWp.id);
+                
+                if (updateError) {
+                    console.error('wp_message_database Reactivation Error:', updateError);
+                    // Fallback
+                    if (authHeader) {
+                        await supabase.from('wp_message_database').update({ verified: true }).eq('id', existingWp.id);
+                    }
+                }
+            } else {
+                wpMessageId = generateRandomId();
+                const wpPayload = {
+                    id: wpMessageId,
+                    session: sessionName,
+                    reply_message: false,
+                    swipe_reply: false,
+                    image_detection: false,
+                    image_send: false,
+                    template: false,
+                    order_tracking: false,
+                    verified: true, // Auto-verified on creation
+                    page_id: null,
+                    text_prompt: null,
+                    image_prompt: null,
+                    template_prompt_x1: null,
+                    template_prompt_x2: null,
+                    api_key: null,
+                    provider: null,
+                    chatmodel: null
+                };
+
+                console.log('Inserting into wp_message_database:', wpPayload);
+                const { error: wpError } = await scopedSupabase
+                    .from('wp_message_database')
+                    .insert(wpPayload);
+                
+                if (wpError) {
+                    console.error('wp_message_database Insert Error:', wpError);
+                    // Fallback to global client
+                    if (authHeader) {
+                       await supabase.from('wp_message_database').insert(wpPayload);
+                    }
+                }
+            }
+        } catch (wpErr) {
+             console.error('wp_message_database logic error:', wpErr);
+        }
+        // --------------------------------------------
+
     } catch (dbErr) {
         console.error('DB Unexpected Error (Non-fatal):', dbErr);
     }
 
-    // Return final response with QR (or null if timed out)
-    res.json({ ...data, qr_code: qrDataUri });
+    // Return final response with QR and WP DB ID
+    res.json({ 
+        ...data, 
+        qr_code: qrDataUri,
+        wp_db_id: wpMessageId // Return the generated ID to frontend
+    });
 
   } catch (error) {
     console.error('Create Session Error:', error);
@@ -528,15 +608,18 @@ app.get('/sessions', async (req, res) => {
 
     // Fetch from Supabase to merge additional info (QR, plan, etc)
     const { data: dbSessions } = await supabase.from('whatsapp_sessions').select('*');
+    const { data: wpSessions } = await supabase.from('wp_message_database').select('id, session');
 
     // Merge WAHA data with DB data
     const mergedSessions = wahaData.map(session => {
       const dbSession = dbSessions?.find(s => s.session_name === session.name);
+      const wpSession = wpSessions?.find(s => s.session === session.name);
       return {
         ...session,
         qr_code: dbSession?.qr_code || null,
         user_email: dbSession?.user_email || null,
-        user_id: dbSession?.user_id || null
+        user_id: dbSession?.user_id || null,
+        wp_id: wpSession?.id || null
       };
     });
 
@@ -586,35 +669,89 @@ app.post('/session/stop', async (req, res) => {
 app.post('/session/restart', async (req, res) => {
   const { sessionName } = req.body;
   try {
-    // 1. Stop Session
-    try {
-        const stopUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/stop`;
-        const headers = { 'Content-Type': 'application/json' };
-        if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
-        await fetch(stopUrl, { method: 'POST', headers });
-    } catch (e) {
-        console.log(`Stop failed for ${sessionName} (might be already stopped):`, e);
+    // 1. Fetch Session Info from DB (to preserve config)
+    const { data: sessionData, error: dbError } = await supabase
+        .from('whatsapp_sessions')
+        .select('*')
+        .eq('session_name', sessionName)
+        .single();
+     
+    if (dbError || !sessionData) {
+         return res.status(404).json({ error: 'Session not found in database' });
     }
 
-    // Wait 5s to ensure full stop
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    const engineCode = sessionData.engine || 'WEBJS'; // Default to WEBJS for safety
+    const planDays = sessionData.plan_days || 30;
+    const userEmail = sessionData.user_email;
 
-    // 2. Start Session
-    const startUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}/start`;
+    console.log(`Hard Restarting session ${sessionName} (Engine: ${engineCode})...`);
+
+    // 2. DELETE Session from WAHA (Hard Reset to fix "Could not connect")
+    try {
+        const deleteUrl = `${WAHA_BASE_URL}/api/sessions/${sessionName}`;
+        const headers = { 'Content-Type': 'application/json' };
+        if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
+        await fetch(deleteUrl, { method: 'DELETE', headers });
+        console.log(`Deleted session ${sessionName} from WAHA for restart.`);
+    } catch (e) {
+        console.log(`Delete failed for ${sessionName} (might not exist):`, e);
+    }
+
+    // Wait 3s to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 3. RE-CREATE Session in WAHA
+    const createUrl = `${WAHA_BASE_URL}/api/sessions`;
     const headers = { 'Content-Type': 'application/json' };
     if (WAHA_API_KEY) headers['X-Api-Key'] = WAHA_API_KEY;
-    
-    const response = await fetch(startUrl, { method: 'POST', headers });
+
+    const isNoweb = engineCode !== 'WEBJS';
+    const payload = {
+      name: sessionName,
+      start: true,
+      config: {
+        engine: engineCode,
+        metadata: {
+            "user_email": userEmail,
+            "plan_days": String(planDays),
+            "engine": engineCode
+        },
+        debug: false,
+        ...(isNoweb ? {
+            noweb: {
+              markOnline: true,
+              store: { enabled: true, fullSync: false }
+            }
+        } : {}),
+        webhooks: [
+          {
+            url: `https://n8n.salesmanchatbot.online/webhook/webhook`,
+            events: ['message', 'session.status'],
+            retries: { delaySeconds: 2, attempts: 15, policy: "linear" },
+            customHeaders: null
+          }
+        ],
+        client: {
+          deviceName: "salesmanchatbot.online || wp : +880195687140.",
+          browserName: isNoweb ? "IE" : "Chrome"
+        }
+      }
+    };
+
+    const response = await fetch(createUrl, { method: 'POST', headers, body: JSON.stringify(payload) });
     const data = await response.json();
     
-    if (!response.ok) return res.status(response.status).json(data);
+    if (!response.ok) {
+         console.error('WAHA Restart/Create Failed:', data);
+         return res.status(response.status).json(data);
+    }
 
     await supabase.from('whatsapp_sessions').update({ status: 'WORKING' }).eq('session_name', sessionName);
 
-    // 3. Trigger QR Fetch Loop
+    // 4. Trigger QR Fetch Loop
      (async () => {
          // Initial delay
-         await new Promise(resolve => setTimeout(resolve, 5000));
+         await new Promise(resolve => setTimeout(resolve, 3000));
  
          for (let i = 0; i < 20; i++) {
              try {
@@ -663,7 +800,7 @@ app.post('/session/restart', async (req, res) => {
   }
 });
 
-app.post('/session/delete', async (req, res) => {
+app.delete('/session/delete', async (req, res) => {
   const { sessionName } = req.body;
   try {
     const url = `${WAHA_BASE_URL}/api/sessions/${sessionName}`;
@@ -691,9 +828,17 @@ app.post('/session/delete', async (req, res) => {
 
     const { error: dbError } = await supabase.from('whatsapp_sessions').delete().eq('session_name', sessionName);
     
+    // Also delete from wp_message_database
+    const { error: wpError } = await supabase.from('wp_message_database').delete().eq('session', sessionName);
+    
     if (dbError) {
         console.error('DB Delete Error:', dbError);
         throw new Error('Failed to delete from database');
+    }
+
+    if (wpError) {
+        console.error('WP DB Delete Error:', wpError);
+        // We log but don't block success if main session is deleted
     }
 
     res.json({ success: true, message: "Session deleted from DB (and WAHA if available)" });
@@ -905,7 +1050,18 @@ async function checkExpiredSessions() {
 
     for (const session of expiredSessions) {
       const sessionName = session.session_name;
-      console.log(`Deleting expired session: ${sessionName}`);
+      console.log(`Processing expired session: ${sessionName}`);
+
+      // 0. Mark as Unverified in wp_message_database (Lock Logic)
+      try {
+        console.log(`Locking wp_message_database for ${sessionName}...`);
+        await supabase
+            .from('wp_message_database')
+            .update({ verified: false })
+            .eq('session', sessionName);
+      } catch (lockErr) {
+        console.error(`Failed to lock wp_message_database for ${sessionName}:`, lockErr);
+      }
 
       // 1. Delete from WAHA
       try {

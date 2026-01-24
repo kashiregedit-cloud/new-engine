@@ -55,8 +55,8 @@ export default function PlatformSelection() {
       description: "Connect with customers on Facebook with automated replies and order tracking.",
       icon: Facebook,
       color: "bg-blue-600",
-      stats: "Coming Soon",
-      action: "Connect"
+      stats: "Active",
+      action: "Manage"
     },
     {
       id: "instagram",
@@ -85,7 +85,7 @@ export default function PlatformSelection() {
             Manage all your customer conversations in one place. Select a platform below to get started with your automation journey.
           </p>
           <div className="flex flex-wrap gap-4">
-            <Button size="lg" onClick={() => navigate('/dashboard/whatsapp')}>
+            <Button size="lg" onClick={() => navigate('/dashboard/whatsapp/sessions')}>
               Go to WhatsApp <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
             <Button variant="outline" size="lg">
@@ -132,14 +132,14 @@ export default function PlatformSelection() {
               key={platform.id} 
               className="group relative overflow-hidden transition-all hover:shadow-lg border-muted/60"
             >
-              <div className={`absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity ${platform.color}`} />
+              <div className={`absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity ${platform.color} pointer-events-none`} />
               
               <CardHeader>
                 <div className="flex items-center justify-between mb-2">
                   <div className={`p-3 rounded-xl text-white shadow-md ${platform.color}`}>
                     <platform.icon size={24} />
                   </div>
-                  {platform.id === 'whatsapp' ? (
+                  {['whatsapp', 'messenger'].includes(platform.id) ? (
                      <div className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
                        <span className="relative flex h-2 w-2">
                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -162,12 +162,16 @@ export default function PlatformSelection() {
               <CardFooter className="pt-2">
                 <Button 
                   className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors" 
-                  variant={platform.id === 'whatsapp' ? "default" : "outline"}
-                  onClick={() => navigate(`/dashboard/${platform.id}`)}
-                  disabled={platform.id !== 'whatsapp'}
+                  variant={['whatsapp', 'messenger'].includes(platform.id) ? "default" : "outline"}
+                  onClick={() => {
+                    if (platform.id === 'whatsapp') navigate('/dashboard/whatsapp/sessions');
+                    else if (platform.id === 'messenger') navigate('/dashboard/messenger/integration');
+                    else navigate(`/dashboard/${platform.id}`);
+                  }}
+                  disabled={!['whatsapp', 'messenger'].includes(platform.id)}
                 >
                   {platform.action}
-                  {platform.id === 'whatsapp' && <ArrowRight className="ml-2 h-4 w-4" />}
+                  {['whatsapp', 'messenger'].includes(platform.id) && <ArrowRight className="ml-2 h-4 w-4" />}
                 </Button>
               </CardFooter>
             </Card>

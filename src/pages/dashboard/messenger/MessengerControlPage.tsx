@@ -3,12 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic } from "lucide-react";
+import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, LayoutTemplate } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 
-export default function ControlPage() {
+export default function MessengerControlPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dbId, setDbId] = useState<string | null>(null);
@@ -18,13 +18,13 @@ export default function ControlPage() {
     swipe_reply: false,
     image_detection: false,
     image_send: false,
+    template: false,
     order_tracking: false,
-    audio_detection: false
   });
 
   useEffect(() => {
     const checkConnection = () => {
-      const storedDbId = localStorage.getItem("active_wp_db_id");
+      const storedDbId = localStorage.getItem("active_fb_db_id");
       if (storedDbId) {
         setDbId(storedDbId);
         fetchConfig(storedDbId);
@@ -37,18 +37,16 @@ export default function ControlPage() {
     checkConnection();
 
     window.addEventListener("storage", checkConnection);
-    window.addEventListener("db-connection-changed", checkConnection);
-
+    
     return () => {
       window.removeEventListener("storage", checkConnection);
-      window.removeEventListener("db-connection-changed", checkConnection);
     };
   }, []);
 
   const fetchConfig = async (id: string) => {
     try {
       const { data, error } = await supabase
-        .from('wp_message_database')
+        .from('fb_message_database')
         .select('*')
         .eq('id', parseInt(id))
         .single();
@@ -56,7 +54,6 @@ export default function ControlPage() {
       if (error) throw error;
 
       if (data) {
-        // Explicitly cast data to any to bypass 'never' type inference
         const row = data as any;
         setVerified(row.verified !== false); 
         setConfig({
@@ -64,8 +61,8 @@ export default function ControlPage() {
           swipe_reply: row.swipe_reply ?? false,
           image_detection: row.image_detection ?? false,
           image_send: row.image_send ?? false,
+          template: row.template ?? false,
           order_tracking: row.order_tracking ?? false,
-          audio_detection: row.audio_detection ?? false
         });
       }
     } catch (error) {
@@ -81,7 +78,7 @@ export default function ControlPage() {
     setSaving(true);
     try {
       const { error } = await (supabase
-        .from('wp_message_database') as any)
+        .from('fb_message_database') as any)
         .update(config)
         .eq('id', parseInt(dbId));
 
@@ -108,10 +105,10 @@ export default function ControlPage() {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
         <Bot className="h-16 w-16 text-muted-foreground" />
-        <h2 className="text-2xl font-bold">No Database Connected</h2>
-        <p className="text-muted-foreground">Please connect to a database to manage bot controls.</p>
+        <h2 className="text-2xl font-bold">No Page Connected</h2>
+        <p className="text-muted-foreground">Please select a Facebook page to manage.</p>
         <Button asChild>
-            <Link to="/dashboard/database">Go to Database</Link>
+            <Link to="/dashboard/messenger/integration">Go to Pages</Link>
         </Button>
       </div>
     );
@@ -139,9 +136,9 @@ export default function ControlPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-3xl font-bold text-foreground tracking-tight">Bot Control</h2>
+          <h2 className="text-3xl font-bold text-foreground tracking-tight">Messenger Bot Control</h2>
           <p className="text-muted-foreground">
-            Manage your automation features.
+            Manage your Facebook Messenger automation features.
           </p>
         </div>
         <Button onClick={handleSave} disabled={saving} size="lg" className="shadow-lg">
@@ -199,7 +196,7 @@ export default function ControlPage() {
               </div>
               <div className="space-y-1">
                 <Label className="text-lg font-semibold cursor-pointer">Image Detection</Label>
-                <p className="text-sm text-muted-foreground">Analyze received images.</p>
+                <p className="text-sm text-muted-foreground">Analyze received images with AI.</p>
               </div>
             </div>
             <Switch 
@@ -213,12 +210,12 @@ export default function ControlPage() {
         <Card className="bg-card border-border shadow-sm">
           <CardContent className="p-6 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-orange-100 text-orange-600 rounded-full">
-                 <Image size={24} />
+              <div className="p-3 bg-pink-100 text-pink-600 rounded-full">
+                 <Sparkles size={24} />
               </div>
               <div className="space-y-1">
                 <Label className="text-lg font-semibold cursor-pointer">Image Send</Label>
-                <p className="text-sm text-muted-foreground">Allow bot to send images.</p>
+                <p className="text-sm text-muted-foreground">Allow bot to send generated images.</p>
               </div>
             </div>
             <Switch 
@@ -228,40 +225,40 @@ export default function ControlPage() {
           </CardContent>
         </Card>
 
+         {/* Template */}
+         <Card className="bg-card border-border shadow-sm">
+          <CardContent className="p-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-orange-100 text-orange-600 rounded-full">
+                 <LayoutTemplate size={24} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-lg font-semibold cursor-pointer">Template</Label>
+                <p className="text-sm text-muted-foreground">Use templates for structured messages.</p>
+              </div>
+            </div>
+            <Switch 
+              checked={config.template}
+              onCheckedChange={(c) => setConfig({...config, template: c})}
+            />
+          </CardContent>
+        </Card>
+
         {/* Order Tracking */}
         <Card className="bg-card border-border shadow-sm">
           <CardContent className="p-6 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-pink-100 text-pink-600 rounded-full">
+              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-full">
                  <PackageSearch size={24} />
               </div>
               <div className="space-y-1">
                 <Label className="text-lg font-semibold cursor-pointer">Order Tracking</Label>
-                <p className="text-sm text-muted-foreground">Automated order status checks.</p>
+                <p className="text-sm text-muted-foreground">Track and manage orders automatically.</p>
               </div>
             </div>
             <Switch 
               checked={config.order_tracking}
               onCheckedChange={(c) => setConfig({...config, order_tracking: c})}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Audio Detection */}
-        <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-yellow-100 text-yellow-600 rounded-full">
-                 <Mic size={24} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-lg font-semibold cursor-pointer">Audio Detection</Label>
-                <p className="text-sm text-muted-foreground">Transcribe and process audio messages.</p>
-              </div>
-            </div>
-            <Switch 
-              checked={config.audio_detection}
-              onCheckedChange={(c) => setConfig({...config, audio_detection: c})}
             />
           </CardContent>
         </Card>

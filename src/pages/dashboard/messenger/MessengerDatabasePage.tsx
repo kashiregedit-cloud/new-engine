@@ -8,66 +8,94 @@ import { Database, Search, CheckCircle, XCircle, Loader2, LogOut } from "lucide-
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-export default function DatabasePage() {
+export default function MessengerDatabasePage() {
   const [searchId, setSearchId] = useState("");
   const [loading, setLoading] = useState(false);
   const [connectedDb, setConnectedDb] = useState<any | null>(null);
+  const [pageName, setPageName] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if already connected
     const checkConnection = () => {
-      const storedId = localStorage.getItem("active_wp_db_id");
+      const storedId = localStorage.getItem("active_fb_db_id");
       if (storedId) {
         setSearchId(storedId);
         fetchDatabase(storedId);
       } else {
         setConnectedDb(null);
         setSearchId("");
+        setPageName(null);
       }
     };
 
     checkConnection();
 
-    // Listen for storage changes (from other tabs or same tab custom event)
+    // Listen for storage changes
     window.addEventListener("storage", checkConnection);
-    window.addEventListener("db-connection-changed", checkConnection);
-
+    
     return () => {
       window.removeEventListener("storage", checkConnection);
-      window.removeEventListener("db-connection-changed", checkConnection);
     };
   }, []);
 
   const fetchDatabase = async (id: string) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('wp_message_database')
+      // 1. Fetch from fb_message_database
+      const { data: dbData, error: dbError } = await supabase
+        .from('fb_message_database')
         .select('*')
         .eq('id', parseInt(id))
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      if (dbError) throw dbError;
       
-      if (data) {
-        setConnectedDb(data);
-        localStorage.setItem("active_wp_db_id", id);
+      if (dbData) {
+        setConnectedDb(dbData);
+        localStorage.setItem("active_fb_db_id", id);
+        
+        // Explicitly cast to any to handle potential type inference issues with maybeSingle()
+        const typedDbData = dbData as any;
+        if (typedDbData.page_id) {
+            localStorage.setItem("active_fb_page_id", typedDbData.page_id);
+            fetchPageDetails(typedDbData.page_id);
+        }
       } else {
         toast.error("Database not found");
-        localStorage.removeItem("active_wp_db_id");
+        localStorage.removeItem("active_fb_db_id");
+        localStorage.removeItem("active_fb_page_id");
         setConnectedDb(null);
+        setPageName(null);
       }
     } catch (error) {
       console.error("Error fetching DB:", error);
-      // Only show error if explicitly searching (not on auto-load if ID is stale)
       toast.error("Database ID not found or connection failed");
-      if (localStorage.getItem("active_wp_db_id") === id) {
-          localStorage.removeItem("active_wp_db_id");
+      if (localStorage.getItem("active_fb_db_id") === id) {
+          localStorage.removeItem("active_fb_db_id");
+          localStorage.removeItem("active_fb_page_id");
           setConnectedDb(null);
+          setPageName(null);
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchPageDetails = async (pageId: string) => {
+      try {
+          const { data, error } = await supabase
+            .from('page_access_token_message')
+            .select('name')
+            .eq('page_id', pageId)
+            .maybeSingle();
+          
+          if (data) {
+              const typedData = data as any;
+              setPageName(typedData.name);
+          }
+      } catch (e) {
+          console.error("Error fetching page details", e);
+      }
   };
 
   const handleConnect = () => {
@@ -79,9 +107,11 @@ export default function DatabasePage() {
   };
 
   const handleDisconnect = () => {
-    localStorage.removeItem("active_wp_db_id");
+    localStorage.removeItem("active_fb_db_id");
+    localStorage.removeItem("active_fb_page_id");
     setConnectedDb(null);
     setSearchId("");
+    setPageName(null);
     toast.info("Disconnected from database");
   };
 
@@ -89,9 +119,9 @@ export default function DatabasePage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold text-foreground">Database Connect</h2>
+        <h2 className="text-2xl font-bold text-foreground">Facebook Database Connect</h2>
         <p className="text-muted-foreground">
-          Connect to your WhatsApp Message Database using your unique ID.
+          Connect to your Facebook Page Database using your unique 6-digit ID.
         </p>
       </div>
 
@@ -120,13 +150,13 @@ export default function DatabasePage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Active Session</p>
+                    <p className="text-sm text-muted-foreground">Active Page</p>
                     <p className="text-xl font-bold text-foreground truncate max-w-[200px] md:max-w-md">
-                      {connectedDb.session}
+                      {pageName || connectedDb.page_id || "Unknown Page"}
                     </p>
                     <div className="flex gap-2 mt-1">
-                        <Badge variant={connectedDb.verified ? "default" : "destructive"}>
-                            {connectedDb.verified ? "Verified" : "Unverified / Expired"}
+                        <Badge variant={connectedDb.verified ? "default" : "secondary"}>
+                            {connectedDb.verified ? "Verified" : "Unverified"}
                         </Badge>
                     </div>
                   </div>
@@ -144,7 +174,7 @@ export default function DatabasePage() {
           <CardDescription>
             {connectedDb 
                 ? `Connected to ID: ${connectedDb.id}` 
-                : "Enter the 6-digit Database ID provided during session creation."}
+                : "Enter the 6-digit Database ID from your Facebook Integration page."}
           </CardDescription>
         </CardHeader>
         <CardContent>
