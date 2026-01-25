@@ -61,6 +61,12 @@ export default function MessengerIntegrationPage() {
 
   const subscribeAppToPage = (pageId: string, accessToken: string) => {
     return new Promise((resolve, reject) => {
+      // Add timeout to prevent hanging
+      const timeoutId = setTimeout(() => {
+        console.error(`Timeout subscribing app to page ${pageId}`);
+        reject(new Error("Timeout subscribing to page"));
+      }, 10000); // 10 seconds timeout
+
       window.FB.api(
         `/${pageId}/subscribed_apps`,
         'post',
@@ -69,9 +75,11 @@ export default function MessengerIntegrationPage() {
           subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
         },
         function(response: any) {
+          clearTimeout(timeoutId);
           if (!response || response.error) {
             console.error('Error subscribing app to page:', response?.error);
-            reject(response?.error);
+            // Don't reject, just resolve with error so we don't break the loop
+            resolve({ error: response?.error }); 
           } else {
             console.log('Successfully subscribed app to page:', response);
             resolve(response);
@@ -156,7 +164,7 @@ export default function MessengerIntegrationPage() {
     }
   };
 
-  const handleConnectFacebook = () => {
+  const handleConnectFacebook = async () => {
     if (!window.FB) {
         toast.error("Facebook SDK not loaded yet. Please refresh or check your connection.");
         return;
@@ -167,60 +175,69 @@ export default function MessengerIntegrationPage() {
     }
 
     setConnecting(true);
-    
-    // Safety timeout to reset loading state if SDK hangs
-    const safetyTimeout = setTimeout(() => {
-        if (connecting) {
-            setConnecting(false);
-            // Don't show error if it actually succeeded but state update was delayed
-            // Just a safety reset
-        }
-    }, 30000); // 30 seconds max
 
-    window.FB.login(async function(response: any) {
-      clearTimeout(safetyTimeout);
-      
-      if (response.authResponse) {
+    try {
+        const loginResponse: any = await new Promise((resolve, reject) => {
+            window.FB.login((response: any) => {
+                if (response.authResponse) {
+                    resolve(response);
+                } else {
+                    reject(new Error("User cancelled login or did not fully authorize."));
+                }
+            }, {scope: 'pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata'});
+        });
+
         console.log('Successfully logged in, exchanging token...');
-        const shortLivedToken = response.authResponse.accessToken;
+        const shortLivedToken = loginResponse.authResponse.accessToken;
         let finalToken = shortLivedToken;
 
         // Exchange for Long-Lived Token via Backend
         try {
-            const exchangeResponse = await fetch('http://localhost:3001/api/auth/facebook/exchange-token', {
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+            const exchangeResponse = await fetch(`${backendUrl}/api/auth/facebook/exchange-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ shortLivedToken })
             });
-            const exchangeData = await exchangeResponse.json();
             
-            if (exchangeData.access_token) {
-                console.log('Obtained long-lived token');
-                finalToken = exchangeData.access_token;
+            if (exchangeResponse.ok) {
+                 const exchangeData = await exchangeResponse.json();
+                 if (exchangeData.access_token) {
+                    console.log('Obtained long-lived token');
+                    finalToken = exchangeData.access_token;
+                 } else {
+                    console.warn('Backend returned no token:', exchangeData);
+                 }
             } else {
-                console.warn('Failed to exchange token, using short-lived one:', exchangeData.error);
-                toast.warning("Using short-lived token (1 hour). Configure backend secrets for 60-day token.");
+                 console.warn('Backend exchange failed:', await exchangeResponse.text());
+                 toast.warning("Using short-lived token (Backend unreachable).");
             }
+
         } catch (err) {
             console.error('Error contacting backend for token exchange:', err);
             toast.warning("Backend connection failed. Using short-lived token.");
         }
-        
-        // Fetch User's Pages using the (hopefully) Long-Lived Token
-        window.FB.api('/me/accounts', 'get', { access_token: finalToken }, function(pageResponse: any) {
-          console.log('Pages fetched:', pageResponse);
-          if (pageResponse && pageResponse.data) {
-             savePagesToSupabase(pageResponse.data);
-          } else {
-             toast.error("No pages found or permission denied.");
-             setConnecting(false);
-          }
+
+        // Fetch User's Pages
+        const pageResponse: any = await new Promise((resolve, reject) => {
+            window.FB.api('/me/accounts', 'get', { access_token: finalToken }, (response: any) => {
+                 if (response && response.data) {
+                     resolve(response);
+                 } else {
+                     reject(response?.error || new Error("No pages found or permission denied."));
+                 }
+            });
         });
-      } else {
-        console.log('User cancelled login or did not fully authorize.');
+
+        console.log('Pages fetched:', pageResponse);
+        await savePagesToSupabase(pageResponse.data);
+
+    } catch (error: any) {
+        console.error("Facebook Connect Error:", error);
+        toast.error(error.message || "Failed to connect Facebook");
+    } finally {
         setConnecting(false);
-      }
-    }, {scope: 'pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata'});
+    }
   };
 
   const savePagesToSupabase = async (facebookPages: any[]) => {
@@ -251,12 +268,15 @@ export default function MessengerIntegrationPage() {
 
               // 1.5 Subscribe App to Page (Critical for Webhooks/n8n)
               try {
-                await subscribeAppToPage(page.id, page.access_token);
-                console.log(`Subscribed app to page ${page.name}`);
+                console.log(`Attempting to subscribe app to page ${page.name}...`);
+                const subResult: any = await subscribeAppToPage(page.id, page.access_token);
+                if (subResult?.error) {
+                    console.warn(`Subscription warning for ${page.name}:`, subResult.error);
+                } else {
+                    console.log(`Subscribed app to page ${page.name}`);
+                }
               } catch (subError) {
                 console.error(`Failed to subscribe app to page ${page.name}`, subError);
-                toast.error(`Could not enable bot for ${page.name}. Check permissions.`);
-                // Continue saving to DB even if subscription fails, but warn user
               }
 
               // 2. Upsert into page_access_token_message
@@ -300,7 +320,6 @@ export default function MessengerIntegrationPage() {
           }
       }
 
-      setConnecting(false);
       if (successCount > 0) {
           toast.success(`Successfully connected ${successCount} pages!`);
           fetchPages();
