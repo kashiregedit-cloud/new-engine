@@ -65,6 +65,50 @@ alter table whatsapp_sessions add column if not exists updated_at timestamp with
 alter table whatsapp_sessions add column if not exists created_at timestamp with time zone default now();
 
 -- 7. Add Unique Constraint to session_name (Required for Upsert)
+alter table whatsapp_sessions drop constraint if exists whatsapp_sessions_session_name_key;
 alter table whatsapp_sessions add constraint whatsapp_sessions_session_name_key unique (session_name);
 
+-- 8. Facebook Page Integration Tables
+create table if not exists page_access_token_message (
+  page_id text primary key,
+  name text,
+  page_access_token text,
+  data_sheet text,
+  secret_key text,
+  found_id text,
+  email text,
+  ai text default 'openrouter',
+  api_key text,
+  chat_model text default 'xiaomi/mimo-v2-flash:free',
+  subscription_status text default 'inactive', -- active, inactive, trial
+  subscription_plan text, -- free, basic, pro, etc.
+  subscription_expiry timestamp with time zone,
+  message_credit numeric default 0,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
 
+-- Ensure columns exist for page_access_token_message (if table already existed)
+alter table page_access_token_message add column if not exists ai text default 'openrouter';
+alter table page_access_token_message add column if not exists api_key text;
+alter table page_access_token_message add column if not exists chat_model text default 'xiaomi/mimo-v2-flash:free';
+alter table page_access_token_message add column if not exists subscription_status text default 'inactive';
+alter table page_access_token_message add column if not exists subscription_plan text;
+alter table page_access_token_message add column if not exists subscription_expiry timestamp with time zone;
+alter table page_access_token_message add column if not exists message_credit numeric default 0;
+
+create table if not exists fb_message_database (
+  id bigint generated always as identity primary key,
+  page_id text references page_access_token_message(page_id),
+  text_prompt text,
+  reply_message boolean default false,
+  swipe_reply boolean default false,
+  image_detection boolean default false,
+  image_send boolean default false,
+  template boolean default false,
+  order_tracking boolean default false,
+  template_prompt_x1 text,
+  template_prompt_x2 text,
+  verified boolean default true,
+  created_at timestamp with time zone default now()
+);
