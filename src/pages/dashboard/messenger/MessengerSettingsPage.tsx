@@ -250,8 +250,9 @@ export default function MessengerSettingsPage() {
           toast.success("AI settings saved successfully");
       }
       
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Unknown error";
+    } catch (error: any) {
+        console.error("Save settings error:", error);
+        const message = error.message || (typeof error === 'string' ? error : JSON.stringify(error));
         toast.error("Failed to save settings: " + message);
     } finally {
       setLoading(false);
