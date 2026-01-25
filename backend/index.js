@@ -114,6 +114,32 @@ async function sendWAHAMessage(chatId, text, session) {
   }
 }
 
+// Send Message via Facebook
+async function sendFacebookMessage(recipientId, text, pageAccessToken) {
+  try {
+    const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${pageAccessToken}`;
+    const body = {
+      recipient: { id: recipientId },
+      message: { text: text }
+    };
+    
+    console.log(`Sending to Facebook (${recipientId}):`, text.substring(0, 50) + '...');
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+    if (data.error) {
+      console.error('Facebook Send Error:', data.error);
+    }
+  } catch (error) {
+    console.error('Error sending message via Facebook:', error);
+  }
+}
+
 // Process Messages (Core Engine)
 async function processUserMessages(debounceKey, senderId, pageId, session) {
   console.log(`Processing messages for: ${debounceKey}`);
@@ -130,9 +156,60 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
     if (fetchError || !messages || messages.length === 0) return;
 
-    // 2. Get AI Config early to check flags
-    const config = await getAIConfig(session);
+    // --- DETECT PLATFORM (Facebook vs WAHA) ---
+    // Check if this pageId belongs to a Facebook Page in our DB
+    const { data: fbPage } = await supabase
+        .from('page_access_token_message')
+        .select('*')
+        .eq('page_id', pageId)
+        .maybeSingle();
 
+    let config = {};
+    let isFacebook = false;
+
+    if (fbPage) {
+        // FACEBOOK CONFIG
+        isFacebook = true;
+        config = {
+            provider: fbPage.ai || 'openrouter',
+            apiKey: process.env.OPENROUTER_API_KEY, // Or custom if we supported it
+            model: fbPage.chat_model || 'xiaomi/mimo-v2-flash:free',
+            systemPrompt: fbPage.system_prompt || DEFAULT_SYSTEM_PROMPT,
+            autoReply: true, // Assuming always true for active plans
+            aiEnabled: true,
+            mediaEnabled: true,
+            // Plan Specifics
+            messageCredit: fbPage.message_credit,
+            subscriptionStatus: fbPage.subscription_status,
+            pageAccessToken: fbPage.access_token,
+            managedKey: fbPage.api_key // If not null, user provided their own key (unlikely for "Buy Plan" scenario)
+        };
+        
+        // If user provided their own API Key (Managed Mode), use it
+        if (config.managedKey) {
+            // Logic to use user's key if we supported it in generateAIResponse
+            // For now, generateAIResponse uses process.env or passed apiKey
+            // We might need to pass it explicitly if we want to support "Use Own API" fully
+        }
+
+    } else {
+        // WAHA CONFIG (Existing Logic)
+        config = await getAIConfig(session);
+        // Add userId to config for credit deduction (legacy)
+        // ... (getAIConfig already returns what we need, but we need userId for credit update)
+        // Re-fetching userId for legacy credit deduction if needed
+        if (session) {
+             const { data: sessionData } = await supabase.from('whatsapp_sessions').select('user_id').eq('session_name', session).maybeSingle();
+             if (sessionData) config.userId = sessionData.user_id;
+        }
+        // Also fetch user_configs for credit balance
+         if (config.userId) {
+            const { data: uConf } = await supabase.from('user_configs').select('message_credit').eq('user_id', config.userId).maybeSingle();
+            if (uConf) config.messageCredit = uConf.message_credit;
+        }
+    }
+
+    // 2. Check Auto-Reply / Credit
     if (!config.autoReply) {
       console.log(`Auto-reply disabled for ${debounceKey}. Marking messages as ignored.`);
       await supabase.from('wp_chats').update({ status: 'ignored' }).in('id', messages.map(m => m.id));
@@ -141,20 +218,11 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
 
     // 3. Merge Content
     let mergedText = '';
-    
     messages.forEach(m => {
       if (m.media_type === 'image') {
-        if (config.mediaEnabled) {
-          mergedText += ` [User sent an image] `;
-        } else {
-          mergedText += ` [User sent an image (Ignored)] `;
-        }
+        mergedText += config.mediaEnabled ? ` [User sent an image] ` : ` [User sent an image (Ignored)] `;
       } else if (m.media_type === 'audio') {
-        if (config.mediaEnabled) {
-          mergedText += ` [User sent a voice message] `;
-        } else {
-          mergedText += ` [User sent a voice message (Ignored)] `;
-        }
+        mergedText += config.mediaEnabled ? ` [User sent a voice message] ` : ` [User sent a voice message (Ignored)] `;
       } else {
         mergedText += ` ${m.text} `;
       }
@@ -168,36 +236,61 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
       return;
     }
 
-    // 4. Call AI Engine (Platform Agnostic)
-    // Construct User Message Object
+    // 4. Call AI Engine
     const userMessage = {
       text: mergedText,
-      images: messages
-        .filter(m => m.media_type === 'image' && m.media_url && config.mediaEnabled)
-        .map(m => m.media_url)
+      images: messages.filter(m => m.media_type === 'image' && m.media_url && config.mediaEnabled).map(m => m.media_url)
     };
 
     const aiResponse = await generateAIResponse(config, [], userMessage);
 
-    // 5. Send Response
+    // 5. Send Response & Deduct Credit
     if (aiResponse && aiResponse.output) {
-      await sendWAHAMessage(senderId, aiResponse.output, session);
+      
+      if (isFacebook) {
+          // --- FACEBOOK SEND ---
+          if (config.pageAccessToken) {
+              await sendFacebookMessage(senderId, aiResponse.output, config.pageAccessToken);
+              
+              // Deduct Credit (Page-Based)
+              if (config.subscriptionStatus === 'active' && config.messageCredit > 0) {
+                  const newCredit = config.messageCredit - 1;
+                  const updates = { message_credit: newCredit };
+                  
+                  // Auto-Unlock if exhausted (Handled by hourly job too, but good to do instantly)
+                  if (newCredit <= 0) {
+                      console.log(`Page ${pageId} credit exhausted. Switching to inactive.`);
+                      updates.subscription_status = 'inactive';
+                      updates.api_key = null; // Unlock
+                  }
 
-      // Decrement Message Credit & Reset if needed
-      if (config.userId && config.messageCredit > 0) {
-        const newCredit = config.messageCredit - 1;
-        const updates = { message_credit: newCredit };
+                  await supabase.from('page_access_token_message')
+                    .update(updates)
+                    .eq('page_id', pageId);
+              }
+          } else {
+              console.error('Missing Page Access Token for Facebook reply');
+          }
 
-        // Automatic Reset when credit exhausted
-        if (newCredit === 0) {
-           console.log(`User ${config.userId} message credit exhausted. Resetting to default AI model.`);
-           updates.model_name = 'xiaomi/mimo-v2-flash:free';
-           updates.ai_provider = 'openrouter';
-        }
+      } else {
+          // --- WAHA SEND (Legacy) ---
+          await sendWAHAMessage(senderId, aiResponse.output, session);
 
-        await supabase.from('user_configs')
-          .update(updates)
-          .eq('user_id', config.userId);
+          // Decrement Message Credit (User-Based Legacy)
+          if (config.userId && config.messageCredit > 0) {
+            const newCredit = config.messageCredit - 1;
+            const updates = { message_credit: newCredit };
+
+            if (newCredit === 0) {
+               console.log(`User ${config.userId} message credit exhausted. Resetting to default AI model.`);
+               updates.model_name = 'xiaomi/mimo-v2-flash:free';
+               updates.ai_provider = 'openrouter';
+            }
+
+            await supabase.from('user_configs')
+              .update(updates)
+              .eq('user_id', config.userId);
+          }
       }
     }
 
@@ -969,6 +1062,70 @@ app.get('/session/qr/:sessionName', async (req, res) => {
 app.post('/webhook', async (req, res) => {
   try {
     const payload = req.body;
+    console.log('Webhook Payload:', JSON.stringify(payload, null, 2));
+
+    // --- FACEBOOK HANDLER ---
+    if (payload.object === 'page') {
+      res.status(200).send('EVENT_RECEIVED'); // Immediate response required by FB
+
+      for (const entry of payload.entry) {
+        // Facebook can batch messages, but usually messaging array has 1 item
+        const webhookEvent = entry.messaging ? entry.messaging[0] : null;
+        
+        if (webhookEvent && webhookEvent.message) {
+           const senderId = webhookEvent.sender.id;
+           const pageId = webhookEvent.recipient.id;
+           const messageId = webhookEvent.message.mid;
+           const timestamp = webhookEvent.timestamp || Date.now();
+           const text = webhookEvent.message.text || '';
+           
+           // Media Handling (Basic)
+           let type = 'text';
+           let mediaUrl = null;
+           if (webhookEvent.message.attachments) {
+               const attachment = webhookEvent.message.attachments[0];
+               if (attachment.type === 'image') type = 'image';
+               else if (attachment.type === 'audio') type = 'audio';
+               else type = 'unknown'; // fallback
+               
+               if (attachment.payload && attachment.payload.url) {
+                   mediaUrl = attachment.payload.url;
+               }
+           }
+
+           // Check Duplicates
+           const { data: existing } = await supabase.from('wp_chats').select('id').eq('message_id', messageId).maybeSingle();
+           if (existing) {
+               console.log('Duplicate FB message:', messageId);
+               continue;
+           }
+
+           // Save to DB
+           await supabase.from('wp_chats').insert({
+              page_id: pageId,
+              sender_id: senderId,
+              recipient_id: pageId,
+              timestamp: Math.floor(timestamp / 1000), // FB sends ms
+              message_id: messageId,
+              text: text,
+              media_type: type,
+              media_url: mediaUrl,
+              status: 'pending'
+           });
+
+           // Trigger Processing
+           const debounceKey = `${pageId}_${senderId}`;
+           await supabase.from('wpp_debounce').upsert({ debounce_key: debounceKey, last_message_at: new Date().toISOString() }, { onConflict: 'debounce_key' });
+           
+           setTimeout(() => {
+               processUserMessages(debounceKey, senderId, pageId, null); // Session is null for FB
+           }, DEBOUNCE_TIME);
+        }
+      }
+      return;
+    }
+
+    // --- WAHA HANDLER (Legacy) ---
     // Adapt to WAHA structure
     const body = payload.payload || payload;
     
