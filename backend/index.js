@@ -1160,6 +1160,37 @@ async function checkExpiredSessions() {
         }
     }
 
+    // --- Facebook Credits Check (Auto Unlock) ---
+    // Unlocks own key if credits are exhausted
+    const { data: exhaustedPages, error: creditError } = await supabase
+      .from('page_access_token_message')
+      .select('*')
+      .lte('message_credit', 0)
+      .not('api_key', 'is', null) // Only if api_key is set (Managed Key)
+      .eq('subscription_status', 'active');
+
+    if (creditError) {
+        console.error('Error fetching exhausted FB pages:', creditError);
+    } else if (exhaustedPages && exhaustedPages.length > 0) {
+        console.log(`Found ${exhaustedPages.length} exhausted Facebook pages. Unlocking own key...`);
+        for (const page of exhaustedPages) {
+            console.log(`Unlocking own key for page: ${page.name || page.page_id}`);
+            
+            const { error: updateError } = await supabase
+                .from('page_access_token_message')
+                .update({
+                    api_key: null, // Unlock own key
+                    subscription_status: 'inactive', // Mark as inactive/expired
+                    ai: 'openrouter', // Default provider
+                    chat_model: 'xiaomi/mimo-v2-flash:free' // Default model
+                })
+                .eq('page_id', page.page_id);
+
+            if (updateError) console.error(`Failed to unlock page ${page.page_id}:`, updateError);
+            else console.log(`Successfully unlocked page ${page.page_id}`);
+        }
+    }
+
   } catch (err) {
     console.error('Auto-Delete Loop Error:', err);
   }

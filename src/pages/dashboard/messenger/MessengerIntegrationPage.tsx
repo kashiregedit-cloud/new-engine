@@ -318,6 +318,7 @@ export default function MessengerIntegrationPage() {
                       page_access_token: page.access_token,
                       subscription_status: 'active', // Default to active on connect
                       subscription_plan: 'free',
+                      message_credit: 100, // Give 100 free credits on connection
                       email: userEmail,
                       secret_key: String(dbId),
                       found_id: String(dbId)
@@ -375,6 +376,7 @@ export default function MessengerIntegrationPage() {
                 .update({
                     subscription_status: 'trial',
                     subscription_plan: 'trial',
+                    message_credit: 500, // 500 credits for trial
                     expires_at: expiryDate.toISOString()
                 })
                 .eq('page_id', selectedPageForSub.page_id);
