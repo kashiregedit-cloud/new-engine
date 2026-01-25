@@ -37,9 +37,11 @@ export default function MessengerControlPage() {
     checkConnection();
 
     window.addEventListener("storage", checkConnection);
+    window.addEventListener("db-connection-changed", checkConnection);
     
     return () => {
       window.removeEventListener("storage", checkConnection);
+      window.removeEventListener("db-connection-changed", checkConnection);
     };
   }, []);
 

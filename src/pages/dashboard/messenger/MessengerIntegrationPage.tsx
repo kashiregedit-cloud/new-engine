@@ -5,8 +5,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Settings, Database, Plus, Facebook, Trash2 } from "lucide-react";
+import { Loader2, Settings, Database, Plus, Facebook, Trash2, CreditCard, Sparkles, Gift, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 // Declare Facebook SDK types globally
 declare global {
@@ -22,6 +33,25 @@ export default function MessengerIntegrationPage() {
   const [connecting, setConnecting] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // Subscription Modal State
+  const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
+  const [selectedPageForSub, setSelectedPageForSub] = useState<any | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState("3_months");
+  const [couponCode, setCouponCode] = useState("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  const PLANS = {
+    "3_months": { label: "3 Months", price: 500, duration_days: 90 },
+    "6_months": { label: "6 Months", price: 800, duration_days: 180 },
+    "12_months": { label: "12 Months", price: 1200, duration_days: 365 },
+  };
+
+  const COUPON_TRIALS: Record<string, number> = {
+    "TRIAL7": 7,
+    "FREE7": 7,
+    "START7": 7
+  };
 
   useEffect(() => {
     // Get user email
@@ -328,7 +358,90 @@ export default function MessengerIntegrationPage() {
       }
   };
 
+  const handleSubscribe = async () => {
+    if (!selectedPageForSub) return;
+    setIsProcessingPayment(true);
+
+    try {
+        // 1. Check Coupon Code
+        if (couponCode && COUPON_TRIALS[couponCode.toUpperCase()]) {
+            const days = COUPON_TRIALS[couponCode.toUpperCase()];
+            const expiryDate = new Date();
+            expiryDate.setDate(expiryDate.getDate() + days);
+
+            // Activate Trial
+            const { error } = await (supabase
+                .from('page_access_token_message') as any)
+                .update({
+                    subscription_status: 'trial',
+                    subscription_plan: 'trial',
+                    expires_at: expiryDate.toISOString()
+                })
+                .eq('page_id', selectedPageForSub.page_id);
+
+            if (error) throw error;
+            
+            toast.success(`Trial Activated for ${days} days!`);
+            setIsSubscriptionOpen(false);
+            fetchPages();
+            return;
+        }
+
+        // 2. Handle Paid Subscription
+        const plan = PLANS[selectedPlan as keyof typeof PLANS];
+        if (!plan) throw new Error("Invalid Plan");
+
+        // Create Transaction Record
+        const { error: trxError } = await (supabase
+            .from('payment_transactions') as any)
+            .insert({
+                user_email: userEmail,
+                amount: plan.price,
+                method: 'manual', // or 'bkash', etc.
+                trx_id: `SUB-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+                sender_number: 'N/A', // Since it's internal
+                status: 'pending',
+            });
+
+        if (trxError) throw trxError;
+
+        // Update Page Status to Pending
+        const { error: pageError } = await (supabase
+            .from('page_access_token_message') as any)
+            .update({
+                subscription_status: 'pending_payment',
+                subscription_plan: selectedPlan
+            })
+            .eq('page_id', selectedPageForSub.page_id);
+
+        if (pageError) throw pageError;
+
+        toast.success("Subscription request submitted. Please wait for admin approval.");
+        setIsSubscriptionOpen(false);
+        fetchPages();
+
+    } catch (error: any) {
+        console.error("Subscription Error:", error);
+        toast.error(error.message || "Failed to process subscription");
+    } finally {
+        setIsProcessingPayment(false);
+    }
+  };
+
+  const openSubscriptionModal = (page: any) => {
+    setSelectedPageForSub(page);
+    setCouponCode("");
+    setSelectedPlan("3_months");
+    setIsSubscriptionOpen(true);
+  };
+
   const handleManage = async (page: any) => {
+    // Check if active
+    if (page.subscription_status !== 'active' && page.subscription_status !== 'trial') {
+        openSubscriptionModal(page);
+        return;
+    }
+
     try {
       // Find linked database entry
       const { data, error } = await supabase
@@ -390,8 +503,6 @@ export default function MessengerIntegrationPage() {
                 <TableRow>
                   <TableHead>Page Name</TableHead>
                   <TableHead>Page ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Subscription</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -400,17 +511,18 @@ export default function MessengerIntegrationPage() {
                   <TableRow key={page.page_id}>
                     <TableCell className="font-medium">{page.name}</TableCell>
                     <TableCell className="font-mono text-xs">{page.page_id}</TableCell>
-                    <TableCell>
-                       <Badge variant={page.subscription_status === 'active' ? 'default' : 'secondary'}>
-                         {page.subscription_status || 'Inactive'}
-                       </Badge>
-                    </TableCell>
-                    <TableCell>{page.subscription_plan || 'Free'}</TableCell>
                     <TableCell className="text-right space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => handleManage(page)}>
-                        <Settings className="mr-2 h-4 w-4" />
-                        Manage
-                      </Button>
+                      {page.subscription_status === 'active' || page.subscription_status === 'trial' ? (
+                          <Button variant="outline" size="sm" onClick={() => handleManage(page)}>
+                            <Settings className="mr-2 h-4 w-4" />
+                            Manage
+                          </Button>
+                      ) : (
+                          <Button variant="default" size="sm" className="bg-purple-600 hover:bg-purple-700" onClick={() => openSubscriptionModal(page)}>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            {page.subscription_status === 'pending_payment' ? 'Pending' : 'Subscribe'}
+                          </Button>
+                      )}
                       <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -422,6 +534,86 @@ export default function MessengerIntegrationPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isSubscriptionOpen} onOpenChange={setIsSubscriptionOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Subscribe to Activate {selectedPageForSub?.name}</DialogTitle>
+            <DialogDescription>
+              Choose a subscription plan to enable chatbot automation for this page.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+             <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan} className="grid gap-3">
+                {Object.entries(PLANS).map(([key, plan]) => (
+                    <div key={key}>
+                        <RadioGroupItem value={key} id={key} className="peer sr-only" />
+                        <Label
+                          htmlFor={key}
+                          className="flex items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                             <div className="bg-primary/10 p-2 rounded-full">
+                                <Sparkles className="w-4 h-4 text-primary" />
+                             </div>
+                             <div className="flex flex-col">
+                                <span className="font-semibold">{plan.label}</span>
+                                <span className="text-xs text-muted-foreground">{plan.duration_days} Days Access</span>
+                             </div>
+                          </div>
+                          <div className="font-bold text-lg">৳{plan.price}</div>
+                        </Label>
+                    </div>
+                ))}
+             </RadioGroup>
+
+             <div className="space-y-2 pt-2 border-t">
+                <Label htmlFor="coupon">Have a coupon?</Label>
+                <div className="flex gap-2">
+                    <Input 
+                        id="coupon" 
+                        placeholder="Enter code (e.g. TRIAL7)" 
+                        value={couponCode} 
+                        onChange={(e) => setCouponCode(e.target.value)} 
+                    />
+                    {couponCode && COUPON_TRIALS[couponCode.toUpperCase()] && (
+                        <div className="flex items-center text-green-600 text-sm">
+                            <Check className="w-4 h-4 mr-1" />
+                            Valid
+                        </div>
+                    )}
+                </div>
+                <p className="text-xs text-muted-foreground">Use code <b>TRIAL7</b> for 7 days free.</p>
+             </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={handleSubscribe} disabled={isProcessingPayment} className="w-full">
+              {isProcessingPayment ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+              ) : (
+                  <>
+                    {couponCode && COUPON_TRIALS[couponCode.toUpperCase()] ? (
+                        <>
+                            <Gift className="mr-2 h-4 w-4" />
+                            Activate Free Trial
+                        </>
+                    ) : (
+                        <>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            Pay & Subscribe
+                        </>
+                    )}
+                  </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

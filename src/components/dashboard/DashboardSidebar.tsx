@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 import { SessionSelector } from "./SessionSelector";
+import { PageSelector } from "./PageSelector";
 
 export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -128,6 +129,7 @@ export function DashboardSidebar() {
         {platform && !collapsed && (
           <div className="mb-4">
              {platform === 'whatsapp' && <SessionSelector />}
+             {platform === 'messenger' && <PageSelector />}
           </div>
         )}
 

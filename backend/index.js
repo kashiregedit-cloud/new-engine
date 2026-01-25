@@ -182,6 +182,23 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
     // 5. Send Response
     if (aiResponse && aiResponse.output) {
       await sendWAHAMessage(senderId, aiResponse.output, session);
+
+      // Decrement Message Credit & Reset if needed
+      if (config.userId && config.messageCredit > 0) {
+        const newCredit = config.messageCredit - 1;
+        const updates = { message_credit: newCredit };
+
+        // Automatic Reset when credit exhausted
+        if (newCredit === 0) {
+           console.log(`User ${config.userId} message credit exhausted. Resetting to default AI model.`);
+           updates.model_name = 'xiaomi/mimo-v2-flash:free';
+           updates.ai_provider = 'openrouter';
+        }
+
+        await supabase.from('user_configs')
+          .update(updates)
+          .eq('user_id', config.userId);
+      }
     }
 
     // 6. Mark done
@@ -1115,6 +1132,32 @@ async function checkExpiredSessions() {
       
       if (dbError) console.error(`Failed to delete ${sessionName} from DB:`, dbError);
       else console.log(`Successfully deleted ${sessionName} from DB.`);
+    }
+
+    // --- Facebook Pages Expiry Check ---
+    const { data: expiredPages, error: fbError } = await supabase
+      .from('page_access_token_message')
+      .select('*')
+      .lt('expires_at', now)
+      // .eq('subscription_status', 'active') // Check all expired, regardless of status if they have an expiry date
+      ;
+
+    if (fbError) {
+        console.error('Error fetching expired FB pages:', fbError);
+    } else if (expiredPages && expiredPages.length > 0) {
+        console.log(`Found ${expiredPages.length} expired Facebook pages. Deleting...`);
+        for (const page of expiredPages) {
+            console.log(`Processing expired FB page: ${page.name || page.page_id} (${page.page_id})`);
+            
+            // Delete from DB (Disconnects integration)
+            const { error: delError } = await supabase
+                .from('page_access_token_message')
+                .delete()
+                .eq('page_id', page.page_id);
+                
+            if (delError) console.error(`Failed to delete FB page ${page.page_id}:`, delError);
+            else console.log(`Successfully deleted FB page ${page.page_id}`);
+        }
     }
 
   } catch (err) {

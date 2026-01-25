@@ -1,26 +1,31 @@
 
--- Create referral_codes table
-CREATE TABLE IF NOT EXISTS public.referral_codes (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('balance', 'discount')),
-  value NUMERIC NOT NULL,
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- 1. Drop existing table if exists (to change schema from UUID to BigInt if needed)
+-- Warning: This will delete existing referral codes!
+DROP TABLE IF EXISTS public.referral_codes;
 
--- Enable RLS for referral_codes
+-- 2. Create new table with 'message' type support
+create table public.referral_codes ( 
+  id bigint generated always as identity not null, 
+  code text not null, 
+  type text not null, 
+  value numeric not null, 
+  status text not null default 'active'::text, 
+  created_at timestamp with time zone null default now(), 
+  constraint referral_codes_pkey primary key (id), 
+  constraint referral_codes_code_key unique (code), 
+  constraint referral_codes_type_check check ( 
+    ( 
+      type = any (array['balance'::text, 'discount'::text, 'message'::text]) 
+    ) 
+  ) 
+) TABLESPACE pg_default;
+
+-- 3. Enable RLS
 ALTER TABLE public.referral_codes ENABLE ROW LEVEL SECURITY;
 
--- Allow read access to everyone (so users can check codes)
-CREATE POLICY "Anyone can read referral codes" 
-ON public.referral_codes FOR SELECT 
-USING (true);
+-- 4. Policies
+CREATE POLICY "Anyone can read referral codes" ON public.referral_codes FOR SELECT USING (true);
 
--- Allow full access to admins (service_role) - handled by Supabase admin client usually, 
--- but for app logic we might need specific policies if using authenticated client for admin.
--- For now, we'll assume admin operations might bypass RLS or use a specific admin role.
--- But since we are using client-side admin panel, we need a policy for admin users.
--- For simplicity in this context, we might allow authenticated users to view, but only admin to edit.
--- However, we don't have a distinct 'admin' role in auth.users yet.
--- We will just leave it open for read for now, and write is restricted.
+-- 5. Add message_credit to user_configs (for tracking usage)
+-- This is required for the 'message' type referral codes to work
+ALTER TABLE public.user_configs ADD COLUMN IF NOT EXISTS message_credit INTEGER DEFAULT 0;

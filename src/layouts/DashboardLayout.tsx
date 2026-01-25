@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { WhatsAppProvider } from "@/context/WhatsAppContext";
+import { MessengerProvider } from "@/context/MessengerContext";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -118,6 +119,14 @@ export function DashboardLayout() {
       <WhatsAppProvider>
         {LayoutContent}
       </WhatsAppProvider>
+    );
+  }
+
+  if (platform === 'messenger') {
+    return (
+      <MessengerProvider>
+        {LayoutContent}
+      </MessengerProvider>
     );
   }
 
