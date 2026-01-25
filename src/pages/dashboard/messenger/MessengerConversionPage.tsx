@@ -3,16 +3,40 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { MessageSquare, RefreshCw, AlertCircle } from "lucide-react";
+import { MessageSquare, RefreshCw, AlertCircle, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "react-router-dom";
+import { addDays, format, startOfDay, endOfDay, subDays, isWithinInterval, parseISO } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 export default function MessengerConversionPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [botReplyCount, setBotReplyCount] = useState(0);
+  const [filteredBotReplyCount, setFilteredBotReplyCount] = useState(0);
+  const [allTimeBotReplies, setAllTimeBotReplies] = useState(0);
   const [activePageId, setActivePageId] = useState<string | null>(null);
+  
+  // Date Filter State
+  const [date, setDate] = useState<DateRange | undefined>({
+    from: startOfDay(new Date()),
+    to: endOfDay(new Date()),
+  });
+  const [filterType, setFilterType] = useState("today");
 
   useEffect(() => {
     const storedPageId = localStorage.getItem("active_fb_page_id");
@@ -20,25 +44,72 @@ export default function MessengerConversionPage() {
     if (storedPageId) {
         fetchMessages(storedPageId);
     }
-  }, []);
+  }, []); // Fetch only once on mount or manual refresh
+
+  useEffect(() => {
+    // Calculate filtered counts when date or messages change
+    if (messages.length > 0 && date?.from && date?.to) {
+        const filtered = messages.filter(msg => {
+            const msgDate = new Date(msg.created_at);
+            return isWithinInterval(msgDate, {
+                start: date.from!,
+                end: date.to!
+            });
+        });
+
+        const botReplies = filtered.filter((msg: any) => msg.reply_by === 'bot').length;
+        setFilteredBotReplyCount(botReplies);
+    } else if (messages.length > 0 && !date?.from) {
+         // If no date selected, maybe show all? Or 0? 
+         // Usually we default to today, so date is usually set.
+         // If date is undefined, show 0 or all. Let's stick to 0 or maintain last state.
+         // Actually initial state has Today set.
+    }
+  }, [date, messages]);
+
+  const handleFilterChange = (value: string) => {
+    setFilterType(value);
+    const today = new Date();
+    
+    switch (value) {
+        case "today":
+            setDate({ from: startOfDay(today), to: endOfDay(today) });
+            break;
+        case "yesterday":
+            const yesterday = subDays(today, 1);
+            setDate({ from: startOfDay(yesterday), to: endOfDay(yesterday) });
+            break;
+        case "last7":
+            setDate({ from: startOfDay(subDays(today, 7)), to: endOfDay(today) });
+            break;
+        case "custom":
+            // Keep current date or reset to default
+            break;
+    }
+  };
 
   const fetchMessages = async (pageId: string) => {
     setLoading(true);
     try {
-      // @ts-ignore
-      const { data, error } = await supabase
+      // Fetch ALL messages for the page
+      let query = supabase
         .from('fb_chats')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('page_id', pageId)
-        .order('id', { ascending: false });
+        .order('created_at', { ascending: false });
+
+      // @ts-ignore
+      const { data, error, count } = await query;
 
       if (error) throw error;
 
       setMessages(data || []);
       
-      // Calculate bot replies
-      const botReplies = data?.filter((msg: any) => msg.reply_by === 'bot').length || 0;
-      setBotReplyCount(botReplies);
+      // Calculate All Time Bot Replies
+      const allBotReplies = data?.filter((msg: any) => msg.reply_by === 'bot').length || 0;
+      setAllTimeBotReplies(allBotReplies);
+
+      // Initial filter calculation will be handled by the useEffect dependent on 'messages'
 
     } catch (error) {
       console.error("Error fetching messages:", error);
@@ -79,30 +150,97 @@ export default function MessengerConversionPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">Conversion</h1>
                 <p className="text-muted-foreground">
                 Track user messages and bot automated replies for Page ID: <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{activePageId}</span>
                 </p>
             </div>
-            <Button onClick={handleRefresh} disabled={loading} variant="outline" size="icon">
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </Button>
+            
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Select value={filterType} onValueChange={handleFilterChange}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select Filter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="yesterday">Yesterday</SelectItem>
+                    <SelectItem value="last7">Last 7 Days</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {filterType === 'custom' && (
+                    <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="date"
+                        variant={"outline"}
+                        className={cn(
+                          "w-[260px] justify-start text-left font-normal",
+                          !date && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {date?.from ? (
+                          date.to ? (
+                            <>
+                              {format(date.from, "LLL dd, y")} -{" "}
+                              {format(date.to, "LLL dd, y")}
+                            </>
+                          ) : (
+                            format(date.from, "LLL dd, y")
+                          )
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="end">
+                      <Calendar
+                        initialFocus
+                        mode="range"
+                        defaultMonth={date?.from}
+                        selected={date}
+                        onSelect={setDate}
+                        numberOfMonths={2}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                )}
+
+                <Button onClick={handleRefresh} disabled={loading} variant="outline" size="icon">
+                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                </Button>
+            </div>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Bot Replies</CardTitle>
+            <CardTitle className="text-sm font-medium">All Time Bot Replies</CardTitle>
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{botReplyCount}</div>
+            <div className="text-2xl font-bold">{allTimeBotReplies}</div>
             <p className="text-xs text-muted-foreground">
-              Automated responses sent
+              Total lifetime bot replies
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Bot Replies (Filtered)</CardTitle>
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{filteredBotReplyCount}</div>
+            <p className="text-xs text-muted-foreground">
+              Replies in selected range
             </p>
           </CardContent>
         </Card>
