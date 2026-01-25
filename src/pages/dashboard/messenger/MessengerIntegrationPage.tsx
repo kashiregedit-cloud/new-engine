@@ -167,7 +167,19 @@ export default function MessengerIntegrationPage() {
     }
 
     setConnecting(true);
+    
+    // Safety timeout to reset loading state if SDK hangs
+    const safetyTimeout = setTimeout(() => {
+        if (connecting) {
+            setConnecting(false);
+            // Don't show error if it actually succeeded but state update was delayed
+            // Just a safety reset
+        }
+    }, 30000); // 30 seconds max
+
     window.FB.login(async function(response: any) {
+      clearTimeout(safetyTimeout);
+      
       if (response.authResponse) {
         console.log('Successfully logged in, exchanging token...');
         const shortLivedToken = response.authResponse.accessToken;

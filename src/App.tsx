@@ -27,6 +27,7 @@ import MessengerControlPage from "./pages/dashboard/messenger/MessengerControlPa
 import MessengerOrderTrackingPage from "./pages/dashboard/messenger/MessengerOrderTrackingPage";
 import MessengerSettingsPage from "./pages/dashboard/messenger/MessengerSettingsPage";
 import MessengerDatabasePage from "./pages/dashboard/messenger/MessengerDatabasePage";
+import MessengerConversionPage from "./pages/dashboard/messenger/MessengerConversionPage";
 import { WhatsAppProvider } from "./context/WhatsAppContext";
 import { Outlet, useParams } from "react-router-dom";
 
@@ -76,6 +77,7 @@ const App = () => (
               <Route path="integration" element={<MessengerIntegrationPage />} />
               <Route path="control" element={<MessengerControlPage />} />
               <Route path="orders" element={<MessengerOrderTrackingPage />} />
+              <Route path="conversion" element={<MessengerConversionPage />} />
               <Route path="database" element={<MessengerDatabasePage />} />
               <Route path="settings" element={<MessengerSettingsPage />} />
               <Route path="products" element={<ProductsPage />} />

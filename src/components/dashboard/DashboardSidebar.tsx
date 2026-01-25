@@ -15,7 +15,8 @@ import {
   LogOut,
   Sparkles,
   ArrowLeft,
-  ShoppingBag
+  ShoppingBag,
+  MessageSquare
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,9 @@ export function DashboardSidebar() {
     if (['whatsapp', 'messenger'].includes(platform)) {
       platformItems.push({ title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
       platformItems.push({ title: "Order Tracking", icon: ShoppingBag, path: `${base}/orders` });
+      if (platform === 'messenger') {
+        platformItems.push({ title: "Conversion", icon: MessageSquare, path: `${base}/conversion` });
+      }
     }
 
     const switchItem = { title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" };
