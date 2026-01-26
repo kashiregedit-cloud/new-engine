@@ -16,7 +16,8 @@ import {
   Sparkles,
   ArrowLeft,
   ShoppingBag,
-  MessageSquare
+  MessageSquare,
+  Key
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ export function DashboardSidebar() {
       { title: "Ads Library", icon: Megaphone, path: platform ? `/dashboard/${platform}/ads` : "/dashboard/ads" },
       { title: "Reseller", icon: Users, path: platform ? `/dashboard/${platform}/reseller` : "/dashboard/reseller" },
       { title: "Payment / Topup", icon: CreditCard, path: platform ? `/dashboard/${platform}/payment` : "/dashboard/payment" },
+      { title: "API Keys", icon: Key, path: "/dashboard/api-management" },
     ];
 
     if (!platform) {

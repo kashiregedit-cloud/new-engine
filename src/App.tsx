@@ -29,6 +29,7 @@ import MessengerSettingsPage from "./pages/dashboard/messenger/MessengerSettings
 import MessengerDatabasePage from "./pages/dashboard/messenger/MessengerDatabasePage";
 import MessengerConversionPage from "./pages/dashboard/messenger/MessengerConversionPage";
 import { WhatsAppProvider } from "./context/WhatsAppContext";
+import ApiManagementPage from "./pages/dashboard/ApiManagementPage";
 import { Outlet, useParams } from "react-router-dom";
 
 const queryClient = new QueryClient();
@@ -48,6 +49,7 @@ const App = () => (
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<PlatformSelection />} />
             <Route path="abcadmin" element={<AdminPage />} />
+            <Route path="api-management" element={<ApiManagementPage />} />
             
             {/* Global Tools Routes (Direct access) */}
             <Route path="products" element={<ProductsPage />} />

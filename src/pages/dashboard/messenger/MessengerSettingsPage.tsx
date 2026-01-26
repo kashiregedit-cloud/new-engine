@@ -58,7 +58,7 @@ const formSchema = z.object({
 });
 
 const MANAGED_SECRET_KEY = import.meta.env.VITE_MANAGED_API_KEY || "AIzaSyCa-Lo6Oy23THyqOLQ-t4z77BPsHqMIpyk";
-const MANAGED_MODEL = import.meta.env.VITE_MANAGED_MODEL || "gemini-2.0-flash-lite-preview-02-05";
+const MANAGED_MODEL = import.meta.env.VITE_MANAGED_MODEL || "gemini-2.5-flash-lite";
 
 export default function MessengerSettingsPage() {
   const [loading, setLoading] = useState(true);

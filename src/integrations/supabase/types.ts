@@ -9,6 +9,35 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      api_list: {
+        Row: {
+          id: number
+          provider: string
+          model: string | null
+          api: string | null
+          usage_count: number | null
+          is_active: boolean | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: number
+          provider: string
+          model?: string | null
+          api?: string | null
+          usage_count?: number | null
+          is_active?: boolean | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: number
+          provider?: string
+          model?: string | null
+          api?: string | null
+          usage_count?: number | null
+          is_active?: boolean | null
+          created_at?: string | null
+        }
+      }
       payment_transactions: {
         Row: {
           id: string
