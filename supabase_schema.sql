@@ -164,3 +164,13 @@ CREATE TABLE IF NOT EXISTS public.fb_comments (
   CONSTRAINT fb_comments_pkey PRIMARY KEY (id),
   CONSTRAINT fb_comments_comment_id_key UNIQUE (comment_id)
 ) TABLESPACE pg_default;
+
+-- 12. API Key Management (Multi-Key Support)
+CREATE TABLE IF NOT EXISTS public.api_list (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL PRIMARY KEY,
+  provider text NOT NULL, -- 'google', 'openai', 'gemini'
+  api text NOT NULL, -- The API Key
+  model text DEFAULT 'gemini-1.5-flash',
+  usage_count bigint DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now()
+);

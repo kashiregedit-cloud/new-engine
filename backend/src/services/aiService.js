@@ -95,6 +95,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
 
         try {
             // console.log(`Attempting AI generation with provider: ${currentProvider} model: ${currentModel}`);
+            console.log(`Sending to AI: ${messages.length} messages (History: ${history.length})`);
             
             const completion = await client.chat.completions.create({
                 model: currentModel,
@@ -116,7 +117,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
                 }
             }
         } catch (error) {
-            console.warn(`AI Generation failed with key ...${currentKey.slice(-4)}. Trying next key.`);
+            console.warn(`AI Generation failed with key ...${currentKey.slice(-4)}. Provider: ${currentProvider}. Error: ${error.message}`);
+            if (error.response) {
+                 console.warn(`Error Response:`, error.response.data);
+            }
             lastError = error;
             // Continue to next key
         }
