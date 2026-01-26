@@ -244,7 +244,7 @@ export default function MessengerSettingsPage() {
               const { data: { user } } = await supabase.auth.getUser();
               const userEmail = user?.email || "unknown_user";
 
-              await supabase.from('payment_transactions').insert({
+              await (supabase.from('payment_transactions') as any).insert({
                   user_email: userEmail,
                   amount: price,
                   method: 'balance_deduction', // or 'mock_purchase'
