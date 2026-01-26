@@ -2,10 +2,13 @@ const dbService = require('./dbService');
 
 // Fetch a rotating key from the global pool (api_list)
 async function getManagedKey(provider = 'gemini') {
+    // Check if provider is 'google' or 'gemini'
+    const isGoogle = provider === 'google' || provider === 'gemini';
+    
     const { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
-        .eq('provider', provider)
+        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`)
         .eq('is_active', true);
 
     if (error || !keys || keys.length === 0) {

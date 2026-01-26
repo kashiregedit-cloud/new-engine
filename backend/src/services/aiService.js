@@ -7,11 +7,13 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
     // 1. Multi-Key Rotation (Zero Cost / Scalability Strategy)
     let selectedApiKey = process.env.OPENROUTER_API_KEY; // Default Fallback
     let activeProvider = pageConfig.ai || 'openrouter';
-    let activeModel = pageConfig.chat_model || 'google/gemini-2.0-flash-lite-preview-02-05';
+    // Default to stable model if not specified. Gemini 1.5 Flash is currently the most stable free tier.
+    let activeModel = pageConfig.chat_model || 'gemini-1.5-flash'; 
 
     // Check if Managed Mode (using global pool)
     if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
-         const managedData = await keyService.getManagedKey(activeProvider === 'openrouter' ? 'openrouter' : 'gemini'); 
+         // Pass the current provider to keyService, but handle 'google'/'gemini' aliasing in keyService
+         const managedData = await keyService.getManagedKey(activeProvider); 
          if (managedData) {
              selectedApiKey = managedData.key;
              activeProvider = managedData.provider; // Update provider based on key source

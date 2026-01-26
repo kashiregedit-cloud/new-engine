@@ -45,7 +45,7 @@ async function saveLead(data) {
             // You might want to add columns for 'reply', 'sentiment' to wp_chats or create fb_chats
             // For now, mapping to existing schema
             status: 'done',
-            timestamp: new Date().toISOString()
+            timestamp: Date.now() // Changed to bigint compatible timestamp
         });
 
     if (error) console.error("Error saving lead:", error);
