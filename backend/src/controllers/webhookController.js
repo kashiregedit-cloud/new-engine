@@ -17,11 +17,21 @@ const handleWebhook = async (req, res) => {
 
         // Async Processing
         for (const entry of body.entry) {
-            const webhookEvent = entry.messaging ? entry.messaging[0] : null;
+            // 1. Handle Messaging Events (Direct Messages)
+            if (entry.messaging) {
+                const webhookEvent = entry.messaging[0];
+                if (webhookEvent) {
+                    await queueMessage(webhookEvent);
+                }
+            }
             
-            if (webhookEvent) {
-                // await processEvent(webhookEvent); // Old immediate processing
-                await queueMessage(webhookEvent);    // New debounced processing
+            // 2. Handle Changes Events (Comments / Feed)
+            if (entry.changes) {
+                for (const change of entry.changes) {
+                    if (change.field === 'feed') {
+                        await processCommentEvent(change.value);
+                    }
+                }
             }
         }
     } else {
@@ -53,10 +63,34 @@ const verifyWebhook = (req, res) => {
 async function queueMessage(event) {
     const senderId = event.sender.id;
     const pageId = event.recipient.id;
-    const messageText = event.message?.text;
-    const messageId = event.message?.mid;
+    let messageText = event.message?.text || '';
+    const messageId = event.message?.mid || `evt_${Date.now()}`;
 
-    if (!messageText) return; // Ignore non-text
+    // 1. Handle Postback (Button Clicks)
+    if (event.postback) {
+        messageText = event.postback.payload || event.postback.title;
+        console.log(`Received Postback: ${messageText}`);
+    }
+
+    // 2. Handle Attachments (Images)
+    if (event.message?.attachments) {
+        const imageUrls = event.message.attachments
+            .filter(att => att.type === 'image')
+            .map(att => att.payload.url);
+        
+        if (imageUrls.length > 0) {
+            // Append Image URLs to text for AI context
+            // In a more advanced version, we would pass these as actual image objects to the AI
+            messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
+        }
+        // Handle other attachments (audio, file) placeholders
+        const otherAtts = event.message.attachments.filter(att => att.type !== 'image');
+        if (otherAtts.length > 0) {
+             messageText += `\n[User sent attachments: ${otherAtts.map(a => a.type).join(', ')}]`;
+        }
+    }
+
+    if (!messageText) return; // Ignore if still empty
 
     // Check Duplicate immediately to avoid processing same message twice
     const isDuplicate = await dbService.checkDuplicate(messageId);
@@ -192,6 +226,81 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
     } catch (error) {
         console.error("Error processing event:", error);
+    }
+}
+
+// Handle Comments (n8n "OnComment" Logic)
+async function processCommentEvent(changeValue) {
+    try {
+        if (changeValue.item !== 'comment' || changeValue.verb !== 'add') return;
+
+        const commentId = changeValue.comment_id;
+        const message = changeValue.message;
+        const senderId = changeValue.from?.id;
+        const senderName = changeValue.from?.name || 'Unknown';
+        const postId = changeValue.post_id;
+        const pageId = postId.split('_')[0]; // Extract Page ID from Post ID
+
+        // Ignore if sender is the page itself
+        if (senderId === pageId) return;
+
+        console.log(`Processing comment ${commentId} from ${senderName}: ${message}`);
+
+        // 1. Save to DB (Avoid Duplicates)
+        await dbService.saveFbComment({
+            comment_id: commentId,
+            page_id: pageId,
+            sender_id: senderId,
+            post_id: postId,
+            message: message,
+            status: 'received'
+        });
+
+        // 2. Fetch Config
+        const pageConfig = await dbService.getPageConfig(pageId);
+        if (!pageConfig || (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial')) {
+             console.log(`Page ${pageId} inactive or not found.`);
+             return;
+        }
+
+        if (pageConfig.message_credit <= 0) {
+            console.log(`Page ${pageId} out of credits for comments.`);
+            return;
+        }
+
+        // 3. Generate AI Reply
+        // Use a simplified prompt for comments (or same as chat)
+        const pagePrompts = await dbService.getPagePrompts(pageId);
+        
+        // Pass "COMMENT_CONTEXT" to help AI understand
+        const aiResponse = await aiService.generateReply(
+            `[User Commented on Post]: ${message}`, 
+            pageConfig, 
+            pagePrompts, 
+            [] // No history for comments usually, just single turn
+        );
+
+        const replyText = aiResponse.reply;
+
+        if (!replyText) return;
+
+        // 4. Reply to Comment
+        await facebookService.replyToComment(commentId, replyText, pageConfig.page_access_token);
+        
+        // 5. Update DB Status
+        await dbService.saveFbComment({
+            comment_id: commentId,
+            reply_text: replyText,
+            status: 'replied'
+        });
+
+        // 6. Deduct Credit
+        await dbService.deductCredit(pageId, pageConfig.message_credit);
+        
+        console.log(`Replied to comment ${commentId}`);
+
+    } catch (error) {
+        console.error("Error processing comment:", error);
     }
 }
 

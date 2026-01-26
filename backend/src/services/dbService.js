@@ -184,5 +184,17 @@ module.exports = {
     saveChatMessage,
     saveFbChat,
     getFbChatHistory,
-    checkN8nDebounce
+    checkN8nDebounce,
+    saveFbComment
 };
+
+// 11. Save Comment (n8n compatible)
+async function saveFbComment(data) {
+    const { error } = await supabase
+        .from('fb_comments')
+        .upsert(data, { onConflict: 'comment_id' });
+    
+    if (error) {
+        console.error("Error saving comment:", error);
+    }
+}

@@ -56,9 +56,64 @@ async function getConversationMessages(pageId, userId, accessToken, limit = 5) {
     }
 }
 
+async function sendImageMessage(pageId, recipientId, imageUrl, accessToken) {
+    try {
+        const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
+        
+        const payload = {
+            recipient: { id: recipientId },
+            message: {
+                attachment: {
+                    type: "image",
+                    payload: { 
+                        url: imageUrl, 
+                        is_reusable: true 
+                    }
+                }
+            }
+        };
+
+        console.log(`Sending Image to ${recipientId} from ${pageId}`);
+        const response = await axios.post(url, payload);
+        return response.data;
+    } catch (error) {
+        console.error(`Error sending image for page ${pageId}:`, error.response ? error.response.data : error.message);
+        throw error;
+    }
+}
+
+// Reply to a Comment (Private or Public)
+async function replyToComment(commentId, message, accessToken) {
+    try {
+        // Public Reply (reply to the comment thread)
+        const url = `https://graph.facebook.com/v19.0/${commentId}/comments?access_token=${accessToken}`;
+        
+        console.log(`Replying to comment ${commentId}`);
+        const response = await axios.post(url, { message: message });
+        return response.data;
+    } catch (error) {
+        console.error(`Error replying to comment ${commentId}:`, error.response ? error.response.data : error.message);
+        throw error;
+    }
+}
+
+// Get Comment Replies (to check if already replied)
+async function getCommentReplies(commentId, accessToken) {
+    try {
+        const url = `https://graph.facebook.com/v19.0/${commentId}/comments?access_token=${accessToken}`;
+        const response = await axios.get(url);
+        return response.data.data || [];
+    } catch (error) {
+        console.error(`Error getting comment replies ${commentId}:`, error.response ? error.response.data : error.message);
+        return [];
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImageMessage,
     sendTypingAction,
-    getConversationMessages
+    getConversationMessages,
+    replyToComment,
+    getCommentReplies
 };
