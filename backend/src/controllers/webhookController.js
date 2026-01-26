@@ -114,43 +114,28 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             return;
         }
 
-        // 2. HUMAN HANDOVER CHECK (New Feature)
-        // Fetch last 5 messages from real Facebook Thread
+        // 2. HUMAN HANDOVER & RACE CONDITION CHECK
+        // Fetch last 10 messages from real Facebook Thread
         const fbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10);
         
-        // Find the latest message sent by the Page
-        const lastPageMessage = fbMessages.find(m => m.from && m.from.id === pageId);
-
-        if (lastPageMessage) {
-            // Check if this message is OLD (older than 24 hours). If so, ignore it and let Bot take over.
-            const messageTime = new Date(lastPageMessage.created_time).getTime();
-            const now = Date.now();
-            const hoursSinceLastReply = (now - messageTime) / (1000 * 60 * 60);
-
-            if (hoursSinceLastReply < 24) {
-                // Only check for Human Handover if the message is recent (< 24 hours)
-                
-                // Check if this message was sent by our Bot
-                // We compare it with our local Bot History
-                const botHistory = await dbService.getChatHistory(sessionId, 5); // Get last 5 bot/user messages
-                
-                // Check if any 'assistant' message in our DB matches the text of the last Page message
-                // We use fuzzy match or simple includes because FB might format text differently
-                const pageMessageText = lastPageMessage.message || '';
-                const isBotMessage = botHistory.some(m => 
-                    m.role === 'assistant' && m.content &&
-                    (m.content === pageMessageText || pageMessageText.includes(m.content.substring(0, 20)))
-                );
-
-                // If the last Page message is NOT in our Bot DB, it must be a Human Admin
-                if (!isBotMessage) {
-                    console.log(`Human Admin detected for ${sessionId}. Last Page Message: "${lastPageMessage.message}" (Time: ${hoursSinceLastReply.toFixed(2)}h ago). Stopping AI.`);
-                    return; // STOP processing
-                }
-            } else {
-                console.log(`Last Page Message is old (${hoursSinceLastReply.toFixed(2)}h ago). Resuming AI.`);
+        // RULE 1: If the LATEST message in the thread is from the Page, STOP.
+        // This handles the race condition where Admin replied during the debounce period.
+        if (fbMessages.length > 0) {
+            const latestMessage = fbMessages[0]; // Messages are usually sorted newest first
+            if (latestMessage.from && latestMessage.from.id === pageId) {
+                console.log(`Latest message in thread is from Page (Admin or Bot). Stopping AI for ${sessionId}.`);
+                return;
             }
         }
+        
+        // RULE 2: Check if Admin Replied Recently (Human Handover) - DISABLED FOR NOW to fix "Not Replying" bug
+        // We will rely on Rule 1 to prevent double replies.
+        /*
+        const lastPageMessage = fbMessages.find(m => m.from && m.from.id === pageId);
+        if (lastPageMessage) {
+             // ... logic ...
+        }
+        */
 
         // 3. Send Typing Indicator
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on');
