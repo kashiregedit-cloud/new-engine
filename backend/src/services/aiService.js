@@ -6,11 +6,17 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
     
     // 1. Multi-Key Rotation (Zero Cost / Scalability Strategy)
     let selectedApiKey = process.env.OPENROUTER_API_KEY; // Default Fallback
+    let activeProvider = pageConfig.ai || 'openrouter';
+    let activeModel = pageConfig.chat_model || 'google/gemini-2.0-flash-lite-preview-02-05';
 
     // Check if Managed Mode (using global pool)
     if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
-         const managedKey = await keyService.getManagedKey('gemini'); // Default to gemini for zero cost
-         if (managedKey) selectedApiKey = managedKey;
+         const managedData = await keyService.getManagedKey(activeProvider === 'openrouter' ? 'openrouter' : 'gemini'); 
+         if (managedData) {
+             selectedApiKey = managedData.key;
+             activeProvider = managedData.provider; // Update provider based on key source
+             if (managedData.model) activeModel = managedData.model;
+         }
     } else {
         // User provided their own keys (Comma separated)
         const keys = pageConfig.api_key.split(',').map(k => k.trim()).filter(k => k);
@@ -21,13 +27,15 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
     }
 
     // 2. Setup Provider (Gemini 2.5 Flash Lite via OpenRouter or Direct)
-    // Assuming we use OpenRouter for unified interface, or direct Google if provider is 'google'
-    // For this specific request ("Zero Cost"), we assume the user might use Google AI Studio keys directly with OpenAI SDK (compatible base URL)
+    let baseURL = 'https://openrouter.ai/api/v1'; // Default
     
-    // Default to OpenRouter for ease, but allow override
-    const baseURL = 'https://openrouter.ai/api/v1'; // Default
-    // If using Google directly: 'https://generativelanguage.googleapis.com/v1beta/openai/'
-    
+    // Switch Base URL based on Provider
+    if (activeProvider === 'gemini' || activeProvider === 'google') {
+        baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    } else if (activeProvider === 'openai') {
+        baseURL = 'https://api.openai.com/v1';
+    }
+
     const client = new OpenAI({
         baseURL: baseURL,
         apiKey: selectedApiKey
@@ -63,7 +71,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
 
     try {
         const completion = await client.chat.completions.create({
-            model: pageConfig.chat_model || 'google/gemini-2.5-flash-lite-preview-02-05', // Updated model
+            model: activeModel,
             messages: messages,
             temperature: 0.7, // Slightly creative but focused
             max_tokens: 150 // Keep it short like a chat

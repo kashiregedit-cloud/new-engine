@@ -20,7 +20,11 @@ async function getManagedKey(provider = 'gemini') {
     // Optional: Update usage count (async, don't block)
     // dbService.supabase.from('api_list').update({ usage_count: selectedKey.usage_count + 1 }).eq('id', selectedKey.id);
 
-    return selectedKey.api;
+    return {
+        key: selectedKey.api,
+        provider: selectedKey.provider,
+        model: selectedKey.model
+    };
 }
 
 module.exports = {

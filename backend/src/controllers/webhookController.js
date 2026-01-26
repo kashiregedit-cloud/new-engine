@@ -39,8 +39,16 @@ const verifyWebhook = (req, res) => {
             console.log('WEBHOOK_VERIFIED');
             res.status(200).send(challenge);
         } else {
+            console.error('WEBHOOK_VERIFICATION_FAILED: Token mismatch or wrong mode', { 
+                received_token: token, 
+                expected_token: VERIFY_TOKEN,
+                mode 
+            });
             res.sendStatus(403);
         }
+    } else {
+        console.error('WEBHOOK_VERIFICATION_FAILED: Missing mode or token');
+        res.sendStatus(400);
     }
 };
 
