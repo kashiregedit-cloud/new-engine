@@ -147,6 +147,18 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // 5. Generate AI Reply
         const aiReply = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history);
         
+        // --- PRE-SEND CHECK (n8n "IfPageReplyExists" Logic) ---
+        // Check again if Admin replied while AI was generating (Race Condition Fix)
+        const freshFbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 1);
+        if (freshFbMessages.length > 0) {
+            const latestFresh = freshFbMessages[0];
+            if (latestFresh.from && latestFresh.from.id === pageId) {
+                console.log(`Admin replied while AI was generating. Stopping reply for ${sessionId}.`);
+                return;
+            }
+        }
+        // -------------------------------------------------------
+
         // 6. Send Reply
         await facebookService.sendMessage(pageId, senderId, aiReply, pageConfig.page_access_token);
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
