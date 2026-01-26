@@ -80,14 +80,14 @@ async function queueMessage(event) {
     // Clear existing timer
     if (sessionData.timer) clearTimeout(sessionData.timer);
 
-    // Set new timer (3 seconds debounce)
+    // Set new timer (5 seconds debounce)
     sessionData.timer = setTimeout(() => {
         // Clone messages and clear buffer immediately to allow new messages
         const messagesToProcess = [...sessionData.messages];
         debounceMap.delete(sessionId);
         
         processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
-    }, 3000); 
+    }, 5000); 
 }
 
 // Core Logic Function (Debounced)
@@ -122,22 +122,33 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const lastPageMessage = fbMessages.find(m => m.from && m.from.id === pageId);
 
         if (lastPageMessage) {
-            // Check if this message was sent by our Bot
-            // We compare it with our local Bot History
-            const botHistory = await dbService.getChatHistory(sessionId, 5); // Get last 5 bot/user messages
-            
-            // Check if any 'assistant' message in our DB matches the text of the last Page message
-            // We use fuzzy match or simple includes because FB might format text differently
-            const pageMessageText = lastPageMessage.message || '';
-            const isBotMessage = botHistory.some(m => 
-                m.role === 'assistant' && m.content &&
-                (m.content === pageMessageText || pageMessageText.includes(m.content.substring(0, 20)))
-            );
+            // Check if this message is OLD (older than 24 hours). If so, ignore it and let Bot take over.
+            const messageTime = new Date(lastPageMessage.created_time).getTime();
+            const now = Date.now();
+            const hoursSinceLastReply = (now - messageTime) / (1000 * 60 * 60);
 
-            // If the last Page message is NOT in our Bot DB, it must be a Human Admin
-            if (!isBotMessage) {
-                console.log(`Human Admin detected for ${sessionId}. Last Page Message: "${lastPageMessage.message}". Stopping AI.`);
-                return; // STOP processing
+            if (hoursSinceLastReply < 24) {
+                // Only check for Human Handover if the message is recent (< 24 hours)
+                
+                // Check if this message was sent by our Bot
+                // We compare it with our local Bot History
+                const botHistory = await dbService.getChatHistory(sessionId, 5); // Get last 5 bot/user messages
+                
+                // Check if any 'assistant' message in our DB matches the text of the last Page message
+                // We use fuzzy match or simple includes because FB might format text differently
+                const pageMessageText = lastPageMessage.message || '';
+                const isBotMessage = botHistory.some(m => 
+                    m.role === 'assistant' && m.content &&
+                    (m.content === pageMessageText || pageMessageText.includes(m.content.substring(0, 20)))
+                );
+
+                // If the last Page message is NOT in our Bot DB, it must be a Human Admin
+                if (!isBotMessage) {
+                    console.log(`Human Admin detected for ${sessionId}. Last Page Message: "${lastPageMessage.message}" (Time: ${hoursSinceLastReply.toFixed(2)}h ago). Stopping AI.`);
+                    return; // STOP processing
+                }
+            } else {
+                console.log(`Last Page Message is old (${hoursSinceLastReply.toFixed(2)}h ago). Resuming AI.`);
             }
         }
 
