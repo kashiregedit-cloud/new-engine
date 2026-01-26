@@ -2,11 +2,15 @@ const dbService = require('../services/dbService');
 const aiService = require('../services/aiService');
 const facebookService = require('../services/facebookService');
 
+// Global Debounce Map (In-Memory)
+// Key: sessionId (pageId_senderId)
+// Value: { timer: NodeJS.Timeout, messages: string[] }
+const debounceMap = new Map();
+
 // Step 1: Webhook Trigger
-// Step 6: Orchestration
 const handleWebhook = async (req, res) => {
     const body = req.body;
-    console.log('Webhook Body Received:', JSON.stringify(body, null, 2));
+    // console.log('Webhook Body Received:', JSON.stringify(body, null, 2)); // Too verbose for production
 
     if (body.object === 'page') {
         res.status(200).send('EVENT_RECEIVED');
@@ -16,7 +20,8 @@ const handleWebhook = async (req, res) => {
             const webhookEvent = entry.messaging ? entry.messaging[0] : null;
             
             if (webhookEvent) {
-                await processEvent(webhookEvent);
+                // await processEvent(webhookEvent); // Old immediate processing
+                await queueMessage(webhookEvent);    // New debounced processing
             }
         }
     } else {
@@ -25,7 +30,7 @@ const handleWebhook = async (req, res) => {
 };
 
 const verifyWebhook = (req, res) => {
-    const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || '123456'; // Default from n8n.json
+    const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || '123456'; 
 
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -36,39 +41,62 @@ const verifyWebhook = (req, res) => {
             console.log('WEBHOOK_VERIFIED');
             res.status(200).send(challenge);
         } else {
-            console.error('WEBHOOK_VERIFICATION_FAILED: Token mismatch or wrong mode', { 
-                received_token: token, 
-                expected_token: VERIFY_TOKEN,
-                mode 
-            });
+            console.error('WEBHOOK_VERIFICATION_FAILED');
             res.sendStatus(403);
         }
     } else {
-        console.error('WEBHOOK_VERIFICATION_FAILED: Missing mode or token');
         res.sendStatus(400);
     }
 };
 
-// Core Logic Function
-async function processEvent(event) {
+// Queue Message for Debounce
+async function queueMessage(event) {
     const senderId = event.sender.id;
     const pageId = event.recipient.id;
     const messageText = event.message?.text;
-    
-    if (!messageText) return; // Ignore non-text for now (or handle images later)
-    
-    // Duplicate Check (Step 5 Enhancement)
-    const messageId = event.message.mid;
+    const messageId = event.message?.mid;
+
+    if (!messageText) return; // Ignore non-text
+
+    // Check Duplicate immediately to avoid processing same message twice
     const isDuplicate = await dbService.checkDuplicate(messageId);
     if (isDuplicate) {
         console.log(`Duplicate message ${messageId} ignored.`);
         return;
     }
 
-    console.log(`Received message from ${senderId} to page ${pageId}: ${messageText}`);
+    const sessionId = `${pageId}_${senderId}`;
+
+    // Initialize buffer if not exists
+    if (!debounceMap.has(sessionId)) {
+        debounceMap.set(sessionId, { messages: [], timer: null });
+    }
+
+    const sessionData = debounceMap.get(sessionId);
+    sessionData.messages.push(messageText);
+
+    console.log(`Queued message for ${sessionId}: ${messageText}`);
+
+    // Clear existing timer
+    if (sessionData.timer) clearTimeout(sessionData.timer);
+
+    // Set new timer (3 seconds debounce)
+    sessionData.timer = setTimeout(() => {
+        // Clone messages and clear buffer immediately to allow new messages
+        const messagesToProcess = [...sessionData.messages];
+        debounceMap.delete(sessionId);
+        
+        processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
+    }, 3000); 
+}
+
+// Core Logic Function (Debounced)
+async function processBufferedMessages(sessionId, pageId, senderId, messages) {
+    const combinedMessage = messages.join('\n'); // Join fragments
+    console.log(`Processing buffered messages for ${sessionId}: ${combinedMessage}`);
 
     try {
-        // 1. Fetch Config (Step 7: Multi-Tenant)
+        // 1. Fetch Config
         const pageConfig = await dbService.getPageConfig(pageId);
         
         if (!pageConfig) {
@@ -76,7 +104,6 @@ async function processEvent(event) {
             return;
         }
 
-        // Check Subscription / Credits
         if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
              console.log(`Page ${pageId} subscription inactive.`);
              return;
@@ -87,30 +114,61 @@ async function processEvent(event) {
             return;
         }
 
-        // 2. Send Typing Indicator (Human Touch)
+        // 2. HUMAN HANDOVER CHECK (New Feature)
+        // Fetch last 5 messages from real Facebook Thread
+        const fbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10);
+        
+        // Find the latest message sent by the Page
+        const lastPageMessage = fbMessages.find(m => m.from && m.from.id === pageId);
+
+        if (lastPageMessage) {
+            // Check if this message was sent by our Bot
+            // We compare it with our local Bot History
+            const botHistory = await dbService.getChatHistory(sessionId, 5); // Get last 5 bot/user messages
+            
+            // Check if any 'assistant' message in our DB matches the text of the last Page message
+            // We use fuzzy match or simple includes because FB might format text differently
+            const pageMessageText = lastPageMessage.message || '';
+            const isBotMessage = botHistory.some(m => 
+                m.role === 'assistant' && m.content &&
+                (m.content === pageMessageText || pageMessageText.includes(m.content.substring(0, 20)))
+            );
+
+            // If the last Page message is NOT in our Bot DB, it must be a Human Admin
+            if (!isBotMessage) {
+                console.log(`Human Admin detected for ${sessionId}. Last Page Message: "${lastPageMessage.message}". Stopping AI.`);
+                return; // STOP processing
+            }
+        }
+
+        // 3. Send Typing Indicator
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on');
 
-        // 3. Get Knowledge Base
+        // 4. Get Knowledge Base & Chat History
         const pagePrompts = await dbService.getPagePrompts(pageId);
+        const history = await dbService.getChatHistory(sessionId, 10); 
 
-        // 4. Generate AI Reply (Step 2 & 3)
-        const aiReply = await aiService.generateReply(messageText, pageConfig, pagePrompts);
+        // 5. Generate AI Reply
+        const aiReply = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history);
         
-        // 5. Send Reply (Step 4)
+        // 6. Send Reply
         await facebookService.sendMessage(pageId, senderId, aiReply, pageConfig.page_access_token);
-        
-        // Turn off typing
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
 
-        // 6. Save Lead / Log (Step 5)
+        // 7. Save History & Lead
+        // Save User Message (Combined)
+        await dbService.saveChatMessage(sessionId, 'user', combinedMessage);
+        // Save Assistant Reply
+        await dbService.saveChatMessage(sessionId, 'assistant', aiReply);
+
         await dbService.saveLead({
             page_id: pageId,
             sender_id: senderId,
-            message: messageText,
+            message: combinedMessage,
             reply: aiReply
         });
 
-        // 7. Deduct Credit
+        // 8. Deduct Credit
         await dbService.deductCredit(pageId, pageConfig.message_credit);
 
     } catch (error) {

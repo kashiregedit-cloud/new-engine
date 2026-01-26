@@ -79,8 +79,16 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
 
         return completion.choices[0].message.content;
     } catch (error) {
-        console.error("AI Generation Error:", error);
-        return "Sorry, I am a bit busy right now. Please leave your number."; // Fallback
+        console.error("AI Generation Error Details:", {
+            message: error.message,
+            response: error.response ? error.response.data : 'No response data',
+            provider: activeProvider,
+            model: activeModel,
+            key: selectedApiKey ? selectedApiKey.substring(0, 10) + '...' : 'Missing Key'
+        });
+        
+        // Return a better fallback or the actual error if in dev
+        return "Sorry, I am currently experiencing high traffic. Please try again later or leave your number."; 
     }
 }
 

@@ -89,11 +89,45 @@ async function deductCredit(pageId, currentCredit) {
     return true;
 }
 
+// 6. Get Chat History (Context Window)
+async function getChatHistory(sessionId, limit = 10) {
+    const { data, error } = await supabase
+        .from('n8n_chat_histories')
+        .select('message')
+        .eq('session_id', sessionId)
+        .order('id', { ascending: false }) // Get latest messages
+        .limit(limit);
+
+    if (error) {
+        console.error("Error fetching chat history:", error);
+        return [];
+    }
+
+    // Supabase returns newest first due to order by id desc, so reverse them to be chronological
+    return data.map(row => row.message).reverse(); 
+}
+
+// 7. Save Chat Message
+async function saveChatMessage(sessionId, role, content) {
+    const { error } = await supabase
+        .from('n8n_chat_histories')
+        .insert({
+            session_id: sessionId,
+            message: { role, content }
+        });
+
+    if (error) {
+        console.error("Error saving chat message:", error);
+    }
+}
+
 module.exports = {
     supabase,
     getPageConfig,
     getPagePrompts,
     saveLead,
     checkDuplicate,
-    deductCredit
+    deductCredit,
+    getChatHistory,
+    saveChatMessage
 };
