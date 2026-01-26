@@ -5,11 +5,8 @@ const facebookService = require('../services/facebookService');
 // Step 1: Webhook Trigger
 // Step 6: Orchestration
 const handleWebhook = async (req, res) => {
-    // 1. Immediate 200 OK (Critical for FB)
-    // We process async, but return 200 immediately if it's a valid event
-    // However, if we need to verify token, that's a GET request. This is POST.
-    
     const body = req.body;
+    console.log('Webhook Body Received:', JSON.stringify(body, null, 2));
 
     if (body.object === 'page') {
         res.status(200).send('EVENT_RECEIVED');

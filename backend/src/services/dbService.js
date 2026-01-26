@@ -94,5 +94,6 @@ module.exports = {
     getPageConfig,
     getPagePrompts,
     saveLead,
+    checkDuplicate,
     deductCredit
 };
