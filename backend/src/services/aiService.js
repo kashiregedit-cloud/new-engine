@@ -6,7 +6,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
     
     // 1. Multi-Key Rotation (Zero Cost / Scalability Strategy)
     let selectedApiKey = process.env.OPENROUTER_API_KEY; // Default Fallback
-    let activeProvider = pageConfig.ai || 'openrouter';
+    let activeProvider = pageConfig.ai || 'gemini';
     // Default to stable model if not specified. Gemini 1.5 Flash is currently the most stable free tier.
     let activeModel = pageConfig.chat_model || 'gemini-1.5-flash'; 
 

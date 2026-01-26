@@ -8,8 +8,7 @@ async function getManagedKey(provider = 'gemini') {
     const { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
-        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`)
-        .eq('is_active', true);
+        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`);
 
     if (error || !keys || keys.length === 0) {
         console.error("No active managed keys found for provider:", provider);
