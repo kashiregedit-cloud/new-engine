@@ -253,20 +253,33 @@ async function processUserMessages(debounceKey, senderId, pageId, session) {
               await sendFacebookMessage(senderId, aiResponse.output, config.pageAccessToken);
               
               // Deduct Credit (Page-Based)
-              if (config.subscriptionStatus === 'active' && config.messageCredit > 0) {
-                  const newCredit = config.messageCredit - 1;
+              // Ensure we are checking 'active' (case-insensitive just in case)
+              const isActive = config.subscriptionStatus && config.subscriptionStatus.toLowerCase() === 'active';
+              
+              if (isActive && config.messageCredit > 0) {
+                  const newCredit = Number(config.messageCredit) - 1; // Ensure number
+                  console.log(`Deducting credit for Page ${pageId}. Old: ${config.messageCredit}, New: ${newCredit}`);
+
                   const updates = { message_credit: newCredit };
                   
-                  // Auto-Unlock if exhausted (Handled by hourly job too, but good to do instantly)
+                  // Auto-Unlock if exhausted
                   if (newCredit <= 0) {
                       console.log(`Page ${pageId} credit exhausted. Switching to inactive.`);
                       updates.subscription_status = 'inactive';
                       updates.api_key = null; // Unlock
                   }
 
-                  await supabase.from('page_access_token_message')
+                  const { error: updateError } = await supabase.from('page_access_token_message')
                     .update(updates)
                     .eq('page_id', pageId);
+                  
+                  if (updateError) {
+                      console.error(`Failed to update credit for page ${pageId}:`, updateError);
+                  } else {
+                      console.log(`Credit updated successfully for page ${pageId}`);
+                  }
+              } else {
+                  console.log(`Skipping credit deduction for Page ${pageId}. Status: ${config.subscriptionStatus}, Credit: ${config.messageCredit}`);
               }
           } else {
               console.error('Missing Page Access Token for Facebook reply');

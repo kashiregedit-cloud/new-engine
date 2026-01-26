@@ -112,3 +112,15 @@ create table if not exists fb_message_database (
   verified boolean default true,
   created_at timestamp with time zone default now()
 );
+
+-- 9. Payment Transactions (for record keeping)
+create table if not exists payment_transactions (
+  id bigint generated always as identity primary key,
+  user_email text,
+  amount numeric,
+  method text, -- 'bkash', 'nagad', 'stripe', 'balance_deduction'
+  trx_id text,
+  sender_number text,
+  status text default 'pending', -- 'pending', 'completed', 'failed'
+  created_at timestamp with time zone default now()
+);

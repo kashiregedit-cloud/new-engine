@@ -228,6 +228,32 @@ export default function MessengerSettingsPage() {
           // User request: "buy and active plan e click korle work kroe na"
           // We will update the credits and status.
           
+          // Record Transaction (Mock or Real)
+          const priceMap: Record<string, number> = { 
+              '500_free': 0, 
+              '1000': 500, 
+              '5000': 2000, 
+              '10000': 3500 
+          };
+          const price = priceMap[selectedPlan] || 0;
+
+          // Only record if price > 0 (or if it's a free trial activation we want to log)
+          if (price >= 0) {
+              // Fetch user email if not in scope (we can try to get it from current session or page data)
+              // For now, let's use a placeholder or try to fetch user
+              const { data: { user } } = await supabase.auth.getUser();
+              const userEmail = user?.email || "unknown_user";
+
+              await supabase.from('payment_transactions').insert({
+                  user_email: userEmail,
+                  amount: price,
+                  method: 'balance_deduction', // or 'mock_purchase'
+                  trx_id: 'SYS_' + Date.now(),
+                  sender_number: 'SYSTEM',
+                  status: 'completed'
+              });
+          }
+
           updates.subscription_status = 'active';
           updates.subscription_plan = selectedPlan;
           updates.message_credit = creditMap[selectedPlan] || 500;
