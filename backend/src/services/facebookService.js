@@ -58,6 +58,7 @@ async function getConversationMessages(pageId, userId, accessToken, limit = 5) {
 
 module.exports = {
     sendMessage,
+    sendImageMessage,
     sendTypingAction,
     getConversationMessages
 };

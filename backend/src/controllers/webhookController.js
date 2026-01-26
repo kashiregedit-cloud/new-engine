@@ -145,7 +145,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const history = await dbService.getChatHistory(sessionId, 10); 
 
         // 5. Generate AI Reply
-        const aiReply = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history);
+        const aiResponse = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history);
         
         // --- PRE-SEND CHECK (n8n "IfPageReplyExists" Logic) ---
         // Check again if Admin replied while AI was generating (Race Condition Fix)
@@ -159,21 +159,32 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         // -------------------------------------------------------
 
-        // 6. Send Reply
-        await facebookService.sendMessage(pageId, senderId, aiReply, pageConfig.page_access_token);
+        // 6. Send Reply (Text + Images)
+        const replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
+        
+        // Send Text
+        await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
+
+        // Send Images (if any)
+        if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {
+            for (const imageUrl of aiResponse.images) {
+                await facebookService.sendImageMessage(pageId, senderId, imageUrl, pageConfig.page_access_token);
+            }
+        }
+
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
 
         // 7. Save History & Lead
         // Save User Message (Combined)
         await dbService.saveChatMessage(sessionId, 'user', combinedMessage);
-        // Save Assistant Reply
-        await dbService.saveChatMessage(sessionId, 'assistant', aiReply);
+        // Save Assistant Reply (Text only)
+        await dbService.saveChatMessage(sessionId, 'assistant', replyText);
 
         await dbService.saveLead({
             page_id: pageId,
             sender_id: senderId,
             message: combinedMessage,
-            reply: aiReply
+            reply: replyText
         });
 
         // 8. Deduct Credit

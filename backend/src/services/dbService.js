@@ -121,6 +121,58 @@ async function saveChatMessage(sessionId, role, content) {
     }
 }
 
+// --- n8n Workflow Specific Tables ---
+
+// 8. Save to fb_chats (n8n compatible)
+async function saveFbChat(data) {
+    // data: { page_id, sender_id, recipient_id, message_id, text, timestamp, status, reply_by }
+    const { error } = await supabase
+        .from('fb_chats')
+        .upsert(data, { onConflict: 'message_id' });
+
+    if (error) {
+        console.error("Error saving to fb_chats:", error);
+    }
+}
+
+// 9. Get Old Messages from fb_chats
+async function getFbChatHistory(pageId, senderId, limit = 5) {
+    const { data, error } = await supabase
+        .from('fb_chats')
+        .select('*')
+        .eq('page_id', pageId)
+        .or(`sender_id.eq.${senderId},recipient_id.eq.${senderId}`)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error("Error getting fb_chats history:", error);
+        return [];
+    }
+    return data.reverse(); // Return chronological order
+}
+
+// 10. n8n Debounce (fb_n8n_debounce)
+async function checkN8nDebounce(key) {
+    // Increment 'incr' for the key
+    // This is a simplified version of n8n's debounce logic which might use a stored procedure or transaction
+    // Here we just check if key exists or update timestamp
+    // Ideally we use Redis, but for Postgres/Supabase:
+    
+    // First, try to insert
+    const { error } = await supabase
+        .from('fb_n8n_debounce')
+        .upsert({ key: key, incr: 1 }, { onConflict: 'key' })
+        .select();
+
+    // If we wanted to count increments, we'd need a different approach, 
+    // but for simple debounce (existence check), this might be enough.
+    // However, n8n usually waits. 
+    // My webhookController already handles in-memory debounce.
+    // I will expose this function for compatibility.
+    return !error;
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -129,5 +181,8 @@ module.exports = {
     checkDuplicate,
     deductCredit,
     getChatHistory,
-    saveChatMessage
+    saveChatMessage,
+    saveFbChat,
+    getFbChatHistory,
+    checkN8nDebounce
 };

@@ -29,6 +29,34 @@ async function getManagedKey(provider = 'gemini') {
     };
 }
 
+// Fetch ALL keys for retry logic
+async function getAllManagedKeys(provider = 'gemini') {
+    // Check if provider is 'google' or 'gemini'
+    const isGoogle = provider === 'google' || provider === 'gemini';
+    
+    const { data: keys, error } = await dbService.supabase
+        .from('api_list')
+        .select('*')
+        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`);
+
+    if (error || !keys || keys.length === 0) {
+        return [];
+    }
+
+    // Shuffle the array (Fisher-Yates) to randomize load
+    for (let i = keys.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [keys[i], keys[j]] = [keys[j], keys[i]];
+    }
+
+    return keys.map(k => ({
+        key: k.api,
+        provider: k.provider,
+        model: k.model
+    }));
+}
+
 module.exports = {
-    getManagedKey
+    getManagedKey,
+    getAllManagedKeys
 };
