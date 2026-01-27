@@ -15,8 +15,14 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
          if (managedKeys && managedKeys.length > 0) {
              keyPool = managedKeys;
          } else {
-             // Fallback if DB is empty
-             keyPool = [{ key: process.env.OPENROUTER_API_KEY, provider: 'openrouter', model: 'google/gemini-flash-1.5' }];
+             // Fallback if DB is empty - Check Env Vars
+             const fallbackKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+             if (fallbackKey) {
+                 console.log("Using Fallback API Key from Environment Variables.");
+                 keyPool = [{ key: fallbackKey, provider: 'google', model: 'gemini-1.5-flash' }];
+             } else {
+                 console.error("CRITICAL: No Managed Keys in DB and no Fallback Key in ENV.");
+             }
          }
     } else {
         // Case B: User Provided Keys (Comma separated)
