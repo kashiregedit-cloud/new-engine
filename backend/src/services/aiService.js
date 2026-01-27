@@ -89,32 +89,51 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
 
     for (const keyObj of keyPool) {
         const currentKey = keyObj.key;
-        const currentProvider = keyObj.provider;
-        const currentModel = keyObj.model || defaultModel;
+        const currentProvider = (keyObj.provider || defaultProvider).toLowerCase();
+        
+        // Smart Default Model based on Provider (if not specified in DB)
+        let currentModel = keyObj.model;
+        if (!currentModel) {
+            if (currentProvider.includes('gemini') || currentProvider.includes('google')) currentModel = 'gemini-1.5-flash';
+            else if (currentProvider.includes('openai')) currentModel = 'gpt-4o-mini';
+            else if (currentProvider.includes('groq')) currentModel = 'llama3-70b-8192';
+            else if (currentProvider.includes('xai') || currentProvider.includes('grok')) currentModel = 'grok-beta';
+            else if (currentProvider.includes('deepseek')) currentModel = 'deepseek-chat';
+            else currentModel = defaultModel;
+        }
 
-        // Setup Base URL
+        // Setup Base URL (Verified Official Documentation)
         let baseURL = 'https://openrouter.ai/api/v1'; 
-        if (currentProvider === 'gemini' || currentProvider === 'google') {
+        
+        if (currentProvider.includes('gemini') || currentProvider.includes('google')) {
+            // Official Google Gemini OpenAI Compatibility Endpoint
             baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-        } else if (currentProvider === 'openai') {
+        } else if (currentProvider.includes('openai')) {
             baseURL = 'https://api.openai.com/v1';
+        } else if (currentProvider.includes('groq')) {
+            baseURL = 'https://api.groq.com/openai/v1';
+        } else if (currentProvider.includes('xai') || currentProvider.includes('grok')) {
+            baseURL = 'https://api.x.ai/v1';
+        } else if (currentProvider.includes('deepseek')) {
+            // DeepSeek Official Base URL
+            baseURL = 'https://api.deepseek.com'; 
         }
 
         const client = new OpenAI({
             baseURL: baseURL,
-            apiKey: currentKey
+            apiKey: currentKey,
+            timeout: 6000 // 6 Seconds Timeout for Fast Failover
         });
 
         try {
-            // console.log(`Attempting AI generation with provider: ${currentProvider} model: ${currentModel}`);
-            console.log(`Sending to AI: ${messages.length} messages (History: ${history.length})`);
+            console.log(`[Attempt ${keyPool.indexOf(keyObj) + 1}] Sending to ${currentProvider.toUpperCase()} (${currentModel})...`);
             
             const completion = await client.chat.completions.create({
                 model: currentModel,
                 messages: messages,
                 temperature: 0.7, 
-                max_tokens: 300, // Increased for JSON
-                response_format: { type: "json_object" } // Force JSON if supported, otherwise prompt handles it
+                max_tokens: 800,
+                response_format: { type: "json_object" } 
             });
 
             if (completion.choices && completion.choices[0] && completion.choices[0].message) {

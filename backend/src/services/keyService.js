@@ -30,14 +30,17 @@ async function getManagedKey(provider = 'gemini') {
 }
 
 // Fetch ALL keys for retry logic
-async function getAllManagedKeys(provider = 'gemini') {
-    // Check if provider is 'google' or 'gemini'
-    const isGoogle = provider === 'google' || provider === 'gemini';
+async function getAllManagedKeys(provider = 'all') {
     
-    const { data: keys, error } = await dbService.supabase
-        .from('api_list')
-        .select('*')
-        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`);
+    let query = dbService.supabase.from('api_list').select('*');
+
+    // If provider is specified and not 'all', try to filter, but based on user requirement
+    // they want a mixed pool. So we will relax this. 
+    // If the user specifically asks for 'gemini', we might still want to give them everything 
+    // if the strategy is "try everything". 
+    // For now, let's fetch ALL keys to ensure maximum availability.
+    
+    const { data: keys, error } = await query;
 
     if (error || !keys || keys.length === 0) {
         return [];
