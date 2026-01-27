@@ -109,6 +109,7 @@ async function getChatHistory(sessionId, limit = 10) {
 
 // 7. Save Chat Message
 async function saveChatMessage(sessionId, role, content) {
+    console.log(`[DB] Saving chat for ${sessionId}: [${role}] ${content.substring(0, 50)}...`);
     const { error } = await supabase
         .from('n8n_chat_histories')
         .insert({

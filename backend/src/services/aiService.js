@@ -4,22 +4,58 @@ const keyService = require('./keyService');
 // Step 2: Business Logic / AI Brain
 async function generateReply(userMessage, pageConfig, pagePrompts, history = []) {
     
-    // 1. Prepare Key Pool (Multi-Key Rotation & Retry Strategy)
+    // 1. Prepare Key Pool (Smart Rotation Strategy)
     let keyPool = [];
     let defaultProvider = pageConfig.ai || 'gemini';
     let defaultModel = pageConfig.chat_model || 'gemini-1.5-flash'; 
 
-    // Case A: Managed Mode (Fetch from DB)
+    // Case A: Managed Mode (Fetch from DB using Smart Key Service)
     if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
-         const managedKeys = await keyService.getAllManagedKeys(defaultProvider); 
-         if (managedKeys && managedKeys.length > 0) {
-             keyPool = managedKeys;
+         // Get a SINGLE smart key first (optimization)
+         // But wait, the retry loop below expects a list. 
+         // Strategy: Fetch a small batch of valid keys (e.g., 3) to allow local retries without hitting DB every time.
+         // However, getSmartKey returns only one.
+         // Let's modify logic: We want to try multiple keys if one fails.
+         
+         // 1. Fetch one best candidate
+         const smartKey = await keyService.getSmartKey(defaultProvider, defaultModel);
+         if (smartKey) {
+             keyPool.push(smartKey);
+         }
+
+         // 2. Add a few more backups just in case the first one fails immediately (optional, but good for robustness)
+         // Actually, if the first one fails, the loop will exit and we return error? No, we want retry.
+         // Let's fetch a few more if possible.
+         // For now, let's just stick to the main one + fallback. 
+         // If we want true robustness, we should fetch a list. 
+         // Let's assume we fetch a small list using the existing getAllManagedKeys but filtered by model?
+         // No, getAllManagedKeys doesn't filter by model.
+         
+         // Let's rely on the first key. If it fails, we can try to fetch another one dynamically? 
+         // Complex. Let's stick to the previous approach of fetching a pool, but filtered by model.
+         
+         // RE-FETCHING ALL KEYS IS EXPENSIVE FOR 1000 KEYS.
+         // But we only fetch "active" keys. 
+         // Let's assume for now we use the `getSmartKey` logic which is cleaner.
+         // If that fails, we have the fallback environment key.
+         
+         // To support retry, we can loop X times calling getSmartKey? 
+         // No, that's redundant DB calls.
+         
+         // Solution: We will trust `getSmartKey` to give us a good key. 
+         // If that fails (e.g. 500 error), we probably want to try one more time with a different key.
+         // So let's push 2-3 unique keys into the pool if possible.
+         
+         for (let i = 0; i < 3; i++) {
+             const k = await keyService.getSmartKey(defaultProvider, defaultModel);
+             if (k && !keyPool.some(existing => existing.key === k.key)) {
+                 keyPool.push(k);
+             }
          }
          
          // Always add Fallback Key from Env to the end of the pool if available
          const fallbackKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
          if (fallbackKey) {
-             // Avoid duplicates if possible, but for now just push it as a safety net
              const isDuplicate = keyPool.some(k => k.key === fallbackKey);
              if (!isDuplicate) {
                 console.log("Adding Fallback API Key from Environment Variables to Key Pool.");
@@ -28,7 +64,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
          }
 
          if (keyPool.length === 0) {
-             console.error("CRITICAL: No Managed Keys in DB and no Fallback Key in ENV.");
+             console.error(`CRITICAL: No Managed Keys found for ${defaultProvider}/${defaultModel} and no Fallback Key in ENV.`);
          }
     } else {
         // Case B: User Provided Keys (Comma separated)
@@ -122,35 +158,56 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
         const client = new OpenAI({
             baseURL: baseURL,
             apiKey: currentKey,
-            timeout: 6000 // 6 Seconds Timeout for Fast Failover
+            timeout: 60000 // 60 Seconds Timeout (Increased from 6s to allow complex reasoning)
         });
 
         try {
             console.log(`[Attempt ${keyPool.indexOf(keyObj) + 1}] Sending to ${currentProvider.toUpperCase()} (${currentModel})...`);
             
-            const completion = await client.chat.completions.create({
+            // Use withResponse() to get access to headers
+            const { data: completion, response } = await client.chat.completions.create({
                 model: currentModel,
                 messages: messages,
                 temperature: 0.7, 
                 max_tokens: 800,
                 response_format: { type: "json_object" } 
-            });
+            }).withResponse();
+
+            // Extract Rate Limit Headers and Update Key Status
+            if (response && response.headers) {
+                keyService.updateKeyStatusFromHeaders(currentKey, response.headers);
+            }
 
             if (completion.choices && completion.choices[0] && completion.choices[0].message) {
                 const rawContent = completion.choices[0].message.content;
                 // Parse JSON to ensure it's valid, otherwise return raw text as fallback
                 try {
                     const parsed = JSON.parse(rawContent.replace(/```json|```/g, "").trim());
+                    // Success! Record usage for Rate Limiting
+                    // Extract token usage if available
+                    const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                    keyService.recordKeyUsage(currentKey, tokenUsage);
                     return parsed; // Return Object
                 } catch (e) {
                     console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
+                    // Even if JSON failed, the API call succeeded, so we record usage
+                    const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                    keyService.recordKeyUsage(currentKey, tokenUsage);
                     return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
                 }
             }
         } catch (error) {
             console.warn(`AI Generation failed with key ...${currentKey.slice(-4)}. Provider: ${currentProvider}. Error: ${error.message}`);
+            
+            // Mark key as dead so we don't try it again immediately
+            keyService.markKeyAsDead(currentKey);
+
             if (error.response) {
                  console.warn(`Error Response:`, error.response.data);
+                 // If error response has headers, we might also want to check them
+                 if (error.response.headers) {
+                    keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
+                 }
             }
             lastError = error;
             // Continue to next key

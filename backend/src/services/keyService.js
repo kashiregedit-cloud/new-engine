@@ -1,65 +1,287 @@
 const dbService = require('./dbService');
 
-// Fetch a rotating key from the global pool (api_list)
-async function getManagedKey(provider = 'gemini') {
-    // Check if provider is 'google' or 'gemini'
-    const isGoogle = provider === 'google' || provider === 'gemini';
-    
+// In-Memory Key Cache (Refresh every 5 minutes or manually)
+let keyCache = [];
+let lastCacheUpdate = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 Minutes
+
+// In-Memory "Dead Key" Tracker
+// Stores invalid keys with a timestamp to avoid retrying them immediately
+const deadKeys = new Map();
+const DEAD_KEY_TIMEOUT = 60 * 60 * 1000; // 1 Hour Cooldown
+
+// In-Memory Usage Tracker for RPM (Rate Per Minute)
+const keyUsageMap = new Map(); 
+
+// In-Memory Pointer for Serial/Round-Robin Selection
+// Key: "provider:model", Value: Next Index (Integer)
+const modelIndexMap = new Map();
+
+// --- Default Limits Map (Fallback if DB values are null) ---
+// Based on typical Free Tier limits as of early 2025
+const DEFAULT_LIMITS = {
+    'gemini-2.0-flash': { rpm: 10, rpd: 1500 },
+    'gemini-1.5-flash': { rpm: 15, rpd: 1500 },
+    'gemini-1.5-flash-8b': { rpm: 15, rpd: 1500 },
+    'gemini-1.5-pro': { rpm: 2, rpd: 50 }, // Very strict!
+    'gemini-1.0-pro': { rpm: 15, rpd: 1500 },
+    'gpt-4o-mini': { rpm: 3, rpd: 200 }, // Example fallback
+    'default': { rpm: 10, rpd: 1000 } // Safe fallback
+};
+
+// --- Helper: Update Cache ---
+async function updateKeyCache() {
+    const now = Date.now();
+    if (now - lastCacheUpdate < CACHE_TTL && keyCache.length > 0) {
+        return; // Cache is fresh
+    }
+
+    // console.log("[KeyService] Refreshing API Key Cache...");
+    // Fetch all active keys, sorted by ID for consistent serial order
     const { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
-        .or(`provider.eq.${provider},provider.eq.${isGoogle ? 'google' : provider},provider.eq.${isGoogle ? 'gemini' : provider}`);
+        // .eq('status', 'active') // Column 'status' does not exist yet
+        .order('id', { ascending: true }); 
 
-    if (error || !keys || keys.length === 0) {
-        console.error("No active managed keys found for provider:", provider);
+    if (error) {
+        console.error("[KeyService] Failed to refresh key cache:", error.message);
+        return;
+    }
+
+    if (keys) {
+        keyCache = keys;
+        lastCacheUpdate = now;
+        // console.log(`[KeyService] Cache updated. Total Keys: ${keys.length}`);
+    }
+}
+
+function markKeyAsDead(key) {
+    if (!key) return;
+    console.warn(`[KeyService] Marking key as dead/invalid: ${key.substring(0, 8)}...`);
+    deadKeys.set(key, Date.now());
+}
+
+function isKeyAlive(key) {
+    if (!deadKeys.has(key)) return true;
+    const timestamp = deadKeys.get(key);
+    if (Date.now() - timestamp > DEAD_KEY_TIMEOUT) {
+        deadKeys.delete(key); // Expired, give it another chance
+        return true;
+    }
+    return false;
+}
+
+// Check if Key is within Limits (RPM, RPD)
+function isKeyWithinLimits(keyDbObject) {
+    const now = Date.now();
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 1. Check RPD (Requests Per Day)
+    const dbDate = keyDbObject.last_date_checked;
+    // If DB date is not today, usage is 0.
+    const usageToday = (dbDate === today) ? (keyDbObject.usage_today || 0) : 0;
+    
+    // Determine Limits (DB > Default Map > Safe Fallback)
+    let rpdLimit = keyDbObject.rpd_limit;
+    let rpmLimit = keyDbObject.rpm_limit;
+
+    if (!rpdLimit || !rpmLimit) {
+        const modelDefaults = DEFAULT_LIMITS[keyDbObject.model] || DEFAULT_LIMITS['default'];
+        if (!rpdLimit) rpdLimit = modelDefaults.rpd;
+        if (!rpmLimit) rpmLimit = modelDefaults.rpm;
+    }
+
+    if (usageToday >= rpdLimit) {
+        // console.log(`Key ${keyDbObject.api.substring(0,6)}... hit RPD limit (${usageToday}/${rpdLimit})`);
+        return false;
+    }
+
+    // 2. Check RPM (Requests Per Minute) via Sliding Window / Interval
+    const minIntervalMs = 60000 / rpmLimit; // e.g., 6000ms for 10 RPM
+    
+    const lastUsed = keyUsageMap.get(keyDbObject.api) || 0;
+    if (now - lastUsed < minIntervalMs) {
+        // console.log(`Key ${keyDbObject.api.substring(0,6)}... hit RPM limit (Wait ${minIntervalMs - (now - lastUsed)}ms)`);
+        return false;
+    }
+
+    // 3. Check TPM (Tokens Per Minute)
+    const tpmLimit = keyDbObject.tpm_limit || 0; // 0 means unchecked/unlimited by default for now
+    if (tpmLimit > 0) {
+        // Simple approximate check: If usageToday * avg_tokens > tpm? 
+        // No, TPM requires a sliding window of actual token counts.
+        // For now, we will skip complex TPM sliding window in memory to save RAM.
+        // We will implement RPD (Requests) and TPD (Tokens Per Day) first.
+    }
+
+    // 4. Check TPD (Tokens Per Day)
+    const tpdLimit = keyDbObject.tpd_limit || 0;
+    const tokensToday = (dbDate === today) ? (keyDbObject.usage_tokens_today || 0) : 0;
+    
+    if (tpdLimit > 0 && tokensToday >= tpdLimit) {
+        // console.log(`Key ${keyDbObject.api.substring(0,6)}... hit TPD limit (${tokensToday}/${tpdLimit})`);
+        return false;
+    }
+
+    return true;
+}
+
+// Record Usage (Call this AFTER successful AI response)
+async function recordKeyUsage(apiKey, tokenUsage = 0) {
+    if (!apiKey) return;
+
+    const now = Date.now();
+    const today = new Date().toISOString().split('T')[0];
+
+    // 1. Update In-Memory RPM Map
+    keyUsageMap.set(apiKey, now);
+
+    // 2. Update In-Memory Cache Object (Immediate Reflection for RPD/TPD)
+    const cachedKey = keyCache.find(k => k.api === apiKey);
+    let newUsage = 1;
+    let newTokens = tokenUsage;
+
+    if (cachedKey) {
+        if (cachedKey.last_date_checked === today) {
+            cachedKey.usage_today = (cachedKey.usage_today || 0) + 1;
+            cachedKey.usage_tokens_today = (cachedKey.usage_tokens_today || 0) + tokenUsage;
+            newUsage = cachedKey.usage_today;
+            newTokens = cachedKey.usage_tokens_today;
+        } else {
+            cachedKey.last_date_checked = today;
+            cachedKey.usage_today = 1;
+            cachedKey.usage_tokens_today = tokenUsage;
+            newUsage = 1;
+            newTokens = tokenUsage;
+        }
+        cachedKey.last_used_at = new Date().toISOString();
+        
+        // Mark for batch update
+        pendingUpdates.add(apiKey);
+    }
+
+    // 3. Update Database (Buffered/Batched)
+    // Removed immediate DB call to prevent Supabase overload
+}
+
+// Flush Usage Stats to Database (Called periodically)
+async function flushUsageStats() {
+    if (pendingUpdates.size === 0) return;
+
+    // console.log(`[KeyService] Flushing usage stats for ${pendingUpdates.size} keys...`);
+    const keysToUpdate = Array.from(pendingUpdates);
+    pendingUpdates.clear();
+
+    for (const apiKey of keysToUpdate) {
+        const cachedKey = keyCache.find(k => k.api === apiKey);
+        if (!cachedKey) continue;
+
+        try {
+            await dbService.supabase
+                .from('api_list')
+                .update({ 
+                    usage_today: cachedKey.usage_today,
+                    usage_tokens_today: cachedKey.usage_tokens_today,
+                    last_date_checked: cachedKey.last_date_checked,
+                    last_used_at: cachedKey.last_used_at
+                })
+                .eq('api', apiKey);
+        } catch (err) {
+            console.error(`[KeyService] Failed to flush stats for key ${apiKey.substring(0,6)}...`, err.message);
+        }
+    }
+}
+
+// Update Key Status based on Response Headers
+function updateKeyStatusFromHeaders(apiKey, headers) {
+    if (!apiKey || !headers) return;
+
+    const remaining = headers['x-ratelimit-remaining-requests'] || headers['x-ratelimit-remaining'] || headers['ratelimit-remaining'];
+    const resetTime = headers['x-ratelimit-reset-requests'] || headers['x-ratelimit-reset'] || headers['ratelimit-reset'];
+
+    if (remaining !== undefined && parseInt(remaining) === 0) {
+        console.warn(`[KeyService] Key ${apiKey.substring(0,8)}... exhausted (Headers).`);
+        
+        let timeoutMs = 60 * 1000; // Default 1 min
+        if (resetTime) {
+            const val = parseInt(resetTime);
+            if (val > 1000000000) { // Timestamp
+                timeoutMs = val - Date.now();
+            } else { // Seconds
+                timeoutMs = val * 1000;
+            }
+        }
+        
+        if (timeoutMs > 0) {
+            markKeyAsDead(apiKey); 
+        }
+    }
+}
+
+// Smart Key Rotation (Serial Round Robin + Health Check)
+async function getSmartKey(provider, model) {
+    // 1. Ensure Cache is Fresh
+    await updateKeyCache();
+
+    // 2. Filter Keys from Memory Cache
+    let validKeys = keyCache;
+
+    // Filter by Provider
+    if (provider) {
+        if (provider === 'google' || provider === 'gemini') {
+            validKeys = validKeys.filter(k => k.provider === 'google' || k.provider === 'gemini');
+        } else {
+            validKeys = validKeys.filter(k => k.provider === provider);
+        }
+    }
+
+    // Filter by Model (Strict Match)
+    if (model) {
+        validKeys = validKeys.filter(k => k.model === model);
+    }
+
+    if (validKeys.length === 0) {
         return null;
     }
 
-    // Simple Random Rotation
-    const randomIndex = Math.floor(Math.random() * keys.length);
-    const selectedKey = keys[randomIndex];
-
-    // Optional: Update usage count (async, don't block)
-    // dbService.supabase.from('api_list').update({ usage_count: selectedKey.usage_count + 1 }).eq('id', selectedKey.id);
-
-    return {
-        key: selectedKey.api,
-        provider: selectedKey.provider,
-        model: selectedKey.model
-    };
-}
-
-// Fetch ALL keys for retry logic
-async function getAllManagedKeys(provider = 'all') {
+    // 3. Serial Round Robin Selection
+    const mapKey = `${provider || 'all'}:${model || 'all'}`;
+    let startIndex = modelIndexMap.get(mapKey) || 0;
     
-    let query = dbService.supabase.from('api_list').select('*');
-
-    // If provider is specified and not 'all', try to filter, but based on user requirement
-    // they want a mixed pool. So we will relax this. 
-    // If the user specifically asks for 'gemini', we might still want to give them everything 
-    // if the strategy is "try everything". 
-    // For now, let's fetch ALL keys to ensure maximum availability.
-    
-    const { data: keys, error } = await query;
-
-    if (error || !keys || keys.length === 0) {
-        return [];
+    // Ensure start index is within bounds
+    if (startIndex >= validKeys.length) {
+        startIndex = 0;
     }
 
-    // Shuffle the array (Fisher-Yates) to randomize load
-    for (let i = keys.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [keys[i], keys[j]] = [keys[j], keys[i]];
+    // Iterate through keys starting from startIndex to find the first valid one
+    for (let i = 0; i < validKeys.length; i++) {
+        const currentIndex = (startIndex + i) % validKeys.length;
+        const candidateKey = validKeys[currentIndex];
+
+        if (isKeyAlive(candidateKey.api) && isKeyWithinLimits(candidateKey)) {
+            // Found a good key!
+            
+            // Update pointer to next one for next call
+            modelIndexMap.set(mapKey, (currentIndex + 1) % validKeys.length);
+
+            return {
+                key: candidateKey.api,
+                provider: candidateKey.provider,
+                model: candidateKey.model
+            };
+        }
     }
 
-    return keys.map(k => ({
-        key: k.api,
-        provider: k.provider,
-        model: k.model
-    }));
+    // No valid key found after checking all
+    return null;
 }
 
 module.exports = {
-    getManagedKey,
-    getAllManagedKeys
+    getManagedKey: () => null, 
+    getAllManagedKeys: () => [], 
+    getSmartKey, 
+    markKeyAsDead,
+    recordKeyUsage,
+    updateKeyStatusFromHeaders
 };

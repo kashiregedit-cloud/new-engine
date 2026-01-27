@@ -1,3 +1,4 @@
+
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
@@ -174,3 +175,13 @@ CREATE TABLE IF NOT EXISTS public.api_list (
   usage_count bigint DEFAULT 0,
   created_at timestamp with time zone DEFAULT now()
 );
+
+-- Update api_list table for Rate Limiting (RPM, RPD)
+alter table api_list add column if not exists rpm_limit int default 10; -- Requests Per Minute
+alter table api_list add column if not exists rpd_limit int default 1000; -- Requests Per Day
+alter table api_list add column if not exists usage_today int default 0;
+alter table api_list add column if not exists last_used_at timestamp with time zone;
+alter table api_list add column if not exists last_date_checked date default CURRENT_DATE;
+
+-- Create index for fast lookup
+create index if not exists idx_api_list_provider on api_list(provider);
