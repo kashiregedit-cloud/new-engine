@@ -174,6 +174,28 @@ async function checkN8nDebounce(key) {
     return !error;
 }
 
+async function getMessageById(messageId) {
+    if (!messageId) return null;
+    
+    // Try backend_chat_histories first
+    const { data, error } = await supabase
+        .from('backend_chat_histories')
+        .select('text')
+        .eq('message_id', messageId)
+        .maybeSingle();
+
+    if (data && data.text) return data.text;
+
+    // Fallback to fb_chats
+    const { data: fbData } = await supabase
+        .from('fb_chats')
+        .select('text')
+        .eq('message_id', messageId)
+        .maybeSingle();
+        
+    return fbData ? fbData.text : null;
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -186,7 +208,9 @@ module.exports = {
     saveFbChat,
     getFbChatHistory,
     checkN8nDebounce,
-    saveFbComment
+    saveFbComment,
+    logMessage,
+    getMessageById
 };
 
 // 11. Save Comment (n8n compatible)

@@ -147,7 +147,12 @@ async function queueMessage(event) {
     }
 
     const sessionData = debounceMap.get(sessionId);
-    sessionData.messages.push(messageText);
+    // Push Object instead of String to preserve metadata
+    sessionData.messages.push({
+        text: messageText,
+        reply_to: replyToId,
+        images: event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || []
+    });
 
     console.log(`Queued message for ${sessionId}: ${messageText}`);
 
@@ -166,8 +171,23 @@ async function queueMessage(event) {
 
 // Core Logic Function (Debounced)
 async function processBufferedMessages(sessionId, pageId, senderId, messages) {
-    const combinedMessage = messages.join('\n'); // Join fragments
-    console.log(`Processing buffered messages for ${sessionId}: ${combinedMessage}`);
+    // Reconstruct Combined Message & Extract Metadata
+    let combinedText = "";
+    let replyToId = null;
+    let allImages = [];
+
+    for (const msg of messages) {
+        if (typeof msg === 'string') {
+            // Handle legacy string format (just in case)
+            combinedText += msg + "\n";
+        } else {
+            combinedText += msg.text + "\n";
+            if (msg.reply_to) replyToId = msg.reply_to; // Capture the last reply_to ID
+            if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
+        }
+    }
+    combinedText = combinedText.trim();
+    console.log(`Processing buffered messages for ${sessionId}: ${combinedText}`);
 
     try {
         // 1. Fetch Config
@@ -198,27 +218,6 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Fetch last 10 messages from real Facebook Thread
         const fbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10);
         
-        // RULE 1: If the LATEST message in the thread is from the Page, STOP.
-        // This handles the race condition where Admin replied during the debounce period.
-        /*
-        if (fbMessages.length > 0) {
-            const latestMessage = fbMessages[0]; // Messages are usually sorted newest first
-            if (latestMessage.from && latestMessage.from.id === pageId) {
-                console.log(`Latest message in thread is from Page (Admin or Bot). Stopping AI for ${sessionId}.`);
-                return;
-            }
-        }
-        */
-        
-        // RULE 2: Check if Admin Replied Recently (Human Handover) - DISABLED FOR NOW to fix "Not Replying" bug
-        // We will rely on Rule 1 to prevent double replies.
-        /*
-        const lastPageMessage = fbMessages.find(m => m.from && m.from.id === pageId);
-        if (lastPageMessage) {
-             // ... logic ...
-        }
-        */
-
         // 3. Send Typing Indicator
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on');
 
@@ -242,7 +241,6 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // -------------------------
         
         // Dynamic History Limit from DB (check_conversion) or default 10
-        // Handle BigInt or Number
         let historyLimit = 10;
         if (pagePrompts?.check_conversion) {
             historyLimit = Number(pagePrompts.check_conversion);
@@ -251,20 +249,12 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const history = await dbService.getChatHistory(sessionId, historyLimit); 
 
         // --- STOP EMOJI CHECK (Dynamic Logic via Graph API) ---
-        // Logic: Check REAL Facebook Thread (fbMessages) for block_emoji and unblock_emoji.
-        // We use fbMessages because it contains Admin replies sent via Inbox (which are not in our DB history).
-        // If block_emoji is found AND it is more recent than unblock_emoji, STOP.
-        
         const blockEmoji = pagePrompts?.block_emoji;
         const unblockEmoji = pagePrompts?.unblock_emoji;
 
         if (blockEmoji) {
             let lastBlockTime = 0;
             let lastUnblockTime = 0;
-
-            // fbMessages is sorted Newest [0] to Oldest [N] (usually)
-            // But let's verify or trust the API. Graph API usually returns newest first.
-            // We iterate through them.
             
             for (const msg of fbMessages) {
                 // Check if message is from PAGE (Admin or Bot)
@@ -282,12 +272,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 }
             }
             
-            // Also check our local history as a fallback (in case Graph API missed something or for consistency)
-            // But Graph API should be the authority for Admin actions.
-            // Actually, let's stick to fbMessages for Admin actions as requested ("page id teke jaite hobe").
-            
             if (lastBlockTime > 0) {
-                 // If Block exists and is newer than Unblock (or Unblock doesn't exist)
                  if (lastBlockTime > lastUnblockTime) {
                       const logMsg = `[Stop Logic] Active Block Emoji (${blockEmoji}) detected from Page. AI Halted.`;
                       console.log(logMsg);
@@ -297,6 +282,36 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             }
         }
         // ---------------------------------------
+
+        // --- REPLY TO LOGIC (New Section) ---
+        // Mimicking n8n logic: Get Old Message -> Combine -> Send to AI
+        let replyContext = "";
+        if (replyToId) {
+            console.log(`[Webhook] Found Reply-To ID: ${replyToId}. Fetching original message...`);
+            
+            // 1. Try DB First
+            let originalText = await dbService.getMessageById(replyToId);
+            
+            // 2. Fallback to Facebook Graph API if not in DB
+            if (!originalText) {
+                console.log(`[Webhook] Message ${replyToId} not in DB. Fetching from Facebook...`);
+                const fbMsg = await facebookService.getMessageById(replyToId, pageConfig.page_access_token);
+                if (fbMsg && fbMsg.message) {
+                    originalText = fbMsg.message;
+                }
+            }
+
+            if (originalText) {
+                replyContext = `[User Replying To: "${originalText}"]\n`;
+                console.log(`[Webhook] Found Reply Context: ${originalText}`);
+            } else {
+                console.log(`[Webhook] Could not fetch original message for ${replyToId}`);
+            }
+        }
+        
+        // Construct Final Message for AI
+        const finalUserMessage = `${replyContext}${combinedText}`;
+        // ------------------------------------
 
         // 5. Generate AI Reply
         // Use finalUserMessage which includes reply context
@@ -344,15 +359,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
 
         // 7. Save History & Lead
-        // Save User Message (Combined)
-        await dbService.saveChatMessage(sessionId, 'user', combinedMessage);
+        // Save User Message (Combined with Context)
+        await dbService.saveChatMessage(sessionId, 'user', finalUserMessage);
         // Save Assistant Reply (Text only)
         await dbService.saveChatMessage(sessionId, 'assistant', replyText);
 
         await dbService.saveLead({
             page_id: pageId,
             sender_id: senderId,
-            message: combinedMessage,
+            message: finalUserMessage,
             reply: replyText
         });
 
