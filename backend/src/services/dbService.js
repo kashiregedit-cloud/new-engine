@@ -92,7 +92,7 @@ async function deductCredit(pageId, currentCredit) {
 // 6. Get Chat History (Context Window)
 async function getChatHistory(sessionId, limit = 10) {
     const { data, error } = await supabase
-        .from('n8n_chat_histories')
+        .from('backend_chat_histories')
         .select('message')
         .eq('session_id', sessionId)
         .order('id', { ascending: false }) // Get latest messages
@@ -111,7 +111,7 @@ async function getChatHistory(sessionId, limit = 10) {
 async function saveChatMessage(sessionId, role, content) {
     console.log(`[DB] Saving chat for ${sessionId}: [${role}] ${content.substring(0, 50)}...`);
     const { error } = await supabase
-        .from('n8n_chat_histories')
+        .from('backend_chat_histories')
         .insert({
             session_id: sessionId,
             message: { role, content }
