@@ -17,6 +17,11 @@ const keyUsageMap = new Map();
 // Key: "provider:model", Value: Next Index (Integer)
 const modelIndexMap = new Map();
 
+// In-Memory Pending Updates (Buffered for Bulk Write)
+const pendingUpdates = new Set();
+// Flush Interval (Every 60 Seconds)
+setInterval(flushUsageStats, 60 * 1000);
+
 // --- Default Limits Map (Fallback if DB values are null) ---
 // Based on typical Free Tier limits as of early 2025
 const DEFAULT_LIMITS = {
