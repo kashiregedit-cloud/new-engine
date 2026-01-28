@@ -229,10 +229,16 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
 // Helper: Process Image with Vision
 async function processImageWithVision(imageUrl, pageConfig) {
+    // Determine Model: Use configured chat model or default to gemini-1.5-flash
+    // Most Gemini models (1.5-flash, 2.0-flash, 1.5-pro) support vision.
+    const modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
+    const providerToUse = pageConfig.ai || 'google';
+
     try {
         let apiKey = pageConfig.api_key;
         if (!apiKey || apiKey === 'MANAGED_SECRET_KEY') {
-             const keyObj = await keyService.getSmartKey('google', 'gemini-1.5-flash');
+             // Fetch key specifically for the requested model
+             const keyObj = await keyService.getSmartKey(providerToUse, modelToUse);
              apiKey = keyObj?.key;
         } else {
              apiKey = apiKey.split(',')[0].trim();
@@ -251,8 +257,10 @@ async function processImageWithVision(imageUrl, pageConfig) {
             baseURL: baseURL
         });
 
+        console.log(`[Vision] Analyzing image with ${modelToUse}...`);
+
         const response = await openai.chat.completions.create({
-            model: "gemini-1.5-flash",
+            model: modelToUse,
             messages: [
                 {
                     role: "user",
@@ -268,7 +276,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
         return response.choices[0].message.content || "Image";
 
     } catch (error) {
-        console.error("Vision API Error:", error.message);
+        console.error(`Vision API Error (${modelToUse}):`, error.message);
         return "Image (Analysis Failed)";
     }
 }
