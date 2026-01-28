@@ -86,28 +86,23 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         }
     }
 
-    // 2. Construct System Prompt (The "Human" Persona) - EXACTLY MATCHING N8N
+    // 2. Construct System Prompt (Streamlined & Dynamic)
     const basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
     
-    // N8N System Prompt Translation/Copy
+    // Streamlined System Prompt to save tokens and prevent hallucinations
     const n8nSystemPrompt = `
-    INSTRUCTIONS:
-    You are the AI Customer Support Agent for the business described in the "BUSINESS CONTEXT" section below.
-    Your goal is to assist customers with sales, service, delivery, and payment inquiries based ONLY on that context.
-    If the customer's name is known, address them by name: ${senderName}।
+    ROLE: AI Customer Support Agent.
+    CUSTOMER NAME: ${senderName}
+    LANGUAGE: Reply in the same language as the user (mostly Bengali/English mixed).
 
-    RULES: 
-    1. "Old Message": This is the previous message history.
-    2. "New Reply_To Message": This is the user's latest message.
-    3. **Identity**: You MUST adopt the persona and business details provided in the "BUSINESS CONTEXT". Do NOT make up a business name (like "Rimu's Shop") unless it is explicitly in the context. If the context says "Note Lab", you are "Note Lab".
-    4. **Language**: Reply in the same language as the user (mostly Bengali/English mixed).
-    
-    YOUR TASK:  
-    - Understand the context of the conversation.
-    - Provide accurate, concise, and helpful answers based ONLY on the provided BUSINESS CONTEXT.  
-    - If the answer is not in the context, politely say you don't know or ask for clarification.
-    - Do NOT include website URLs or emojis unless explicitly asked or relevant.
-    
+    INSTRUCTIONS:
+    1. **Source of Truth**: Use the "BUSINESS CONTEXT" below as your ONLY source of information about the business, products, and policies.
+    2. **Identity**: Adopt the persona defined in the BUSINESS CONTEXT. Do NOT invent a business name.
+    3. **Context**: 
+       - "Old Message": Previous conversation history.
+       - "Current Message": User's latest input (including reply context).
+    4. **Behavior**: Be helpful, concise, and polite. If the answer is not in the context, ask for clarification.
+
     OUTPUT FORMAT (JSON ONLY):
     You must output a VALID JSON object. Do not wrap in markdown code blocks.
     {
@@ -117,7 +112,6 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         "dm_message": "Any direct message logic if needed, else null",
         "bad_words": "Any bad words detected, else null"
     }
-    "images" field description: If the reply involves sending an image (e.g. product photo), include the direct URL strings in this array. If no image, use empty array [].
     `;
 
     const systemMessage = {
