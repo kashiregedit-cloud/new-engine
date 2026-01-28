@@ -260,18 +260,18 @@ async function processImageWithVision(imageUrl, pageConfig) {
         console.log(`[Vision] Analyzing image with ${modelToUse}...`);
 
         const response = await openai.chat.completions.create({
-            model: modelToUse,
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "Describe this image in detail. Focus on text and main objects. Return a concise description." },
-                        { type: "image_url", image_url: { url: imageUrl } }
-                    ]
-                }
-            ],
-            max_tokens: 300
-        });
+                    model: modelToUse,
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
+                                { type: "image_url", image_url: { url: imageUrl } }
+                            ]
+                        }
+                    ],
+                    max_tokens: 300
+                });
 
         return response.choices[0].message.content || "Image";
 

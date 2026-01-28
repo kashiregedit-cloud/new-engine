@@ -117,13 +117,13 @@ async function queueMessage(event) {
                     }
                     
                     // Append analysis result to message text
-                    // This text will be processed exactly like a normal text message
+                    // The prompt ensures it starts with "Based on the image this is..."
                     if (descriptions.length > 0) {
                         const analysisText = descriptions.join(' | ');
                         if (messageText) {
-                            messageText += `\n[Image Analysis: ${analysisText}]`;
+                            messageText += `\n${analysisText}`;
                         } else {
-                            messageText = `[Image Analysis: ${analysisText}]`;
+                            messageText = analysisText;
                         }
                     }
                 } else {
