@@ -289,21 +289,14 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         // ---------------------------------------
 
-        // --- REPLY TO LOGIC (New Section) ---
-        // Mimicking n8n logic: Get Old Message -> Combine -> Send to AI
+        // --- REPLY TO LOGIC ---
+        // User Instruction: Try to find old message by message_id from fb_chats first.
+        // If not found, keep it null (no fallback to FB API).
         let replyContext = "";
         if (replyToId) {
-            console.log(`[Webhook] Found Reply-To ID: ${replyToId}. Fetching original message DIRECTLY from Facebook...`);
-            
-            // DIRECT FACEBOOK FETCH (As requested)
-            // No DB lookup for original message.
-            const fbMsg = await facebookService.getMessageById(replyToId, pageConfig.page_access_token);
-            if (fbMsg && fbMsg.message) {
-                const originalText = fbMsg.message;
-                replyContext = `[User Replying To: "${originalText}"]\n`;
-                console.log(`[Webhook] Found Reply Context: ${originalText}`);
-            } else {
-                console.log(`[Webhook] Could not fetch original message for ${replyToId} from Facebook.`);
+            const originalText = await dbService.getMessageById(replyToId);
+            if (originalText) {
+                replyContext = `\n[User Replying To: "${originalText}"]`;
             }
         }
         

@@ -178,16 +178,7 @@ async function checkN8nDebounce(key) {
 async function getMessageById(messageId) {
     if (!messageId) return null;
     
-    // Try backend_chat_histories first
-    const { data, error } = await supabase
-        .from('backend_chat_histories')
-        .select('text')
-        .eq('message_id', messageId)
-        .maybeSingle();
-
-    if (data && data.text) return data.text;
-
-    // Fallback to fb_chats
+    // Prioritize fb_chats as per user instruction
     const { data: fbData } = await supabase
         .from('fb_chats')
         .select('text')
