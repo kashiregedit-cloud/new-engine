@@ -1,6 +1,19 @@
 const dbService = require('../services/dbService');
 const aiService = require('../services/aiService');
 const facebookService = require('../services/facebookService');
+const fs = require('fs');
+const path = require('path');
+
+// Helper to log to file
+function logToFile(message) {
+    const logPath = path.join(__dirname, '../../debug.log');
+    const timestamp = new Date().toISOString();
+    try {
+        fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
+    } catch (e) {
+        console.error('Log Error:', e);
+    }
+}
 
 // Global Debounce Map (In-Memory)
 // Key: sessionId (pageId_senderId)
@@ -68,8 +81,18 @@ async function queueMessage(event) {
 
     // 1. Handle Postback (Button Clicks)
     if (event.postback) {
-        messageText = event.postback.payload || event.postback.title;
-        console.log(`Received Postback: ${messageText}`);
+        // PRIORITIZE PAYLOAD, THEN TITLE. Ensure it's a string.
+        messageText = event.postback.payload || event.postback.title || '';
+        if (typeof messageText !== 'string') {
+            messageText = JSON.stringify(messageText);
+        }
+        const logMsg = `[Webhook] Received Postback. Page: ${pageId}, Sender: ${senderId}, Payload: ${messageText}`;
+        console.log(logMsg);
+        logToFile(logMsg);
+    } else {
+        const logMsg = `[Webhook] Received Message. Page: ${pageId}, Sender: ${senderId}, Text: ${messageText}`;
+        console.log(logMsg);
+        logToFile(logMsg);
     }
 
     // 2. Handle Attachments (Images)
@@ -148,17 +171,23 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const pageConfig = await dbService.getPageConfig(pageId);
         
         if (!pageConfig) {
-            console.log(`Page ${pageId} not configured.`);
+            const logMsg = `Page ${pageId} not configured.`;
+            console.log(logMsg);
+            logToFile(logMsg);
             return;
         }
 
         if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
-             console.log(`Page ${pageId} subscription inactive.`);
+             const logMsg = `Page ${pageId} subscription inactive.`;
+             console.log(logMsg);
+             logToFile(logMsg);
              return;
         }
         
         if (pageConfig.message_credit <= 0) {
-            console.log(`Page ${pageId} out of credits.`);
+            const logMsg = `Page ${pageId} out of credits.`;
+            console.log(logMsg);
+            logToFile(logMsg);
             return;
         }
 
@@ -168,6 +197,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         
         // RULE 1: If the LATEST message in the thread is from the Page, STOP.
         // This handles the race condition where Admin replied during the debounce period.
+        /*
         if (fbMessages.length > 0) {
             const latestMessage = fbMessages[0]; // Messages are usually sorted newest first
             if (latestMessage.from && latestMessage.from.id === pageId) {
@@ -175,6 +205,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 return;
             }
         }
+        */
         
         // RULE 2: Check if Admin Replied Recently (Human Handover) - DISABLED FOR NOW to fix "Not Replying" bug
         // We will rely on Rule 1 to prevent double replies.
@@ -193,9 +224,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         
         // Debugging: Log Prompt Info
         if (pagePrompts) {
-             console.log(`[AI] Loaded Prompts for ${pageId}. Text Prompt Length: ${pagePrompts.text_prompt?.length || 0}`);
+             const logMsg = `[AI] Loaded Prompts for ${pageId}. Text Prompt: "${pagePrompts.text_prompt?.substring(0, 50)}..."`;
+             console.log(logMsg);
+             logToFile(logMsg);
         } else {
-             console.log(`[AI] No Prompts found for ${pageId}. Using Default.`);
+             const logMsg = `[AI] No Prompts found for ${pageId}. Using Default.`;
+             console.log(logMsg);
+             logToFile(logMsg);
         }
 
         // --- FETCH SENDER NAME ---
@@ -204,51 +239,58 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // -------------------------
         
         // Dynamic History Limit from DB (check_conversion) or default 10
-        const historyLimit = pagePrompts?.check_conversion ? parseInt(pagePrompts.check_conversion) : 10;
+        // Handle BigInt or Number
+        let historyLimit = 10;
+        if (pagePrompts?.check_conversion) {
+            historyLimit = Number(pagePrompts.check_conversion);
+        }
+        
         const history = await dbService.getChatHistory(sessionId, historyLimit); 
 
-        // --- STOP EMOJI CHECK (Dynamic Logic) ---
-        // Logic: Check history for block_emoji and unblock_emoji.
+        // --- STOP EMOJI CHECK (Dynamic Logic via Graph API) ---
+        // Logic: Check REAL Facebook Thread (fbMessages) for block_emoji and unblock_emoji.
+        // We use fbMessages because it contains Admin replies sent via Inbox (which are not in our DB history).
         // If block_emoji is found AND it is more recent than unblock_emoji, STOP.
-        // CRITICAL: Only consider emojis sent by the PAGE (Admin/Bot), not the USER.
         
         const blockEmoji = pagePrompts?.block_emoji;
         const unblockEmoji = pagePrompts?.unblock_emoji;
 
         if (blockEmoji) {
-            let lastBlockIndex = -1;
-            let lastUnblockIndex = -1;
+            let lastBlockTime = 0;
+            let lastUnblockTime = 0;
 
-            // History format: Array of { role: 'user' | 'assistant', content: '...' }
-            // 'assistant' means it was sent by the Page (AI or Admin).
-            // 'user' means it was sent by the Customer.
-            // We only care if the PAGE sent the block emoji.
-
-            for (let i = history.length - 1; i >= 0; i--) {
-                const msg = history[i];
-                const content = msg.content || '';
-                const role = msg.role; // 'user' or 'assistant'
-
-                // Only check 'assistant' messages for control emojis
-                if (role === 'assistant') {
-                    if (lastBlockIndex === -1 && content.includes(blockEmoji)) {
-                        lastBlockIndex = i;
-                    }
-                    if (unblockEmoji && lastUnblockIndex === -1 && content.includes(unblockEmoji)) {
-                        lastUnblockIndex = i;
-                    }
+            // fbMessages is sorted Newest [0] to Oldest [N] (usually)
+            // But let's verify or trust the API. Graph API usually returns newest first.
+            // We iterate through them.
+            
+            for (const msg of fbMessages) {
+                // Check if message is from PAGE (Admin or Bot)
+                if (msg.from && msg.from.id === pageId) {
+                     const content = msg.message || '';
+                     const msgTime = new Date(msg.created_time).getTime();
+                     
+                     if (content.includes(blockEmoji)) {
+                         if (msgTime > lastBlockTime) lastBlockTime = msgTime;
+                     }
+                     
+                     if (unblockEmoji && content.includes(unblockEmoji)) {
+                         if (msgTime > lastUnblockTime) lastUnblockTime = msgTime;
+                     }
                 }
-                
-                if (lastBlockIndex !== -1 && (lastUnblockIndex !== -1 || !unblockEmoji)) break;
             }
-
-            // Decision: If Block is found...
-            if (lastBlockIndex !== -1) {
-                // ...and (Unblock is NOT found OR Block is AFTER Unblock)
-                if (lastUnblockIndex === -1 || lastBlockIndex > lastUnblockIndex) {
-                    console.log(`[Stop Logic] Active Block Emoji (${blockEmoji}) found in PAGE reply at index ${lastBlockIndex}. AI will not reply.`);
-                    return;
-                }
+            
+            // Also check our local history as a fallback (in case Graph API missed something or for consistency)
+            // But Graph API should be the authority for Admin actions.
+            // Actually, let's stick to fbMessages for Admin actions as requested ("page id teke jaite hobe").
+            
+            if (lastBlockTime > 0) {
+                 // If Block exists and is newer than Unblock (or Unblock doesn't exist)
+                 if (lastBlockTime > lastUnblockTime) {
+                      const logMsg = `[Stop Logic] Active Block Emoji (${blockEmoji}) detected from Page. AI Halted.`;
+                      console.log(logMsg);
+                      logToFile(logMsg);
+                      return;
+                 }
             }
         }
         // ---------------------------------------

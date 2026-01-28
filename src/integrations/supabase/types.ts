@@ -236,6 +236,9 @@ export interface Database {
           template_prompt_x2: string | null
           page_id: string | null
           verified: boolean | null
+          block_emoji: string | null
+          unblock_emoji: string | null
+          check_conversion: number | null
         }
         Insert: {
           id: number
@@ -251,6 +254,9 @@ export interface Database {
           template_prompt_x2?: string | null
           page_id?: string | null
           verified?: boolean | null
+          block_emoji?: string | null
+          unblock_emoji?: string | null
+          check_conversion?: number | null
         }
         Update: {
           id?: number
@@ -266,6 +272,9 @@ export interface Database {
           template_prompt_x2?: string | null
           page_id?: string | null
           verified?: boolean | null
+          block_emoji?: string | null
+          unblock_emoji?: string | null
+          check_conversion?: number | null
         }
       }
       page_access_token_message: {
