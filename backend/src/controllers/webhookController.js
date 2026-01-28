@@ -122,6 +122,8 @@ async function queueMessage(event) {
         return;
     }
 
+    const replyToId = event.message?.reply_to?.mid || null;
+
     // --- SAVE USER MESSAGE TO fb_chats (Immediate) ---
     // This ensures every incoming message (including Swipe/Postback) is logged.
     await dbService.saveFbChat({
@@ -130,6 +132,7 @@ async function queueMessage(event) {
         recipient_id: pageId,
         message_id: messageId,
         text: messageText,
+        reply_to: replyToId,
         timestamp: Date.now(),
         status: 'received',
         reply_by: 'user'

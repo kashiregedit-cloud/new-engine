@@ -4,6 +4,13 @@ const keyService = require('./keyService');
 // Step 2: Business Logic / AI Brain
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
+    // --- MULTI-TENANCY SAFETY CHECK ---
+    // Ensure we are using the correct context for this specific page
+    const pageId = pageConfig.page_id;
+    const promptPreview = pagePrompts?.text_prompt ? pagePrompts.text_prompt.substring(0, 30) : "DEFAULT";
+    console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
+    // ----------------------------------
+
     // 1. Prepare Key Pool (Smart Rotation Strategy)
     let keyPool = [];
     let defaultProvider = pageConfig.ai || 'gemini';

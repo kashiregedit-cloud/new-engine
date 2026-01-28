@@ -199,3 +199,34 @@ async function saveFbComment(data) {
         console.error("Error saving comment:", error);
     }
 }
+
+async function logMessage(msgData) {
+    const { page_id, sender_id, recipient_id, message_id, text, reply_to, image, timestamp, status, reply_by } = msgData;
+
+    try {
+        const { error } = await supabase
+            .from('backend_chat_histories') // Using the new table
+            .insert([
+                {
+                    page_id,
+                    sender_id,
+                    recipient_id,
+                    message_id,
+                    text,
+                    reply_to: reply_to || null, // Ensure null if undefined
+                    image,
+                    timestamp,
+                    status,
+                    reply_by: reply_by || 'user' // Default to user if not specified (bot replies will override)
+                }
+            ]);
+
+        if (error) {
+            console.error('[DB] Error logging message:', error.message);
+        } else {
+            // console.log(`[DB] Message logged: ${message_id}`);
+        }
+    } catch (err) {
+        console.error('[DB] Unexpected error logging message:', err);
+    }
+}
