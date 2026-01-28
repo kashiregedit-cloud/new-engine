@@ -126,17 +126,21 @@ async function queueMessage(event) {
 
     // --- SAVE USER MESSAGE TO fb_chats (Immediate) ---
     // This ensures every incoming message (including Swipe/Postback) is logged.
-    await dbService.saveFbChat({
-        page_id: pageId,
-        sender_id: senderId,
-        recipient_id: pageId,
-        message_id: messageId,
-        text: messageText,
-        reply_to: replyToId,
-        timestamp: Date.now(),
-        status: 'received',
-        reply_by: 'user'
-    });
+    try {
+        await dbService.saveFbChat({
+            page_id: pageId,
+            sender_id: senderId,
+            recipient_id: pageId,
+            message_id: messageId,
+            text: messageText,
+            reply_to: replyToId,
+            timestamp: Date.now(),
+            status: 'received',
+            reply_by: 'user'
+        });
+    } catch (err) {
+        console.error("Error saving to fb_chats (non-blocking):", err.message);
+    }
     // -------------------------------------------------
 
     const sessionId = `${pageId}_${senderId}`;
@@ -155,18 +159,15 @@ async function queueMessage(event) {
     });
 
     console.log(`Queued message for ${sessionId}: ${messageText}`);
-
-    // Clear existing timer
-    if (sessionData.timer) clearTimeout(sessionData.timer);
-
-    // Set new timer (5 seconds debounce)
-    sessionData.timer = setTimeout(() => {
-        // Clone messages and clear buffer immediately to allow new messages
-        const messagesToProcess = [...sessionData.messages];
-        debounceMap.delete(sessionId);
-        
-        processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
-    }, 5000); 
+    if (!sessionData.timer) {
+        sessionData.timer = setTimeout(() => {
+            // Clone messages and clear buffer immediately to allow new messages
+            const messagesToProcess = [...sessionData.messages];
+            debounceMap.delete(sessionId);
+            
+            processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
+        }, 3000); // 3 seconds
+    }
 }
 
 // Core Logic Function (Debounced)
@@ -193,6 +194,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // 1. Fetch Config
         const pageConfig = await dbService.getPageConfig(pageId);
         
+        console.log("Config fetched:", pageConfig ? "Found" : "Null");
+        
         if (!pageConfig) {
             const logMsg = `Page ${pageId} not configured.`;
             console.log(logMsg);
@@ -215,13 +218,16 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // 2. HUMAN HANDOVER & RACE CONDITION CHECK
+        console.log("Checking human handover...");
         // Fetch last 10 messages from real Facebook Thread
         const fbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10);
         
         // 3. Send Typing Indicator
+        console.log("Sending typing...");
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on');
 
         // 4. Get Knowledge Base & Chat History
+        console.log("Fetching prompts...");
         const pagePrompts = await dbService.getPagePrompts(pageId);
         
         // Debugging: Log Prompt Info
@@ -287,25 +293,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Mimicking n8n logic: Get Old Message -> Combine -> Send to AI
         let replyContext = "";
         if (replyToId) {
-            console.log(`[Webhook] Found Reply-To ID: ${replyToId}. Fetching original message...`);
+            console.log(`[Webhook] Found Reply-To ID: ${replyToId}. Fetching original message DIRECTLY from Facebook...`);
             
-            // 1. Try DB First
-            let originalText = await dbService.getMessageById(replyToId);
-            
-            // 2. Fallback to Facebook Graph API if not in DB
-            if (!originalText) {
-                console.log(`[Webhook] Message ${replyToId} not in DB. Fetching from Facebook...`);
-                const fbMsg = await facebookService.getMessageById(replyToId, pageConfig.page_access_token);
-                if (fbMsg && fbMsg.message) {
-                    originalText = fbMsg.message;
-                }
-            }
-
-            if (originalText) {
+            // DIRECT FACEBOOK FETCH (As requested)
+            // No DB lookup for original message.
+            const fbMsg = await facebookService.getMessageById(replyToId, pageConfig.page_access_token);
+            if (fbMsg && fbMsg.message) {
+                const originalText = fbMsg.message;
                 replyContext = `[User Replying To: "${originalText}"]\n`;
                 console.log(`[Webhook] Found Reply Context: ${originalText}`);
             } else {
-                console.log(`[Webhook] Could not fetch original message for ${replyToId}`);
+                console.log(`[Webhook] Could not fetch original message for ${replyToId} from Facebook.`);
             }
         }
         

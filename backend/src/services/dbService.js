@@ -10,6 +10,7 @@ async function getPageConfig(pageId) {
     .eq('page_id', pageId)
     .single();
 
+
   if (error) {
     console.error(`Error fetching config for page ${pageId}:`, error);
     return null;
