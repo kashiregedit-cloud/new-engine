@@ -18,4 +18,10 @@ app.get('/', (req, res) => {
     res.send('AI Agent Backend Running');
 });
 
+// Global Error Handler
+app.use((err, req, res, next) => {
+    console.error('Unhandled Application Error:', err);
+    res.status(500).json({ error: 'Internal Server Error', message: err.message });
+});
+
 module.exports = app;

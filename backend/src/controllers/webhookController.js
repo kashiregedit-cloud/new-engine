@@ -99,6 +99,20 @@ async function queueMessage(event) {
         return;
     }
 
+    // --- SAVE USER MESSAGE TO fb_chats (Immediate) ---
+    // This ensures every incoming message (including Swipe/Postback) is logged.
+    await dbService.saveFbChat({
+        page_id: pageId,
+        sender_id: senderId,
+        recipient_id: pageId,
+        message_id: messageId,
+        text: messageText,
+        timestamp: Date.now(),
+        status: 'received',
+        reply_by: 'user'
+    });
+    // -------------------------------------------------
+
     const sessionId = `${pageId}_${senderId}`;
 
     // Initialize buffer if not exists
@@ -177,6 +191,18 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // 4. Get Knowledge Base & Chat History
         const pagePrompts = await dbService.getPagePrompts(pageId);
         
+        // Debugging: Log Prompt Info
+        if (pagePrompts) {
+             console.log(`[AI] Loaded Prompts for ${pageId}. Text Prompt Length: ${pagePrompts.text_prompt?.length || 0}`);
+        } else {
+             console.log(`[AI] No Prompts found for ${pageId}. Using Default.`);
+        }
+
+        // --- FETCH SENDER NAME ---
+        const userProfile = await facebookService.getUserProfile(senderId, pageConfig.page_access_token);
+        const senderName = userProfile.name || 'Customer';
+        // -------------------------
+        
         // Dynamic History Limit from DB (check_conversion) or default 10
         const historyLimit = pagePrompts?.check_conversion ? parseInt(pagePrompts.check_conversion) : 10;
         const history = await dbService.getChatHistory(sessionId, historyLimit); 
@@ -184,28 +210,35 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // --- STOP EMOJI CHECK (Dynamic Logic) ---
         // Logic: Check history for block_emoji and unblock_emoji.
         // If block_emoji is found AND it is more recent than unblock_emoji, STOP.
+        // CRITICAL: Only consider emojis sent by the PAGE (Admin/Bot), not the USER.
         
         const blockEmoji = pagePrompts?.block_emoji;
         const unblockEmoji = pagePrompts?.unblock_emoji;
 
         if (blockEmoji) {
-            // Helper to find last index of a message containing the emoji
-            // History is chronological: [Oldest, ..., Newest]
-            // We want the latest occurrence, so we search from the end (findLastIndex).
-            // Note: findLastIndex might not be available in older Node versions, using custom loop if needed, 
-            // but Node 18+ supports it. Assuming Node 18+.
-            
             let lastBlockIndex = -1;
             let lastUnblockIndex = -1;
 
+            // History format: Array of { role: 'user' | 'assistant', content: '...' }
+            // 'assistant' means it was sent by the Page (AI or Admin).
+            // 'user' means it was sent by the Customer.
+            // We only care if the PAGE sent the block emoji.
+
             for (let i = history.length - 1; i >= 0; i--) {
-                const content = history[i].content || '';
-                if (lastBlockIndex === -1 && content.includes(blockEmoji)) {
-                    lastBlockIndex = i;
+                const msg = history[i];
+                const content = msg.content || '';
+                const role = msg.role; // 'user' or 'assistant'
+
+                // Only check 'assistant' messages for control emojis
+                if (role === 'assistant') {
+                    if (lastBlockIndex === -1 && content.includes(blockEmoji)) {
+                        lastBlockIndex = i;
+                    }
+                    if (unblockEmoji && lastUnblockIndex === -1 && content.includes(unblockEmoji)) {
+                        lastUnblockIndex = i;
+                    }
                 }
-                if (unblockEmoji && lastUnblockIndex === -1 && content.includes(unblockEmoji)) {
-                    lastUnblockIndex = i;
-                }
+                
                 if (lastBlockIndex !== -1 && (lastUnblockIndex !== -1 || !unblockEmoji)) break;
             }
 
@@ -213,7 +246,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             if (lastBlockIndex !== -1) {
                 // ...and (Unblock is NOT found OR Block is AFTER Unblock)
                 if (lastUnblockIndex === -1 || lastBlockIndex > lastUnblockIndex) {
-                    console.log(`[Stop Logic] Active Block Emoji (${blockEmoji}) found at index ${lastBlockIndex}. AI will not reply.`);
+                    console.log(`[Stop Logic] Active Block Emoji (${blockEmoji}) found in PAGE reply at index ${lastBlockIndex}. AI will not reply.`);
                     return;
                 }
             }
@@ -239,7 +272,21 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
         
         // Send Text
-        await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
+        const sendResult = await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
+        const botMessageId = sendResult?.message_id || `bot_${Date.now()}`;
+
+        // --- SAVE BOT REPLY TO fb_chats ---
+        await dbService.saveFbChat({
+            page_id: pageId,
+            sender_id: pageId, // Bot is sender
+            recipient_id: senderId,
+            message_id: botMessageId,
+            text: replyText,
+            timestamp: Date.now(),
+            status: 'bot_reply',
+            reply_by: 'bot'
+        });
+        // ----------------------------------
 
         // Send Images (if any)
         if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {

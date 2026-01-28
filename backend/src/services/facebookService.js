@@ -109,11 +109,25 @@ async function getCommentReplies(commentId, accessToken) {
     }
 }
 
+// Get User Profile (Name)
+async function getUserProfile(userId, accessToken) {
+    try {
+        const url = `https://graph.facebook.com/v19.0/${userId}?fields=first_name,last_name,name&access_token=${accessToken}`;
+        const response = await axios.get(url);
+        return response.data;
+    } catch (error) {
+        // console.error(`Error fetching user profile ${userId}:`, error.message);
+        // Fail silently, return default
+        return { name: 'Customer' };
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImageMessage,
     sendTypingAction,
     getConversationMessages,
     replyToComment,
-    getCommentReplies
+    getCommentReplies,
+    getUserProfile
 };
