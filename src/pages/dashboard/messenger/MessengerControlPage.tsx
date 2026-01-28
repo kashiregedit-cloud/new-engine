@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, LayoutTemplate } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, LayoutTemplate, Hand, StopCircle, RefreshCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -20,6 +21,9 @@ export default function MessengerControlPage() {
     image_send: false,
     template: false,
     order_tracking: false,
+    block_emoji: '',
+    unblock_emoji: '',
+    check_conversion: 10,
   });
 
   useEffect(() => {
@@ -65,6 +69,9 @@ export default function MessengerControlPage() {
           image_send: row.image_send ?? false,
           template: row.template ?? false,
           order_tracking: row.order_tracking ?? false,
+          block_emoji: row.block_emoji ?? '',
+          unblock_emoji: row.unblock_emoji ?? '',
+          check_conversion: row.check_conversion ?? 10,
         });
       }
     } catch (error) {
