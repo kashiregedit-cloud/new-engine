@@ -15,6 +15,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     let keyPool = [];
     let defaultProvider = pageConfig.ai || 'gemini';
     let defaultModel = pageConfig.chat_model || 'gemini-1.5-flash'; 
+    
+    // --- IMAGE DETECTION & VISION SUPPORT ---
+    let imageUrls = [];
+    let cleanUserMessage = userMessage;
+    // Regex to extract "[User sent images: url1, url2]" pattern from webhookController
+    const imageMatch = userMessage.match(/\[User sent images: (.*?)\]/);
+    if (imageMatch && imageMatch[1]) {
+        imageUrls = imageMatch[1].split(',').map(url => url.trim());
+        cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); // Remove the text tag to avoid duplication
+        console.log(`[AI] Detected ${imageUrls.length} images. Enabling Vision Mode.`);
+    }
+
+    const VISION_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet'];
+    // ----------------------------------------
 
     // Case A: Managed Mode (Fetch from DB using Smart Key Service)
     if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
@@ -123,28 +137,22 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         systemMessage,
         ...history,
         { role: 'user', content: userMessage }
-    ];
+    ]; 
 
-    // 3. Try Loop (Retry Logic)
     let lastError = null;
 
+    // 3. Iterate through Key Pool
     for (const keyObj of keyPool) {
         const currentKey = keyObj.key;
-        const currentProvider = (keyObj.provider || defaultProvider).toLowerCase();
-        
-        // Smart Default Model based on Provider (if not specified in DB)
-        let currentModel = keyObj.model;
-        if (!currentModel) {
-            if (currentProvider.includes('gemini') || currentProvider.includes('google')) currentModel = 'gemini-1.5-flash';
-            else if (currentProvider.includes('openai')) currentModel = 'gpt-4o-mini';
-            else if (currentProvider.includes('groq')) currentModel = 'llama3-70b-8192';
-            else if (currentProvider.includes('xai') || currentProvider.includes('grok')) currentModel = 'grok-beta';
-            else if (currentProvider.includes('deepseek')) currentModel = 'deepseek-chat';
-            else currentModel = defaultModel;
+        let currentProvider = keyObj.provider || defaultProvider;
+        let currentModel = keyObj.model || defaultModel;
+
+        // Force specific models for providers if needed
+        if (currentProvider === 'deepseek') {
+             currentModel = 'deepseek-chat';
         }
 
-        // Setup Base URL (Verified Official Documentation)
-        let baseURL = 'https://openrouter.ai/api/v1'; 
+        let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/'; // Default to Gemini
         
         if (currentProvider.includes('gemini') || currentProvider.includes('google')) {
             // Official Google Gemini OpenAI Compatibility Endpoint
@@ -160,36 +168,24 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
             baseURL = 'https://api.deepseek.com'; 
         }
 
-        const client = new OpenAI({
-            baseURL: baseURL,
-            apiKey: currentKey,
-            timeout: 60000 // 60 Seconds Timeout (Increased from 6s to allow complex reasoning)
-        });
-
         try {
-            console.log(`[Attempt ${keyPool.indexOf(keyObj) + 1}] Sending to ${currentProvider.toUpperCase()} (${currentModel})...`);
-            
-            // Use withResponse() to get access to headers
-            const { data: completion, response } = await client.chat.completions.create({
+            const openai = new OpenAI({
+                apiKey: currentKey,
+                baseURL: baseURL
+            });
+
+            console.log(`[AI] Calling ${currentProvider}/${currentModel}...`);
+            const completion = await openai.chat.completions.create({
                 model: currentModel,
                 messages: messages,
-                temperature: 0.7, 
-                max_tokens: 800,
-                response_format: { type: "json_object" } 
-            }).withResponse();
+                response_format: { type: "json_object" }
+            });
 
-            // Extract Rate Limit Headers and Update Key Status
-            if (response && response.headers) {
-                keyService.updateKeyStatusFromHeaders(currentKey, response.headers);
-            }
-
-            if (completion.choices && completion.choices[0] && completion.choices[0].message) {
+            if (completion.choices && completion.choices.length > 0) {
                 const rawContent = completion.choices[0].message.content;
-                // Parse JSON to ensure it's valid, otherwise return raw text as fallback
                 try {
-                    const parsed = JSON.parse(rawContent.replace(/```json|```/g, "").trim());
-                    // Success! Record usage for Rate Limiting
-                    // Extract token usage if available
+                    const parsed = JSON.parse(rawContent);
+                    // Record Usage
                     const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
                     keyService.recordKeyUsage(currentKey, tokenUsage);
                     return parsed; // Return Object
@@ -231,6 +227,53 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }; 
 }
 
+// Helper: Process Image with Vision
+async function processImageWithVision(imageUrl, pageConfig) {
+    try {
+        let apiKey = pageConfig.api_key;
+        if (!apiKey || apiKey === 'MANAGED_SECRET_KEY') {
+             const keyObj = await keyService.getSmartKey('google', 'gemini-1.5-flash');
+             apiKey = keyObj?.key;
+        } else {
+             apiKey = apiKey.split(',')[0].trim();
+        }
+
+        if (!apiKey) {
+             apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+        }
+
+        if (!apiKey) return "Image (Analysis Failed: No Key)";
+
+        // Use OpenAI Client for Gemini Vision
+        const baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        const openai = new OpenAI({
+            apiKey: apiKey,
+            baseURL: baseURL
+        });
+
+        const response = await openai.chat.completions.create({
+            model: "gemini-1.5-flash",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "Describe this image in detail. Focus on text and main objects. Return a concise description." },
+                        { type: "image_url", image_url: { url: imageUrl } }
+                    ]
+                }
+            ],
+            max_tokens: 300
+        });
+
+        return response.choices[0].message.content || "Image";
+
+    } catch (error) {
+        console.error("Vision API Error:", error.message);
+        return "Image (Analysis Failed)";
+    }
+}
+
 module.exports = {
-    generateReply
+    generateReply,
+    processImageWithVision
 };

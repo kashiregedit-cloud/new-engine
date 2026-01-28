@@ -102,10 +102,30 @@ async function queueMessage(event) {
             .map(att => att.payload.url);
         
         if (imageUrls.length > 0) {
-            // Append Image URLs to text for AI context
-            // In a more advanced version, we would pass these as actual image objects to the AI
-            messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
+            // NEW: Process Images with Vision AI BEFORE saving
+            // This ensures fb_chats contains the image description, not just a link.
+            try {
+                // We need pageConfig to get the API key
+                const pageConfig = await dbService.getPageConfig(pageId);
+                
+                if (pageConfig) {
+                    const descriptions = [];
+                    for (const url of imageUrls) {
+                        const desc = await aiService.processImageWithVision(url, pageConfig);
+                        descriptions.push(desc);
+                    }
+                    // Save the description so Swipe Reply and History can understand the context
+                    messageText += `\n[Image Context: ${descriptions.join(' | ')}]`;
+                } else {
+                     // Fallback if no config found
+                     messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
+                }
+            } catch (err) {
+                console.error("Image Processing Error:", err);
+                messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
+            }
         }
+        
         // Handle other attachments (audio, file) placeholders
         const otherAtts = event.message.attachments.filter(att => att.type !== 'image');
         if (otherAtts.length > 0) {
