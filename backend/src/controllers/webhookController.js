@@ -299,7 +299,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // ---------------------------------------
 
         // 5. Generate AI Reply
-        const aiResponse = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history, senderName);
+        // Use finalUserMessage which includes reply context
+        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, history, senderName);
         
         // --- PRE-SEND CHECK (n8n "IfPageReplyExists" Logic) ---
         // Check again if Admin replied while AI was generating (Race Condition Fix)

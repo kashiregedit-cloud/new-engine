@@ -122,6 +122,18 @@ async function getUserProfile(userId, accessToken) {
     }
 }
 
+// Fetch Single Message by ID (Fallback for Old Messages)
+async function getMessageById(messageId, accessToken) {
+    try {
+        const url = `https://graph.facebook.com/v19.0/${messageId}?fields=message,from,created_time&access_token=${accessToken}`;
+        const response = await axios.get(url);
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching message ${messageId}:`, error.response ? error.response.data : error.message);
+        return null;
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImageMessage,
@@ -129,5 +141,6 @@ module.exports = {
     getConversationMessages,
     replyToComment,
     getCommentReplies,
-    getUserProfile
+    getUserProfile,
+    getMessageById
 };
