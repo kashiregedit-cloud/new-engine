@@ -266,6 +266,71 @@ export default function MessengerControlPage() {
         </Card>
 
       </div>
+
+      {/* Human Handover / Block Logic Section */}
+      <Card className="bg-card border-border shadow-sm">
+        <CardHeader>
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-100 text-red-600 rounded-lg">
+                    <Hand size={24} />
+                </div>
+                <div>
+                    <CardTitle>Human Handover Settings</CardTitle>
+                    <CardDescription>Configure how and when the AI should pause for a human agent.</CardDescription>
+                </div>
+            </div>
+        </CardHeader>
+        <CardContent className="grid gap-6 md:grid-cols-3">
+            
+            <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                    <StopCircle className="w-4 h-4 text-red-500" />
+                    Block Emoji
+                </Label>
+                <Input 
+                    placeholder="e.g. 🛑" 
+                    value={config.block_emoji} 
+                    onChange={(e) => setConfig({...config, block_emoji: e.target.value})}
+                />
+                <p className="text-xs text-muted-foreground">
+                    AI stops if this emoji is found in recent messages.
+                </p>
+            </div>
+
+            <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                    <RefreshCcw className="w-4 h-4 text-green-500" />
+                    Unblock Emoji
+                </Label>
+                <Input 
+                    placeholder="e.g. ✅" 
+                    value={config.unblock_emoji} 
+                    onChange={(e) => setConfig({...config, unblock_emoji: e.target.value})}
+                />
+                <p className="text-xs text-muted-foreground">
+                    AI resumes if this emoji is sent after a block.
+                </p>
+            </div>
+
+            <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-blue-500" />
+                    Check Conversion Limit
+                </Label>
+                <Input 
+                    type="number" 
+                    min={1}
+                    max={50}
+                    value={config.check_conversion} 
+                    onChange={(e) => setConfig({...config, check_conversion: parseInt(e.target.value) || 10})}
+                />
+                <p className="text-xs text-muted-foreground">
+                    Number of recent messages to check for emojis.
+                </p>
+            </div>
+
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -2,7 +2,7 @@ const { OpenAI } = require('openai'); // Using OpenAI SDK for compatibility with
 const keyService = require('./keyService');
 
 // Step 2: Business Logic / AI Brain
-async function generateReply(userMessage, pageConfig, pagePrompts, history = []) {
+async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
     // 1. Prepare Key Pool (Smart Rotation Strategy)
     let keyPool = [];
@@ -85,6 +85,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [])
     // N8N System Prompt Translation/Copy
     const n8nSystemPrompt = `
     তুমি একজন স্মার্ট AI, যিনি বিভিন্ন ফেসবুক পেইজে sales, service, delivery, payment ইত্যাদি বিষয় নিয়ে গ্রাহকদের সাহায্য করো। 
+    তোমার নাম জানা থাকলে গ্রাহককে নাম ধরে সম্বোধন করতে পারো। গ্রাহকের নাম: ${senderName}।
 
     নিয়মাবলী: 
     1. "Old Message": এইটি হলো গ্রাহক আগে যা পাঠিয়েছে বা আগের SMS/Message।  

@@ -176,10 +176,52 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // 4. Get Knowledge Base & Chat History
         const pagePrompts = await dbService.getPagePrompts(pageId);
-        const history = await dbService.getChatHistory(sessionId, 10); 
+        
+        // Dynamic History Limit from DB (check_conversion) or default 10
+        const historyLimit = pagePrompts?.check_conversion ? parseInt(pagePrompts.check_conversion) : 10;
+        const history = await dbService.getChatHistory(sessionId, historyLimit); 
+
+        // --- STOP EMOJI CHECK (Dynamic Logic) ---
+        // Logic: Check history for block_emoji and unblock_emoji.
+        // If block_emoji is found AND it is more recent than unblock_emoji, STOP.
+        
+        const blockEmoji = pagePrompts?.block_emoji;
+        const unblockEmoji = pagePrompts?.unblock_emoji;
+
+        if (blockEmoji) {
+            // Helper to find last index of a message containing the emoji
+            // History is chronological: [Oldest, ..., Newest]
+            // We want the latest occurrence, so we search from the end (findLastIndex).
+            // Note: findLastIndex might not be available in older Node versions, using custom loop if needed, 
+            // but Node 18+ supports it. Assuming Node 18+.
+            
+            let lastBlockIndex = -1;
+            let lastUnblockIndex = -1;
+
+            for (let i = history.length - 1; i >= 0; i--) {
+                const content = history[i].content || '';
+                if (lastBlockIndex === -1 && content.includes(blockEmoji)) {
+                    lastBlockIndex = i;
+                }
+                if (unblockEmoji && lastUnblockIndex === -1 && content.includes(unblockEmoji)) {
+                    lastUnblockIndex = i;
+                }
+                if (lastBlockIndex !== -1 && (lastUnblockIndex !== -1 || !unblockEmoji)) break;
+            }
+
+            // Decision: If Block is found...
+            if (lastBlockIndex !== -1) {
+                // ...and (Unblock is NOT found OR Block is AFTER Unblock)
+                if (lastUnblockIndex === -1 || lastBlockIndex > lastUnblockIndex) {
+                    console.log(`[Stop Logic] Active Block Emoji (${blockEmoji}) found at index ${lastBlockIndex}. AI will not reply.`);
+                    return;
+                }
+            }
+        }
+        // ---------------------------------------
 
         // 5. Generate AI Reply
-        const aiResponse = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history);
+        const aiResponse = await aiService.generateReply(combinedMessage, pageConfig, pagePrompts, history, senderName);
         
         // --- PRE-SEND CHECK (n8n "IfPageReplyExists" Logic) ---
         // Check again if Admin replied while AI was generating (Race Condition Fix)
