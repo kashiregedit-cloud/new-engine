@@ -35,13 +35,13 @@ const DEFAULT_LIMITS = {
 };
 
 // --- Helper: Update Cache ---
-async function updateKeyCache() {
+async function updateKeyCache(force = false) {
     const now = Date.now();
-    if (now - lastCacheUpdate < CACHE_TTL && keyCache.length > 0) {
+    if (!force && now - lastCacheUpdate < CACHE_TTL && keyCache.length > 0) {
         return; // Cache is fresh
     }
 
-    // console.log("[KeyService] Refreshing API Key Cache...");
+    console.log("[KeyService] Refreshing API Key Cache from DB...");
     // Fetch all active keys, sorted by ID for consistent serial order
     const { data: keys, error } = await dbService.supabase
         .from('api_list')
@@ -57,7 +57,14 @@ async function updateKeyCache() {
     if (keys) {
         keyCache = keys;
         lastCacheUpdate = now;
-        // console.log(`[KeyService] Cache updated. Total Keys: ${keys.length}`);
+        console.log(`[KeyService] Cache updated. Total Keys: ${keys.length}`);
+        
+        // Optional: Clean up deadKeys map if a key is no longer in the DB
+        for (const [key] of deadKeys) {
+            if (!keys.find(k => k.api === key)) {
+                deadKeys.delete(key);
+            }
+        }
     }
 }
 
@@ -246,6 +253,25 @@ async function getSmartKey(provider, model) {
         validKeys = validKeys.filter(k => k.model === model);
     }
 
+    // RETRY LOGIC: If no keys found in cache, FORCE REFRESH from DB and try again
+    if (validKeys.length === 0) {
+        console.log(`[KeyService] No local keys found for ${provider}/${model}. Forcing DB refresh...`);
+        await updateKeyCache(true);
+        
+        // Re-filter after refresh
+        validKeys = keyCache;
+        if (provider) {
+             if (provider === 'google' || provider === 'gemini') {
+                validKeys = validKeys.filter(k => k.provider === 'google' || k.provider === 'gemini');
+            } else {
+                validKeys = validKeys.filter(k => k.provider === provider);
+            }
+        }
+        if (model) {
+            validKeys = validKeys.filter(k => k.model === model);
+        }
+    }
+
     if (validKeys.length === 0) {
         return null;
     }
@@ -278,7 +304,49 @@ async function getSmartKey(provider, model) {
         }
     }
 
-    // No valid key found after checking all
+    // FAILSAFE REFRESH: If we are here, it means we have keys in memory, but ALL are either dead or rate-limited.
+    // It is possible the DB has new keys that we haven't loaded yet (stale cache).
+    // Let's force a refresh ONCE and try again.
+    
+    // Check if we already forced a refresh? We can't easily pass state here without argument.
+    // But updateKeyCache has a check. If we pass force=true, it hits DB.
+    // We should only do this if we haven't just done it. 
+    // Ideally, we check `Date.now() - lastCacheUpdate`. If it's very recent (< 5s), we assume we already have latest.
+    
+    if (Date.now() - lastCacheUpdate > 5000) {
+        console.log(`[KeyService] All cached keys are dead/limited. Forcing DB refresh to check for new keys...`);
+        await updateKeyCache(true);
+        
+        // Re-fetch and Re-filter
+        validKeys = keyCache;
+        if (provider) {
+             if (provider === 'google' || provider === 'gemini') {
+                validKeys = validKeys.filter(k => k.provider === 'google' || k.provider === 'gemini');
+            } else {
+                validKeys = validKeys.filter(k => k.provider === provider);
+            }
+        }
+        if (model) {
+            validKeys = validKeys.filter(k => k.model === model);
+        }
+        
+        // Try Loop Again
+        for (let i = 0; i < validKeys.length; i++) {
+            // Simple iteration for the second pass
+            const candidateKey = validKeys[i];
+            if (isKeyAlive(candidateKey.api) && isKeyWithinLimits(candidateKey)) {
+                modelIndexMap.set(mapKey, (i + 1) % validKeys.length);
+                return {
+                    key: candidateKey.api,
+                    provider: candidateKey.provider,
+                    model: candidateKey.model
+                };
+            }
+        }
+    }
+
+    // If still no valid key...
+    console.warn(`[KeyService] All ${validKeys.length} keys for ${provider}/${model} are dead/limited.`);
     return null;
 }
 
