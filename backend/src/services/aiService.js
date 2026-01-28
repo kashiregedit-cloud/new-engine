@@ -277,6 +277,9 @@ async function processImageWithVision(imageUrl, pageConfig) {
 
     } catch (error) {
         console.error(`Vision API Error (${modelToUse}):`, error.message);
+        if (error.response) {
+            console.error("Vision API Error Details:", JSON.stringify(error.response.data || error.response));
+        }
         return "Image (Analysis Failed)";
     }
 }

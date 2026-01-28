@@ -102,22 +102,32 @@ async function queueMessage(event) {
             .map(att => att.payload.url);
         
         if (imageUrls.length > 0) {
-            // NEW: Process Images with Vision AI BEFORE saving
-            // This ensures fb_chats contains the image description, not just a link.
+            // Process Images with Vision AI if enabled
             try {
-                // We need pageConfig to get the API key
                 const pageConfig = await dbService.getPageConfig(pageId);
                 
-                if (pageConfig) {
+                // Check if image analysis is enabled in page config
+                // User Instruction: "jodi page access token e iamge analysis true hoi"
+                if (pageConfig && pageConfig.image_analysis) {
                     const descriptions = [];
                     for (const url of imageUrls) {
+                        // Loop through images and analyze using chat model
                         const desc = await aiService.processImageWithVision(url, pageConfig);
                         descriptions.push(desc);
                     }
-                    // Save the description so Swipe Reply and History can understand the context
-                    messageText += `\n[Image Context: ${descriptions.join(' | ')}]`;
+                    
+                    // Append analysis result to message text
+                    // This text will be processed exactly like a normal text message
+                    if (descriptions.length > 0) {
+                        const analysisText = descriptions.join(' | ');
+                        if (messageText) {
+                            messageText += `\n[Image Analysis: ${analysisText}]`;
+                        } else {
+                            messageText = `[Image Analysis: ${analysisText}]`;
+                        }
+                    }
                 } else {
-                     // Fallback if no config found
+                     // Fallback: Just append URLs if analysis is disabled or config missing
                      messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
                 }
             } catch (err) {
@@ -153,7 +163,7 @@ async function queueMessage(event) {
             recipient_id: pageId,
             message_id: messageId,
             text: messageText,
-            reply_to: replyToId,
+            // reply_to: replyToId, // Removed because fb_chats table doesn't have this column
             timestamp: Date.now(),
             status: 'received',
             reply_by: 'user'
