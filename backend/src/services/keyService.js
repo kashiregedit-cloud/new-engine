@@ -278,16 +278,17 @@ async function getSmartKey(provider, model) {
         }
     }
 
-    // Use model-specific keys if available, otherwise fall back to provider-only keys (Relaxed Match)
-    if (modelSpecificKeys.length > 0) {
-        validKeys = modelSpecificKeys;
-    } else {
-        console.warn(`[KeyService] No strict keys for ${model}. Falling back to ANY key for provider ${provider}.`);
-        // validKeys already contains all keys for the provider (filtered above)
-        if (validKeys.length === 0) {
-             return null;
+    // Use model-specific keys if available. 
+    // STRICT MODE: If model is specified, we MUST use keys for that model.
+    if (model) {
+        if (modelSpecificKeys.length > 0) {
+            validKeys = modelSpecificKeys;
+        } else {
+            console.warn(`[KeyService] STRICT MODE: No keys found for ${provider}/${model}. Returning null.`);
+            return null;
         }
     }
+    // If model is NOT specified, we use any key for the provider (validKeys is already filtered by provider)
 
     // 3. Serial Round Robin Selection
     const mapKey = `${provider || 'all'}:${model || 'all'}`;

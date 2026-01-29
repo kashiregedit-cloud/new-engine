@@ -77,6 +77,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
          }
          
          // Always add Fallback Key from Env to the end of the pool if available
+         // REMOVED FALLBACK LOGIC AS PER USER REQUEST ("fallback er dorkar nai")
+         /*
          const fallbackKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
          if (fallbackKey) {
              const isDuplicate = keyPool.some(k => k.key === fallbackKey);
@@ -85,9 +87,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
                 keyPool.push({ key: fallbackKey, provider: 'google', model: 'gemini-1.5-flash' });
              }
          }
+         */
 
          if (keyPool.length === 0) {
-             console.error(`CRITICAL: No Managed Keys found for ${defaultProvider}/${defaultModel} and no Fallback Key in ENV.`);
+             console.error(`CRITICAL: No Managed Keys found for ${defaultProvider}/${defaultModel}. System will fail.`);
          }
     } else {
         // Case B: User Provided Keys (Comma separated)
