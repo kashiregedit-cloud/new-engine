@@ -494,35 +494,47 @@ async function transcribeAudio(audioUrl, pageConfig) {
         
         // CASE 1: Gemini (Multimodal Audio)
         if (provider === 'gemini') {
-            console.log(`[Audio] Using Gemini 1.5 Flash (Multimodal) with key ...${apiKey.slice(-4)}`);
+            console.log(`[Audio] Using Gemini (Multimodal) with key ...${apiKey.slice(-4)}`);
             
             // 1. Need ArrayBuffer/Base64, not Stream. Re-download as buffer.
             const bufferResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
             const base64Audio = Buffer.from(bufferResponse.data).toString('base64');
             
-            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            // Try multiple models if one fails (404/500)
+            const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
             
-            const payload = {
-                contents: [{
-                    parts: [
-                        { text: "Please transcribe this audio message exactly as spoken. Do not add any commentary." },
-                        {
-                            inline_data: {
-                                mime_type: "audio/mp3", // Generic mime, Gemini is usually smart enough
-                                data: base64Audio
-                            }
-                        }
-                    ]
-                }]
-            };
-            
-            const geminiRes = await axios.post(geminiUrl, payload);
-            if (geminiRes.data && geminiRes.data.candidates && geminiRes.data.candidates.length > 0) {
-                 const text = geminiRes.data.candidates[0].content.parts[0].text;
-                 console.log(`[Audio] Gemini Transcription: "${text.trim()}"`);
-                 return `[User sent voice message: "${text.trim()}"]`;
+            for (const m of modelsToTry) {
+                try {
+                    console.log(`[Audio] Trying Gemini Model: ${m}...`);
+                    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
+                    
+                    const payload = {
+                        contents: [{
+                            parts: [
+                                { text: "Please transcribe this audio message exactly as spoken. Do not add any commentary." },
+                                {
+                                    inline_data: {
+                                        mime_type: "audio/mp3", // Generic mime, Gemini is usually smart enough
+                                        data: base64Audio
+                                    }
+                                }
+                            ]
+                        }]
+                    };
+                    
+                    const geminiRes = await axios.post(geminiUrl, payload);
+                    if (geminiRes.data && geminiRes.data.candidates && geminiRes.data.candidates.length > 0) {
+                         const text = geminiRes.data.candidates[0].content.parts[0].text;
+                         console.log(`[Audio] Gemini Transcription (${m}): "${text.trim()}"`);
+                         return `[User sent voice message: "${text.trim()}"]`;
+                    }
+                } catch (geminiError) {
+                    console.warn(`[Audio] Gemini Model ${m} Failed: ${geminiError.message}`);
+                    if (geminiError.response) console.warn(`[Audio] Status: ${geminiError.response.status}`);
+                    // Continue to next model
+                }
             }
-            throw new Error("Gemini returned no content");
+            throw new Error("All Gemini models failed to transcribe.");
         }
 
         // CASE 2: Groq / OpenAI / OpenRouter (Standard Whisper API)
