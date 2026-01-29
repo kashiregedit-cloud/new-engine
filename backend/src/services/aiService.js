@@ -229,69 +229,85 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
 // Helper: Process Image with Vision
 async function processImageWithVision(imageUrl, pageConfig) {
-    // Determine Model: Use configured chat model or default to gemini-1.5-flash
-    // Most Gemini models (1.5-flash, 2.0-flash, 1.5-pro) support vision.
-    const modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
-    const providerToUse = pageConfig.ai || 'google';
+  // Determine Model: Use configured chat model or default to gemini-1.5-flash
+  let modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
+  const providerToUse = pageConfig.ai || 'google';
 
-    try {
-        let apiKey = pageConfig.api_key;
-        if (!apiKey || apiKey === 'MANAGED_SECRET_KEY') {
-            // Fetch key specifically for the requested model
-            const keyObj = await keyService.getSmartKey(providerToUse, modelToUse);
-            apiKey = keyObj?.key;
-        } else {
-            apiKey = apiKey.split(',')[0].trim();
-        }
-
-        if (!apiKey) {
-            apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-        }
-
-        if (!apiKey) return "Image (Analysis Failed: No Key)";
-
-        // Configure Base URL based on Provider
-        let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-        if (providerToUse === 'openrouter') {
-            baseURL = 'https://openrouter.ai/api/v1';
-        } else if (providerToUse === 'groq') {
-            baseURL = 'https://api.groq.com/openai/v1';
-        } else if (providerToUse === 'openai') {
-            baseURL = 'https://api.openai.com/v1';
-        }
-
-        const openai = new OpenAI({
-            apiKey: apiKey,
-            baseURL: baseURL
-        });
-
-        console.log(`[Vision] Analyzing image with ${providerToUse}/${modelToUse}...`);
-
-        const response = await openai.chat.completions.create({
-            model: modelToUse,
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
-                        { type: "image_url", image_url: { url: imageUrl } }
-                    ]
-                }
-            ],
-            max_tokens: 300
-        });
-
-        const content = response.choices[0].message.content;
-        console.log(`[Vision] Result: ${content}`);
-        return content || "Image";
-
-    } catch (error) {
-        console.error(`Vision API Error (${modelToUse}):`, error.message);
-        if (error.response) {
-            console.error("Vision API Error Details:", JSON.stringify(error.response.data || error.response));
-        }
-        return "Image (Analysis Failed)";
+  const performVisionCall = async (model) => {
+    let apiKey = pageConfig.api_key;
+    if (!apiKey || apiKey === 'MANAGED_SECRET_KEY') {
+      // Fetch key specifically for the requested model
+      const keyObj = await keyService.getSmartKey(providerToUse, model);
+      apiKey = keyObj?.key;
+    } else {
+      apiKey = apiKey.split(',')[0].trim();
     }
+
+    if (!apiKey) {
+      apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    }
+
+    if (!apiKey) throw new Error("No API Key available");
+
+    // Configure Base URL based on Provider
+    let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    if (providerToUse === 'openrouter') {
+      baseURL = 'https://openrouter.ai/api/v1';
+    } else if (providerToUse === 'groq') {
+      baseURL = 'https://api.groq.com/openai/v1';
+    } else if (providerToUse === 'openai') {
+      baseURL = 'https://api.openai.com/v1';
+    }
+
+    const openai = new OpenAI({
+      apiKey: apiKey,
+      baseURL: baseURL
+    });
+
+    console.log(`[Vision] Analyzing image with ${providerToUse}/${model}...`);
+
+    const response = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ]
+        }
+      ],
+      max_tokens: 300
+    });
+
+    return response.choices[0].message.content;
+  };
+
+  try {
+    const content = await performVisionCall(modelToUse);
+    console.log(`[Vision] Result: ${content}`);
+    return content || "Image";
+  } catch (error) {
+    console.error(`Vision API Error (${modelToUse}):`, error.message);
+    if (error.response) {
+      console.error("Vision API Error Details:", JSON.stringify(error.response.data || error.response));
+    }
+
+    // Fallback to gemini-1.5-flash if the primary model failed and it wasn't already 1.5-flash
+    if (modelToUse !== 'gemini-1.5-flash') {
+      console.log(`[Vision] Falling back to gemini-1.5-flash...`);
+      try {
+        const content = await performVisionCall('gemini-1.5-flash');
+        console.log(`[Vision] Fallback Result: ${content}`);
+        return content || "Image";
+      } catch (fallbackError) {
+        console.error(`Vision Fallback Error:`, fallbackError.message);
+        return "Image (Analysis Failed)";
+      }
+    }
+
+    return "Image (Analysis Failed)";
+  }
 }
 
 module.exports = {
