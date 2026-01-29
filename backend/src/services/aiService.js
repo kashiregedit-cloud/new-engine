@@ -377,7 +377,91 @@ async function processImageWithVision(imageUrl, pageConfig) {
   }
 }
 
+// Helper: Transcribe Audio
+async function transcribeAudio(audioUrl, pageConfig) {
+    try {
+        console.log(`[Audio] Transcribing: ${audioUrl}`);
+
+        // 1. Download Audio File (Stream)
+        const response = await axios.get(audioUrl, { responseType: 'stream' });
+        
+        // 2. Prepare Form Data
+        const form = new FormData();
+        // Facebook audio is usually mp4/aac. We'll verify extension if possible, but 'audio.mp4' is safe for Whisper.
+        form.append('file', response.data, { filename: 'audio.mp4', contentType: 'audio/mp4' }); 
+        
+        // 3. Select Provider & Key
+        // Priority: Groq (Fast/Free) -> OpenAI (Standard)
+        
+        let apiKey = null;
+        let baseURL = null;
+        let model = 'whisper-large-v3'; // Default to Groq's best
+
+        // A. Check Page Config for Groq Key
+        if (pageConfig.api_key && pageConfig.api_key.includes('gsk_')) {
+             const keys = pageConfig.api_key.split(',');
+             const groqKey = keys.find(k => k.trim().startsWith('gsk_'));
+             if (groqKey) {
+                 apiKey = groqKey.trim();
+                 baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+             }
+        }
+
+        // B. Smart Key Lookup (Groq)
+        if (!apiKey) {
+            const keyObj = await keyService.getSmartKey('groq', 'whisper-large-v3');
+            if (keyObj) {
+                apiKey = keyObj.key;
+                baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+            }
+        }
+
+        // C. Fallback to OpenAI
+        if (!apiKey) {
+             // Check for OpenAI key in pageConfig or Env
+             let openAiKey = null;
+             if (pageConfig.api_key && pageConfig.api_key.startsWith('sk-') && !pageConfig.api_key.startsWith('sk-or-')) {
+                 openAiKey = pageConfig.api_key.split(',')[0].trim();
+             } else {
+                 openAiKey = process.env.OPENAI_API_KEY;
+             }
+
+             if (openAiKey) {
+                 apiKey = openAiKey;
+                 baseURL = 'https://api.openai.com/v1/audio/transcriptions';
+                 model = 'whisper-1';
+             }
+        }
+
+        if (!apiKey) {
+            console.warn("[Audio] No suitable API key (Groq/OpenAI) found for transcription.");
+            return "[Audio Message (Transcription Failed - No Key)]";
+        }
+
+        form.append('model', model);
+
+        // 4. Call API
+        const headers = {
+            ...form.getHeaders(),
+            'Authorization': `Bearer ${apiKey}`
+        };
+
+        console.log(`[Audio] Sending to ${baseURL} (${model})...`);
+        const transcriptionResponse = await axios.post(baseURL, form, { headers });
+        
+        const text = transcriptionResponse.data.text;
+        console.log(`[Audio] Transcription: "${text}"`);
+        return `[User sent voice message: "${text}"]`;
+
+    } catch (error) {
+        console.error("[Audio] Transcription Failed:", error.message);
+        if (error.response) console.error(error.response.data);
+        return "[Audio Message (Transcription Error)]";
+    }
+}
+
 module.exports = {
     generateReply,
-    processImageWithVision
+    processImageWithVision,
+    transcribeAudio
 };

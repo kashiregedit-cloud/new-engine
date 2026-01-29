@@ -146,8 +146,35 @@ async function queueMessage(event) {
             }
         }
         
-        // Handle other attachments (audio, file) placeholders
-        const otherAtts = event.message.attachments.filter(att => att.type !== 'image');
+        // 3. Handle Audio (Voice Messages)
+        const audioUrls = event.message.attachments
+            .filter(att => att.type === 'audio')
+            .map(att => att.payload.url);
+            
+        if (audioUrls.length > 0) {
+            console.log(`[Webhook] Audio received. Count: ${audioUrls.length}`);
+            try {
+                // Fetch Page Config for API Keys
+                const pageConfig = await dbService.getPageConfig(pageId);
+                
+                for (const url of audioUrls) {
+                     // Transcribe
+                     const transcription = await aiService.transcribeAudio(url, pageConfig);
+                     if (messageText) {
+                         messageText += `\n${transcription}`;
+                     } else {
+                         messageText = transcription;
+                     }
+                }
+                console.log(`[Webhook] Final Message Text with Audio: ${messageText}`);
+            } catch (err) {
+                console.error("Audio Processing Error:", err);
+                messageText += `\n[User sent voice message (Processing Failed)]`;
+            }
+        }
+
+        // Handle other attachments (file, video) placeholders
+        const otherAtts = event.message.attachments.filter(att => att.type !== 'image' && att.type !== 'audio');
         if (otherAtts.length > 0) {
              messageText += `\n[User sent attachments: ${otherAtts.map(a => a.type).join(', ')}]`;
         }
