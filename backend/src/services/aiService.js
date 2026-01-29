@@ -176,8 +176,23 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         let currentProvider = keyObj.provider || defaultProvider;
         let currentModel = keyObj.model || defaultModel;
         
-        // Normalize model name (Fix typos like gemini-2.5-flash)
-        currentModel = normalizeModelName(currentModel);
+        // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
+        // This overrides DB provider if it's clearly mismatched (e.g. OpenRouter key labeled as Gemini)
+        if (currentKey.startsWith('sk-or-v1')) {
+            currentProvider = 'openrouter';
+        } else if (currentKey.startsWith('AIzaSy')) {
+            currentProvider = 'google';
+        } else if (currentKey.startsWith('gsk_')) {
+            currentProvider = 'groq';
+        } else if (currentKey.startsWith('xai-')) {
+            currentProvider = 'xai';
+        }
+        // ------------------------------------------------
+
+        // Normalize model name ONLY for Google (Fix typos like gemini-2.5-flash)
+        if (currentProvider === 'google' || currentProvider === 'gemini') {
+             currentModel = normalizeModelName(currentModel);
+        }
 
         // Force specific models for providers if needed
         if (currentProvider === 'deepseek') {
@@ -307,8 +322,8 @@ async function processImageWithVision(imageUrl, pageConfig) {
   // Determine Model: Use configured chat model or default to gemini-1.5-flash
   let modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
   
-  // Normalize Model Name
-  modelToUse = normalizeModelName(modelToUse);
+  // Don't normalize yet - wait until we know the provider (key)
+  // modelToUse = normalizeModelName(modelToUse);
   
   const providerToUse = pageConfig.ai || 'google';
 
@@ -328,13 +343,31 @@ async function processImageWithVision(imageUrl, pageConfig) {
 
     if (!apiKey) throw new Error("No API Key available");
 
+    // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
+    let effectiveProvider = providerToUse;
+    if (apiKey.startsWith('sk-or-v1')) {
+        effectiveProvider = 'openrouter';
+    } else if (apiKey.startsWith('AIzaSy')) {
+        effectiveProvider = 'google';
+    } else if (apiKey.startsWith('gsk_')) {
+        effectiveProvider = 'groq';
+    } else if (apiKey.startsWith('xai-')) {
+        effectiveProvider = 'xai';
+    }
+    // ------------------------------------------------
+
+    // Normalize model name ONLY for Google (Fix typos like gemini-2.5-flash)
+    if (effectiveProvider === 'google' || effectiveProvider === 'gemini') {
+        model = normalizeModelName(model);
+    }
+
     // Configure Base URL based on Provider
     let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-    if (providerToUse === 'openrouter') {
+    if (effectiveProvider === 'openrouter') {
       baseURL = 'https://openrouter.ai/api/v1';
-    } else if (providerToUse === 'groq') {
+    } else if (effectiveProvider === 'groq') {
       baseURL = 'https://api.groq.com/openai/v1';
-    } else if (providerToUse === 'openai') {
+    } else if (effectiveProvider === 'openai') {
       baseURL = 'https://api.openai.com/v1';
     }
 
@@ -343,7 +376,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
       baseURL: baseURL
     });
 
-    console.log(`[Vision] Analyzing image with ${providerToUse}/${model}...`);
+    console.log(`[Vision] Analyzing image with ${effectiveProvider}/${model}...`);
 
     const response = await openai.chat.completions.create({
       model: model,
