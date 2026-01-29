@@ -237,43 +237,53 @@ async function processImageWithVision(imageUrl, pageConfig) {
     try {
         let apiKey = pageConfig.api_key;
         if (!apiKey || apiKey === 'MANAGED_SECRET_KEY') {
-             // Fetch key specifically for the requested model
-             const keyObj = await keyService.getSmartKey(providerToUse, modelToUse);
-             apiKey = keyObj?.key;
+            // Fetch key specifically for the requested model
+            const keyObj = await keyService.getSmartKey(providerToUse, modelToUse);
+            apiKey = keyObj?.key;
         } else {
-             apiKey = apiKey.split(',')[0].trim();
+            apiKey = apiKey.split(',')[0].trim();
         }
 
         if (!apiKey) {
-             apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+            apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
         }
 
         if (!apiKey) return "Image (Analysis Failed: No Key)";
 
-        // Use OpenAI Client for Gemini Vision
-        const baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        // Configure Base URL based on Provider
+        let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        if (providerToUse === 'openrouter') {
+            baseURL = 'https://openrouter.ai/api/v1';
+        } else if (providerToUse === 'groq') {
+            baseURL = 'https://api.groq.com/openai/v1';
+        } else if (providerToUse === 'openai') {
+            baseURL = 'https://api.openai.com/v1';
+        }
+
         const openai = new OpenAI({
             apiKey: apiKey,
             baseURL: baseURL
         });
 
-        console.log(`[Vision] Analyzing image with ${modelToUse}...`);
+        console.log(`[Vision] Analyzing image with ${providerToUse}/${modelToUse}...`);
 
         const response = await openai.chat.completions.create({
-                    model: modelToUse,
-                    messages: [
-                        {
-                            role: "user",
-                            content: [
-                                { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
-                                { type: "image_url", image_url: { url: imageUrl } }
-                            ]
-                        }
-                    ],
-                    max_tokens: 300
-                });
+            model: modelToUse,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
+                        { type: "image_url", image_url: { url: imageUrl } }
+                    ]
+                }
+            ],
+            max_tokens: 300
+        });
 
-        return response.choices[0].message.content || "Image";
+        const content = response.choices[0].message.content;
+        console.log(`[Vision] Result: ${content}`);
+        return content || "Image";
 
     } catch (error) {
         console.error(`Vision API Error (${modelToUse}):`, error.message);

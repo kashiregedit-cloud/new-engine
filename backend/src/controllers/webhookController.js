@@ -106,28 +106,38 @@ async function queueMessage(event) {
             try {
                 const pageConfig = await dbService.getPageConfig(pageId);
                 
+                console.log(`[Webhook] Image received. Page: ${pageId}. Image Analysis Enabled: ${pageConfig?.image_analysis}`);
+
                 // Check if image analysis is enabled in page config
                 // User Instruction: "jodi page access token e iamge analysis true hoi"
                 if (pageConfig && pageConfig.image_analysis) {
                     const descriptions = [];
+                    console.log(`[Webhook] Starting analysis for ${imageUrls.length} images...`);
+                    
                     for (const url of imageUrls) {
                         // Loop through images and analyze using chat model
+                        console.log(`[Webhook] Analyzing image: ${url}`);
                         const desc = await aiService.processImageWithVision(url, pageConfig);
+                        console.log(`[Webhook] Analysis result: ${desc}`);
                         descriptions.push(desc);
                     }
                     
                     // Append analysis result to message text
                     // The prompt ensures it starts with "Based on the image this is..."
                     if (descriptions.length > 0) {
-                        const analysisText = descriptions.join(' | ');
+                        const analysisText = descriptions.join('\n');
+                        // Store the analysis result in messageText so it flows into the AI context
+                        // The user wants this to be the "total summary content"
                         if (messageText) {
                             messageText += `\n${analysisText}`;
                         } else {
                             messageText = analysisText;
                         }
+                        console.log(`[Webhook] Final Message Text with Analysis: ${messageText}`);
                     }
                 } else {
                      // Fallback: Just append URLs if analysis is disabled or config missing
+                     console.log('[Webhook] Image analysis disabled or config missing. Appending URLs.');
                      messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
                 }
             } catch (err) {
