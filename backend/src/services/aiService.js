@@ -3,33 +3,6 @@ const keyService = require('./keyService');
 const axios = require('axios');
 const FormData = require('form-data');
 
-// Helper: Normalize Model Name
-// Maps user-defined or typo model names to valid API model IDs
-function normalizeModelName(modelName) {
-    if (!modelName) return 'gemini-1.5-flash';
-    
-    const lower = modelName.toLowerCase();
-    
-    // Map "gemini-2.5-flash" (likely user typo/custom tag) to a valid model
-    if (lower === 'gemini-2.5-flash') {
-        return 'gemini-1.5-flash'; // Fallback to 1.5 Flash for stability
-    }
-    
-    // Map "gemini-2.0-flash" to experimental if needed, or keep as is if valid
-    // Currently (Early 2025), it might be gemini-2.0-flash-exp or similar
-    // But let's assume if user explicitly asked for 2.0, they know what they are doing.
-    // However, if we want to be safe:
-    if (lower === 'gemini-2.0-flash') {
-        return 'gemini-2.0-flash-exp'; // Try experimental endpoint if 2.0 fails? 
-        // Or just return it as is. Google might have aliased it.
-        // Let's return 'gemini-1.5-flash' if we are unsure? No, user specifically wants 2.0.
-        // Let's try to stick to what we know works.
-        // For now, let's just fix the blatant "2.5" typo.
-    }
-
-    return modelName;
-}
-
 // Step 2: Business Logic / AI Brain
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
@@ -174,6 +147,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     for (const keyObj of keyPool) {
         const currentKey = keyObj.key;
         let currentProvider = keyObj.provider || defaultProvider;
+        
+        // Strict Model Handling:
+        // If the key object comes with a specific model (from DB), USE IT.
+        // Otherwise, fallback to the requested defaultModel.
         let currentModel = keyObj.model || defaultModel;
         
         // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
@@ -189,19 +166,15 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         }
         // ------------------------------------------------
 
-        // Normalize model name ONLY for Google (Fix typos like gemini-2.5-flash)
-        if (currentProvider === 'google' || currentProvider === 'gemini') {
-             currentModel = normalizeModelName(currentModel);
-        }
-
-        // Force specific models for providers if needed
-        if (currentProvider === 'deepseek') {
-             currentModel = 'deepseek-chat';
-        }
+        // STRICT MODE: Use EXACTLY the model defined in the DB/Key configuration.
+        // No normalization, no forcing. User's input is the source of truth.
+        // "je api token and chatmodel takbe setai use korte hobe"
 
         let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/'; // Default to Gemini
         
-        if (currentProvider.includes('gemini') || currentProvider.includes('google')) {
+        if (currentProvider.includes('openrouter')) {
+            baseURL = 'https://openrouter.ai/api/v1';
+        } else if (currentProvider.includes('gemini') || currentProvider.includes('google')) {
             // Official Google Gemini OpenAI Compatibility Endpoint
             baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
         } else if (currentProvider.includes('openai')) {
