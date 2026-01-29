@@ -256,20 +256,25 @@ async function getSmartKey(provider, model) {
 
     // RETRY LOGIC: If no keys found in cache, FORCE REFRESH from DB and try again
     if (model && modelSpecificKeys.length === 0) {
-        console.log(`[KeyService] No local keys found for ${provider}/${model}. Forcing DB refresh...`);
-        await updateKeyCache(true);
-        
-        // Re-filter after refresh
-        validKeys = keyCache;
-        if (provider) {
-             if (provider === 'google' || provider === 'gemini') {
-                validKeys = validKeys.filter(k => k.provider === 'google' || k.provider === 'gemini');
-            } else {
-                validKeys = validKeys.filter(k => k.provider === provider);
+        // Prevent excessive DB hammering: Only force refresh if cache is older than 10 seconds
+        if (Date.now() - lastCacheUpdate > 10000) {
+            console.log(`[KeyService] No local keys found for ${provider}/${model}. Forcing DB refresh...`);
+            await updateKeyCache(true);
+            
+            // Re-filter after refresh
+            validKeys = keyCache;
+            if (provider) {
+                if (provider === 'google' || provider === 'gemini') {
+                    validKeys = validKeys.filter(k => k.provider === 'google' || k.provider === 'gemini');
+                } else {
+                    validKeys = validKeys.filter(k => k.provider === provider);
+                }
             }
-        }
-        if (model) {
-            modelSpecificKeys = validKeys.filter(k => k.model === model);
+            if (model) {
+                modelSpecificKeys = validKeys.filter(k => k.model === model);
+            }
+        } else {
+             // console.log(`[KeyService] No strict keys for ${model} and cache is fresh. Skipping refresh.`);
         }
     }
 
