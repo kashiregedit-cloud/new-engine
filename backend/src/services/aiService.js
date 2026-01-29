@@ -229,6 +229,49 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
 // Helper: Process Image with Vision
 async function processImageWithVision(imageUrl, pageConfig) {
+  // STRATEGY: 
+  // 1. Try OCR.space (User's "Best Solution") for reliable text extraction.
+  // 2. If OCR fails or returns very little text, try Gemini Vision (if configured).
+
+  const performOCRSpace = async (url) => {
+      try {
+          console.log(`[Vision] Analyzing image with OCR.space...`);
+          const apiKey = 'K88523729188957'; // Hardcoded from user's n8n workflow
+          const formData = new URLSearchParams();
+          formData.append('url', url);
+          formData.append('language', 'eng');
+          formData.append('isOverlayRequired', 'false');
+          formData.append('apikey', apiKey);
+
+          const response = await axios.post('https://api.ocr.space/parse/image', formData, {
+              headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded'
+              }
+          });
+
+          if (response.data && response.data.ParsedResults && response.data.ParsedResults.length > 0) {
+              const text = response.data.ParsedResults[0].ParsedText;
+              if (text && text.trim().length > 0) {
+                  return `Based on the image this is: ${text.trim().replace(/\r\n/g, ', ')}`;
+              }
+          }
+          return null;
+      } catch (error) {
+          console.error("OCR.space Error:", error.message);
+          return null;
+      }
+  };
+
+  // 1. Attempt OCR.space
+  const ocrResult = await performOCRSpace(imageUrl);
+  if (ocrResult) {
+      console.log(`[Vision] OCR Result: ${ocrResult}`);
+      return ocrResult;
+  }
+
+  console.log("[Vision] OCR.space failed or returned empty. Falling back to Gemini...");
+
+  // 2. Fallback to Gemini Vision
   // Determine Model: Use configured chat model or default to gemini-1.5-flash
   let modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
   const providerToUse = pageConfig.ai || 'google';
