@@ -249,12 +249,13 @@ async function getSmartKey(provider, model) {
     }
 
     // Filter by Model (Strict Match)
+    let modelSpecificKeys = [];
     if (model) {
-        validKeys = validKeys.filter(k => k.model === model);
+        modelSpecificKeys = validKeys.filter(k => k.model === model);
     }
 
     // RETRY LOGIC: If no keys found in cache, FORCE REFRESH from DB and try again
-    if (validKeys.length === 0) {
+    if (model && modelSpecificKeys.length === 0) {
         console.log(`[KeyService] No local keys found for ${provider}/${model}. Forcing DB refresh...`);
         await updateKeyCache(true);
         
@@ -268,12 +269,19 @@ async function getSmartKey(provider, model) {
             }
         }
         if (model) {
-            validKeys = validKeys.filter(k => k.model === model);
+            modelSpecificKeys = validKeys.filter(k => k.model === model);
         }
     }
 
-    if (validKeys.length === 0) {
-        return null;
+    // Use model-specific keys if available, otherwise fall back to provider-only keys (Relaxed Match)
+    if (modelSpecificKeys.length > 0) {
+        validKeys = modelSpecificKeys;
+    } else {
+        console.warn(`[KeyService] No strict keys for ${model}. Falling back to ANY key for provider ${provider}.`);
+        // validKeys already contains all keys for the provider (filtered above)
+        if (validKeys.length === 0) {
+             return null;
+        }
     }
 
     // 3. Serial Round Robin Selection

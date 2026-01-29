@@ -274,6 +274,10 @@ async function processImageWithVision(imageUrl, pageConfig) {
   // 2. Fallback to Gemini Vision
   // Determine Model: Use configured chat model or default to gemini-1.5-flash
   let modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
+  
+  // Normalize model name
+  modelToUse = normalizeModelName(modelToUse);
+  
   const providerToUse = pageConfig.ai || 'google';
 
   const performVisionCall = async (model) => {
