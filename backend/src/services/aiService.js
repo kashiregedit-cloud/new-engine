@@ -253,13 +253,13 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
 // Helper: Process Image with Vision
 async function processImageWithVision(imageUrl, pageConfig) {
-  // STRATEGY: 
-  // 1. Try OCR.space (User's "Best Solution") for reliable text extraction.
-  // 2. If OCR fails or returns very little text, try Gemini Vision (if configured).
+  // STRATEGY (Updated as per User Request): 
+  // 1. Try Vision API (Gemini/OpenRouter) FIRST.
+  // 2. If Vision API fails, Fallback to OCR.space.
 
   const performOCRSpace = async (url) => {
       try {
-          console.log(`[Vision] Analyzing image with OCR.space...`);
+          console.log(`[Vision] Fallback: Analyzing image with OCR.space...`);
           const apiKey = 'K88523729188957'; // Hardcoded from user's n8n workflow
           const formData = new URLSearchParams();
           formData.append('url', url);
@@ -286,22 +286,9 @@ async function processImageWithVision(imageUrl, pageConfig) {
       }
   };
 
-  // 1. Attempt OCR.space
-  const ocrResult = await performOCRSpace(imageUrl);
-  if (ocrResult) {
-      console.log(`[Vision] OCR Result: ${ocrResult}`);
-      return ocrResult;
-  }
-
-  console.log("[Vision] OCR.space failed or returned empty. Falling back to Gemini...");
-
-  // 2. Fallback to Gemini Vision
   // Determine Model: Use configured chat model or default to gemini-1.5-flash
   let modelToUse = pageConfig.chat_model || 'gemini-1.5-flash';
-  
   // Don't normalize yet - wait until we know the provider (key)
-  // modelToUse = normalizeModelName(modelToUse);
-  
   const providerToUse = pageConfig.ai || 'google';
 
   const performVisionCall = async (model) => {
@@ -332,11 +319,6 @@ async function processImageWithVision(imageUrl, pageConfig) {
         effectiveProvider = 'xai';
     }
     // ------------------------------------------------
-
-    // Normalize model name ONLY for Google (Fix typos like gemini-2.5-flash)
-    if (effectiveProvider === 'google' || effectiveProvider === 'gemini') {
-        model = normalizeModelName(model);
-    }
 
     // Configure Base URL based on Provider
     let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -373,6 +355,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
   };
 
   try {
+    // 1. Try Vision API First
     const content = await performVisionCall(modelToUse);
     console.log(`[Vision] Result: ${content}`);
     return content || "Image";
@@ -382,17 +365,12 @@ async function processImageWithVision(imageUrl, pageConfig) {
       console.error("Vision API Error Details:", JSON.stringify(error.response.data || error.response));
     }
 
-    // Fallback to gemini-1.5-flash if the primary model failed and it wasn't already 1.5-flash
-    if (modelToUse !== 'gemini-1.5-flash') {
-      console.log(`[Vision] Falling back to gemini-1.5-flash...`);
-      try {
-        const content = await performVisionCall('gemini-1.5-flash');
-        console.log(`[Vision] Fallback Result: ${content}`);
-        return content || "Image";
-      } catch (fallbackError) {
-        console.error(`Vision Fallback Error:`, fallbackError.message);
-        return "Image (Analysis Failed)";
-      }
+    // 2. Fallback to OCR.space
+    console.log("[Vision] Vision API failed. Falling back to OCR.space...");
+    const ocrResult = await performOCRSpace(imageUrl);
+    if (ocrResult) {
+        console.log(`[Vision] OCR Fallback Result: ${ocrResult}`);
+        return ocrResult;
     }
 
     return "Image (Analysis Failed)";
