@@ -105,12 +105,12 @@ async function queueMessage(event) {
             // Process Images with Vision AI if enabled
             try {
                 const pageConfig = await dbService.getPageConfig(pageId);
+                const pagePrompts = await dbService.getPagePrompts(pageId); // Fetch from fb_message_database
                 
-                console.log(`[Webhook] Image received. Page: ${pageId}. Image Analysis Enabled: ${pageConfig?.image_analysis}`);
+                console.log(`[Webhook] Image received. Page: ${pageId}. Image Analysis Enabled (DB): ${pagePrompts?.image_detection}`);
 
-                // Check if image analysis is enabled in page config
-                // User Instruction: "jodi page access token e iamge analysis true hoi"
-                if (pageConfig && pageConfig.image_analysis) {
+                // Check if image analysis is enabled in page prompts (fb_message_database)
+                if (pagePrompts && pagePrompts.image_detection) {
                     const descriptions = [];
                     console.log(`[Webhook] Starting analysis for ${imageUrls.length} images...`);
                     
@@ -195,7 +195,8 @@ async function queueMessage(event) {
     sessionData.messages.push({
         text: messageText,
         reply_to: replyToId,
-        images: event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || []
+        images: event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || [],
+        isPostback: !!event.postback
     });
 
     console.log(`Queued message for ${sessionId}: ${messageText}`);
@@ -216,6 +217,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     let combinedText = "";
     let replyToId = null;
     let allImages = [];
+    let hasPostback = false;
 
     for (const msg of messages) {
         if (typeof msg === 'string') {
@@ -225,6 +227,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             combinedText += msg.text + "\n";
             if (msg.reply_to) replyToId = msg.reply_to; // Capture the last reply_to ID
             if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
+            if (msg.isPostback) hasPostback = true;
         }
     }
     combinedText = combinedText.trim();
@@ -270,6 +273,28 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         console.log("Fetching prompts...");
         const pagePrompts = await dbService.getPagePrompts(pageId);
         
+        // --- FEATURE FLAGS CHECK ---
+        if (pagePrompts) {
+            // Check based on message type
+            if (hasPostback) {
+                // It's a Swipe/Postback
+                if (!pagePrompts.swipe_reply) {
+                    const logMsg = `[AI] Swipe Reply disabled (swipe_reply=false) for page ${pageId}. Ignoring.`;
+                    console.log(logMsg);
+                    logToFile(logMsg);
+                    return;
+                }
+            } else {
+                // It's a Text Message
+                if (!pagePrompts.reply_message) {
+                    const logMsg = `[AI] Reply Message disabled (reply_message=false) for page ${pageId}. Ignoring.`;
+                    console.log(logMsg);
+                    logToFile(logMsg);
+                    return;
+                }
+            }
+        }
+
         // Debugging: Log Prompt Info
         if (pagePrompts) {
              const logMsg = `[AI] Loaded Prompts for ${pageId}. Text Prompt: "${pagePrompts.text_prompt?.substring(0, 50)}..."`;
