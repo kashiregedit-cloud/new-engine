@@ -391,11 +391,12 @@ async function transcribeAudio(audioUrl, pageConfig) {
         form.append('file', response.data, { filename: 'audio.mp4', contentType: 'audio/mp4' }); 
         
         // 3. Select Provider & Key
-        // Priority: Groq (Fast/Free) -> OpenAI (Standard)
+        // Priority: Groq (Fast/Free) -> Gemini 1.5 Flash (Free/Multimodal) -> OpenRouter/OpenAI
         
         let apiKey = null;
         let baseURL = null;
-        let model = 'whisper-large-v3'; // Default to Groq's best
+        let model = 'whisper-large-v3'; 
+        let provider = 'groq';
 
         // A. Check Page Config for Groq Key
         if (pageConfig.api_key && pageConfig.api_key.includes('gsk_')) {
@@ -404,6 +405,7 @@ async function transcribeAudio(audioUrl, pageConfig) {
              if (groqKey) {
                  apiKey = groqKey.trim();
                  baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+                 provider = 'groq';
              }
         }
 
@@ -413,40 +415,130 @@ async function transcribeAudio(audioUrl, pageConfig) {
             if (keyObj) {
                 apiKey = keyObj.key;
                 baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+                provider = 'groq';
             }
         }
 
-        // C. Fallback to OpenAI
+        // C. Gemini 1.5 Flash (Free Tier Fallback)
         if (!apiKey) {
-             // Check for OpenAI key in pageConfig or Env
-             let openAiKey = null;
-             if (pageConfig.api_key && pageConfig.api_key.startsWith('sk-') && !pageConfig.api_key.startsWith('sk-or-')) {
-                 openAiKey = pageConfig.api_key.split(',')[0].trim();
-             } else {
-                 openAiKey = process.env.OPENAI_API_KEY;
+             // Look for Gemini Key (AIzaSy...)
+             let geminiKey = null;
+             
+             // 1. Try Page Config (Best chance to find a valid key)
+             if (pageConfig.api_key) {
+                 const keys = pageConfig.api_key.split(',');
+                 geminiKey = keys.find(k => k.trim().startsWith('AIzaSy'));
              }
 
-             if (openAiKey) {
-                 apiKey = openAiKey;
-                 baseURL = 'https://api.openai.com/v1/audio/transcriptions';
-                 model = 'whisper-1';
+             // 2. Smart Key Lookup (Try 1.5 Flash)
+             if (!geminiKey) {
+                 const keyObj = await keyService.getSmartKey('google', 'gemini-1.5-flash');
+                 if (keyObj) geminiKey = keyObj.key;
+             }
+             
+             // 3. Smart Key Lookup (Try 2.0 Flash - User might have this)
+             if (!geminiKey) {
+                 const keyObj = await keyService.getSmartKey('google', 'gemini-2.0-flash');
+                 if (keyObj) geminiKey = keyObj.key;
+             }
+
+             // 4. Smart Key Lookup (Try 2.5 Flash - User might have this)
+             if (!geminiKey) {
+                 const keyObj = await keyService.getSmartKey('google', 'gemini-2.5-flash');
+                 if (keyObj) geminiKey = keyObj.key;
+             }
+             
+             // Env Fallback
+             if (!geminiKey) geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+             if (geminiKey) {
+                 apiKey = geminiKey;
+                 provider = 'gemini';
+                 model = 'gemini-1.5-flash'; // Model name for transcription (can be any multimodal model)
+             }
+        }
+
+        // D. Fallback to OpenRouter / OpenAI
+        if (!apiKey) {
+             // Check for OpenRouter (sk-or-v1) or OpenAI (sk-)
+             let fallbackKey = null;
+             
+             if (pageConfig.api_key) {
+                 const keys = pageConfig.api_key.split(',');
+                 // Prefer OpenRouter first as it might have cheap whisper
+                 fallbackKey = keys.find(k => k.trim().startsWith('sk-or-v1')) || keys.find(k => k.trim().startsWith('sk-'));
+             }
+             
+             if (!fallbackKey) fallbackKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+
+             if (fallbackKey) {
+                 apiKey = fallbackKey;
+                 if (apiKey.startsWith('sk-or-v1')) {
+                     provider = 'openrouter';
+                     baseURL = 'https://openrouter.ai/api/v1/audio/transcriptions';
+                     model = 'openai/whisper'; // OpenRouter generic whisper
+                 } else {
+                     provider = 'openai';
+                     baseURL = 'https://api.openai.com/v1/audio/transcriptions';
+                     model = 'whisper-1';
+                 }
              }
         }
 
         if (!apiKey) {
-            console.warn("[Audio] No suitable API key (Groq/OpenAI) found for transcription.");
+            console.warn("[Audio] No suitable API key (Groq/Gemini/OpenAI) found for transcription.");
             return "[Audio Message (Transcription Failed - No Key)]";
         }
 
-        form.append('model', model);
+        // --- EXECUTION ---
+        
+        // CASE 1: Gemini (Multimodal Audio)
+        if (provider === 'gemini') {
+            console.log(`[Audio] Using Gemini 1.5 Flash (Multimodal) with key ...${apiKey.slice(-4)}`);
+            
+            // 1. Need ArrayBuffer/Base64, not Stream. Re-download as buffer.
+            const bufferResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+            const base64Audio = Buffer.from(bufferResponse.data).toString('base64');
+            
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: "Please transcribe this audio message exactly as spoken. Do not add any commentary." },
+                        {
+                            inline_data: {
+                                mime_type: "audio/mp3", // Generic mime, Gemini is usually smart enough
+                                data: base64Audio
+                            }
+                        }
+                    ]
+                }]
+            };
+            
+            const geminiRes = await axios.post(geminiUrl, payload);
+            if (geminiRes.data && geminiRes.data.candidates && geminiRes.data.candidates.length > 0) {
+                 const text = geminiRes.data.candidates[0].content.parts[0].text;
+                 console.log(`[Audio] Gemini Transcription: "${text.trim()}"`);
+                 return `[User sent voice message: "${text.trim()}"]`;
+            }
+            throw new Error("Gemini returned no content");
+        }
 
-        // 4. Call API
+        // CASE 2: Groq / OpenAI / OpenRouter (Standard Whisper API)
+        form.append('model', model);
         const headers = {
             ...form.getHeaders(),
             'Authorization': `Bearer ${apiKey}`
         };
 
-        console.log(`[Audio] Sending to ${baseURL} (${model})...`);
+        // OpenRouter Header Requirement
+        if (provider === 'openrouter') {
+             headers['HTTP-Referer'] = 'https://orderly-conversations.com'; // Placeholder
+             headers['X-Title'] = 'Orderly Conversations';
+        }
+
+        console.log(`[Audio] Sending to ${provider.toUpperCase()} (${model})...`);
         const transcriptionResponse = await axios.post(baseURL, form, { headers });
         
         const text = transcriptionResponse.data.text;
