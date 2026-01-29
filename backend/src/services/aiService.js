@@ -16,7 +16,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // 1. Prepare Key Pool (Smart Rotation Strategy)
     let keyPool = [];
     let defaultProvider = pageConfig.ai || 'gemini';
-    let defaultModel = pageConfig.chat_model || 'gemini-1.5-flash'; 
+    // Ensure model name is trimmed to avoid whitespace issues
+    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
     
     // --- IMAGE DETECTION & VISION SUPPORT ---
     let imageUrls = [];
