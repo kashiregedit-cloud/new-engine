@@ -6,9 +6,10 @@ let lastCacheUpdate = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 Minutes
 
 // In-Memory "Dead Key" Tracker
-// Stores invalid keys with a timestamp to avoid retrying them immediately
+// Stores invalid keys with an expiry timestamp
+// Value format: { expiry: number, reason: string }
 const deadKeys = new Map();
-const DEAD_KEY_TIMEOUT = 60 * 60 * 1000; // 1 Hour Cooldown
+const DEFAULT_COOLDOWN = 60 * 1000; // 1 Minute default for RPM/TPM
 
 // In-Memory Usage Tracker for RPM (Rate Per Minute)
 const keyUsageMap = new Map(); 
@@ -73,17 +74,34 @@ async function updateKeyCache(force = false) {
     }
 }
 
-function markKeyAsDead(key) {
+function markKeyAsDead(key, duration = DEFAULT_COOLDOWN, reason = 'unknown') {
     if (!key) return;
-    console.warn(`[KeyService] Marking key as dead/invalid: ${key.substring(0, 8)}...`);
-    deadKeys.set(key, Date.now());
+    const expiry = Date.now() + duration;
+    console.warn(`[KeyService] Blocking key ${key.substring(0, 8)}... for ${(duration/1000).toFixed(1)}s. Reason: ${reason}`);
+    deadKeys.set(key, { expiry, reason });
+}
+
+function markKeyAsQuotaExceeded(key) {
+    if (!key) return;
+    // Calculate time until next midnight (UTC)
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setUTCHours(24, 0, 0, 0); // Next UTC Midnight
+    const duration = tomorrow.getTime() - now.getTime();
+    
+    // Add 1 hour buffer to be safe
+    const safeDuration = duration + (60 * 60 * 1000);
+    
+    markKeyAsDead(key, safeDuration, 'quota_exceeded');
 }
 
 function isKeyAlive(key) {
     if (!deadKeys.has(key)) return true;
-    const timestamp = deadKeys.get(key);
-    if (Date.now() - timestamp > DEAD_KEY_TIMEOUT) {
-        deadKeys.delete(key); // Expired, give it another chance
+    const entry = deadKeys.get(key);
+    
+    // Check if expired
+    if (Date.now() > entry.expiry) {
+        deadKeys.delete(key); // Cooldown over
         return true;
     }
     return false;
@@ -384,6 +402,7 @@ module.exports = {
     getAllManagedKeys: () => [], 
     getSmartKey, 
     markKeyAsDead,
+    markKeyAsQuotaExceeded,
     recordKeyUsage,
     updateKeyStatusFromHeaders,
     updateKeyCache // Export this!

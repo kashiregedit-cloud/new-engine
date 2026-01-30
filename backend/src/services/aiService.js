@@ -237,8 +237,22 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
             console.warn(`[AI] Phase 2 Error with ...${currentKey.slice(-4)}: ${error.message}`);
             lastError = error;
             
-            // Mark key as dead
-            keyService.markKeyAsDead(currentKey);
+            // Analyze Error Type for Smart Blocking
+            const status = error.status || (error.response ? error.response.status : null);
+            const errorBody = error.response ? JSON.stringify(error.response.data || {}) : error.message;
+            const isQuota = errorBody.includes('quota') || errorBody.includes('exhausted') || status === 403;
+            const isRateLimit = status === 429 || errorBody.includes('Rate limit') || errorBody.includes('Too Many Requests');
+
+            if (isQuota) {
+                console.warn(`[AI] Key ...${currentKey.slice(-4)} QUOTA EXHAUSTED (RPD). Blocking until tomorrow.`);
+                keyService.markKeyAsQuotaExceeded(currentKey);
+            } else if (isRateLimit) {
+                console.warn(`[AI] Key ...${currentKey.slice(-4)} RATE LIMITED (RPM/TPM). Blocking for 1 min.`);
+                keyService.markKeyAsDead(currentKey, 60 * 1000, 'rate_limit');
+            } else {
+                // Generic error (network, server, etc) - Block for 1 min just in case
+                keyService.markKeyAsDead(currentKey, 60 * 1000, 'generic_error');
+            }
             
             if (error.response && error.response.headers) {
                keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
