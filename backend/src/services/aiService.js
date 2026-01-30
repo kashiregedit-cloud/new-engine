@@ -19,9 +19,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Ensure model name is trimmed to avoid whitespace issues
     let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
 
-    // --- MODEL NAME NORMALIZATION (User Requested 2.5 Support) ---
-    // Gemini 2.5 is now valid (e.g. gemini-2.5-flash-lite).
-    // We only correct obvious old typos if needed, but we TRUST the user's input for 2.5.
+    // --- MODEL NAME NORMALIZATION & ALIASES ---
+    // User often uses "2.5" to refer to the latest 2.0 Flash Lite Preview or Experimental models.
+    // We map these friendly names to the official API Model IDs to prevent 400 errors.
+    const MODEL_ALIASES = {
+        'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // Likely what user means
+        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
+        'gemini-2.5-pro': 'gemini-2.0-pro-exp',
+        'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite-preview-02-05'
+    };
+
+    if (MODEL_ALIASES[defaultModel]) {
+        console.log(`[AI] Mapping alias '${defaultModel}' to official ID '${MODEL_ALIASES[defaultModel]}'`);
+        defaultModel = MODEL_ALIASES[defaultModel];
+    }
     // -------------------------------------------------
     
     // --- IMAGE DETECTION & VISION SUPPORT ---
@@ -235,6 +246,35 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
                 }
             }
         } catch (error) {
+            // --- FALLBACK LOGIC FOR 400 ERRORS (Model Mismatch) ---
+            // If the model name was invalid (e.g. gemini-2.5 not found), retry with a stable model.
+            if (error.status === 400 && currentModel !== 'gemini-1.5-flash' && (currentProvider.includes('google') || currentProvider.includes('gemini'))) {
+                console.warn(`[AI] 400 Error with ${currentModel}. Attempting fallback to 'gemini-1.5-flash' with same key...`);
+                try {
+                    const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
+                    const fallbackCompletion = await openai.chat.completions.create({
+                        model: 'gemini-1.5-flash',
+                        messages: messages,
+                        response_format: { type: "json_object" }
+                    });
+
+                    if (fallbackCompletion.choices && fallbackCompletion.choices.length > 0) {
+                        const rawContent = fallbackCompletion.choices[0].message.content;
+                        try {
+                            const parsed = JSON.parse(rawContent);
+                            keyService.recordKeyUsage(currentKey, fallbackCompletion.usage ? fallbackCompletion.usage.total_tokens : 0);
+                            return parsed;
+                        } catch (e) {
+                            return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                        }
+                    }
+                } catch (fallbackError) {
+                    console.warn(`[AI] Fallback failed too: ${fallbackError.message}`);
+                    // Proceed to mark key as dead
+                }
+            }
+            // -----------------------------------------------------
+
             console.warn(`AI Generation failed with key ...${currentKey.slice(-4)}. Provider: ${currentProvider}. Error: ${error.message}`);
             
             // Mark key as dead so we don't try it again immediately
