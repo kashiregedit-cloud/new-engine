@@ -388,7 +388,14 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         if (replyToId) {
             const originalText = await dbService.getMessageById(replyToId);
             if (originalText) {
-                replyContext = `\n[User Replying To: "${originalText}"]`;
+                // DETECT IMAGE ANALYSIS CONTEXT
+                // If the user is replying to a message that contains "Based on the image",
+                // we must explicitly tell the AI that this text IS the image content.
+                if (originalText.includes("Based on the image") || originalText.includes("[User sent images:")) {
+                    replyContext = `\n[System Note: The user is replying to an image. The AI cannot see the image again, but here is the analysis/description of that image: "${originalText}". Answer the user's question assuming this text is what they are looking at.]\n`;
+                } else {
+                    replyContext = `\n[User Replying To: "${originalText}"]`;
+                }
             }
         }
         
