@@ -626,11 +626,9 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 }
     
                 if (!sentViaCarousel) {
-                    // We send them sequentially to ensure order, but we can try to do it efficiently.
+                    // Binary Upload Fallback
                     console.log(`[Image Send] Sending ${images.length} images via Binary Upload (Parallel)...`);
                     
-                    // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
-                    // Using Promise.all to send them as fast as possible
                     const uploadPromises = images.map(async (imgObj) => {
                          try {
                              await facebookService.sendImageUpload(pageId, senderId, imgObj.url, pageConfig.page_access_token);
@@ -639,6 +637,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                              console.error(`[Image Fallback] Failed to send image ${imgObj.url}: ${imgError.message}`);
                              // FALLBACK FOR NON-IMAGE LINKS (User Requirement #5)
                              // If upload fails (e.g. it's a product page URL), send it as a text link.
+                             // FORCE LINK FORMAT if Binary Upload Fails to ensure user sees it
                              const fallbackText = `Link: ${imgObj.url}`;
                              await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
                          }

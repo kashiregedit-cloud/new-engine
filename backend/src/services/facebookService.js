@@ -29,7 +29,8 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
                     
                     // Regex for Section Headers (e.g., "🌟 Basic Plan", "📦 Pro Plan")
                     // Looks for Newline + Emoji/Bullet + Text
-                    const headerRegex = /\n[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}].{1,50}(\n|$)/gu;
+                    // Added [IMAGE: and [Link: to split points too
+                    const headerRegex = /\n(?:[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]|IMAGE:|Link:|Sobi:).{1,50}(\n|$)/gu;
                     
                     let bestSplit = -1;
                     let match;
