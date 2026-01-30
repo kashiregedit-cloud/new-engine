@@ -20,13 +20,13 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
-    // User often uses "2.5" to refer to the latest 2.0 Flash Lite Preview or Experimental models.
-    // We map these friendly names to the official API Model IDs to prevent 400 errors.
+    // Update: Google now lists 'Gemini 2.5 Flash' and 'Gemini 3 Pro' in docs.
+    // We will support these models natively if the user selects them.
+    // We only map 'experimental' or 'old preview' tags to stable versions where appropriate.
     const MODEL_ALIASES = {
-        'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // Likely what user means
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-pro': 'gemini-2.0-pro-exp',
-        'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite-preview-02-05'
+        'gemini-2.0-flash-exp': 'gemini-2.0-flash', // Auto-upgrade old "exp" users to latest 2.0
+        'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now, or let it pass if stable
+        // We REMOVED the mapping of 2.5 -> 2.0 because 2.5 is now a real separate model family.
     };
 
     if (MODEL_ALIASES[defaultModel]) {
@@ -46,7 +46,14 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         console.log(`[AI] Detected ${imageUrls.length} images. Enabling Vision Mode.`);
     }
 
-    const VISION_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet'];
+    // Updated Vision Models List with latest 2.5 and 3.0 support
+    const VISION_MODELS = [
+        'gemini-3-pro', 'gemini-3-flash', 
+        'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro',
+        'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.0-pro-exp',
+        'gemini-1.5-flash', 'gemini-1.5-pro', 
+        'gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet'
+    ];
     // ----------------------------------------
 
     // Case A: Managed Mode (Fetch from DB using Smart Key Service)

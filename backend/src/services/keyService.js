@@ -25,6 +25,11 @@ setInterval(flushUsageStats, 60 * 1000);
 // --- Default Limits Map (Fallback if DB values are null) ---
 // Based on typical Free Tier limits as of early 2025
 const DEFAULT_LIMITS = {
+    'gemini-3-pro': { rpm: 2, rpd: 50 }, // Assuming high tier/strict
+    'gemini-3-flash': { rpm: 10, rpd: 1500 },
+    'gemini-2.5-flash': { rpm: 10, rpd: 1500 },
+    'gemini-2.5-flash-lite': { rpm: 15, rpd: 1500 }, // Likely higher limits
+    'gemini-2.5-pro': { rpm: 2, rpd: 50 },
     'gemini-2.0-flash': { rpm: 10, rpd: 1500 },
     'gemini-1.5-flash': { rpm: 15, rpd: 1500 },
     'gemini-1.5-flash-8b': { rpm: 15, rpd: 1500 },
