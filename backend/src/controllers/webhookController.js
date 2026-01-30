@@ -472,35 +472,49 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // 6. Send Reply (Text + Images)
         let replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
         
-        // --- SMART IMAGE EXTRACTION FROM TEXT ---
-        // If AI put image links in text (especially Google Drive), extract them to send as attachments.
+        // --- SMART IMAGE EXTRACTION & CLEANING ---
         if (!aiResponse.images) aiResponse.images = [];
         
-        // 1. Google Drive Viewer Links -> Direct Links
-        // Regex: https://drive.google.com/file/d/FILE_ID/view...
-        const driveRegex = /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*/g;
-        let match;
-        while ((match = driveRegex.exec(replyText)) !== null) {
-            const fullMatch = match[0];
-            const fileId = match[1];
+        // Helper to extract and clean
+        const extractAndClean = (regex) => {
+            let match;
+            while ((match = regex.exec(replyText)) !== null) {
+                const fullMatch = match[0]; // The whole string "Image: http..."
+                const url = match[1];       // Just the URL
+                
+                if (!aiResponse.images.includes(url)) {
+                    aiResponse.images.push(url);
+                }
+                // Remove the FULL MATCH from text (Label + URL)
+                replyText = replyText.replace(fullMatch, '').trim();
+            }
+        };
+
+        // 1. Google Drive Viewer Links
+        // Regex handles optional label: (Image: )? https://...
+        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*)/gi;
+        let driveMatch;
+        while ((driveMatch = driveRegex.exec(replyText)) !== null) {
+            const fullMatch = driveMatch[0];
+            const originalUrl = driveMatch[1];
+            const fileId = driveMatch[2];
             const directLink = `https://drive.google.com/uc?export=view&id=${fileId}`;
+            
             if (!aiResponse.images.includes(directLink)) {
                 aiResponse.images.push(directLink);
             }
-            // Remove the link from text to prevent double showing (Link + Image)
             replyText = replyText.replace(fullMatch, '').trim();
         }
 
         // 2. Direct Image URLs (jpg, png, etc)
-        const imgRegex = /(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
-        while ((match = imgRegex.exec(replyText)) !== null) {
-             const imgUrl = match[0];
-             if (!aiResponse.images.includes(imgUrl)) {
-                 aiResponse.images.push(imgUrl);
-             }
-             // Remove the link from text
-             replyText = replyText.replace(imgUrl, '').trim();
-        }
+        // Regex handles optional label: (Image: )? https://...
+        const imgRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
+        extractAndClean(imgRegex);
+
+        // 3. Generic Labeled Links (Catch-all for "Image: https://website.com")
+        // Catches non-image URLs (like product pages) IF they are explicitly labeled as Image/Link/Sobi
+        const labeledLinkRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)(https?:\/\/[^\s]+)/gi;
+        extractAndClean(labeledLinkRegex);
         
         if (aiResponse.images.length > 0) {
             console.log(`[Smart Extraction] Found ${aiResponse.images.length} images in text.`);
@@ -532,60 +546,82 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const images = aiResponse.images;
             console.log(`[AI] Found ${images.length} images to send.`);
             
-            // User Request: Control via "template button" (template_reply)
-            // If template_reply is ON -> Send as Carousel (Group Card)
-            // If template_reply is OFF -> Send as Sequential/Parallel Binary Upload (Native Group)
+            // MASTER SWITCH: check if 'image_reply' is FALSE (default TRUE if undefined)
+            // User requirement: "jodi image send o false ... tobe full image send system ta kaj korbe na"
+            const allowImageSend = pagePrompts?.image_reply !== false; // Strict check against false
             
-            let sentViaCarousel = false;
-            
-            // Check Config (Assuming 'template_reply' is the boolean field in fb_message_database)
-            const useCarousel = pagePrompts?.template_reply === true || pagePrompts?.template_reply === 'true';
-
-            if (useCarousel && images.length > 1) {
-                console.log(`[Image Group] Template Reply ON. Sending via Carousel...`);
-                try {
-                    const elements = images.map((imgUrl, index) => ({
-                        title: `View Image ${index + 1}`, // Todo: Map to actual Product Name if available from AI
-                        subtitle: 'Tap to expand',
-                        image_url: imgUrl,
-                        default_action: {
-                            type: "web_url",
-                            url: imgUrl,
-                            webview_height_ratio: "tall"
-                        }
-                    }));
-                    
-                    // Limit to 10 elements (FB limit)
-                    const carouselElements = elements.slice(0, 10);
-                    
-                    await facebookService.sendCarouselMessage(pageId, senderId, carouselElements, pageConfig.page_access_token);
-                    sentViaCarousel = true;
-                    console.log(`[Image Group] Sent ${images.length} images via Carousel.`);
-                } catch (carouselError) {
-                    console.error(`[Image Group] Carousel failed. Falling back to Binary Upload. Error: ${carouselError.message}`);
-                    sentViaCarousel = false;
+            if (!allowImageSend) {
+                console.log(`[Image Send] Disabled by Config (image_reply=false). Sending links as text.`);
+                // Append links back to text since we stripped them
+                if (replyText.length > 0) replyText += "\n\n";
+                replyText += "Attached Links:\n" + images.join("\n");
+                
+                // If text was already sent (unlikely here as we haven't sent yet, but let's be safe), we just send a new message.
+                // But wait, the code above sends text FIRST. 
+                // Line 513 sends text. We are at line 532.
+                // Uh oh. The text sending happens at line 513 using 'replyText'.
+                // 'replyText' was modified by our cleaning logic.
+                // So the text sent at 513 DOES NOT contain the links.
+                // So here, we must send them as a new text message.
+                const linksText = "Attached Links:\n" + images.join("\n");
+                await facebookService.sendMessage(pageId, senderId, linksText, pageConfig.page_access_token);
+                
+            } else {
+                // Image Send ENABLED
+                
+                let sentViaCarousel = false;
+                
+                // Check Config for Template/Carousel
+                const useCarousel = pagePrompts?.template_reply === true || pagePrompts?.template_reply === 'true';
+    
+                if (useCarousel && images.length > 1) {
+                    console.log(`[Image Group] Template Reply ON. Sending via Carousel...`);
+                    try {
+                        const elements = images.map((imgUrl, index) => ({
+                            title: `View Image ${index + 1}`,
+                            subtitle: 'Tap to expand',
+                            image_url: imgUrl,
+                            default_action: {
+                                type: "web_url",
+                                url: imgUrl,
+                                webview_height_ratio: "tall"
+                            }
+                        }));
+                        
+                        // Limit to 10 elements (FB limit)
+                        const carouselElements = elements.slice(0, 10);
+                        
+                        await facebookService.sendCarouselMessage(pageId, senderId, carouselElements, pageConfig.page_access_token);
+                        sentViaCarousel = true;
+                        console.log(`[Image Group] Sent ${images.length} images via Carousel.`);
+                    } catch (carouselError) {
+                        console.error(`[Image Group] Carousel failed. Falling back to Binary Upload. Error: ${carouselError.message}`);
+                        sentViaCarousel = false;
+                    }
                 }
-            }
-
-            if (!sentViaCarousel) {
-                // We send them sequentially to ensure order, but we can try to do it efficiently.
-                console.log(`[Image Send] Sending ${images.length} images via Binary Upload (Parallel)...`);
-                
-                // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
-                // Using Promise.all to send them as fast as possible
-                const uploadPromises = images.map(async (imgUrl) => {
-                     try {
-                         await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                         console.log(`[Image Sent] ${imgUrl}`);
-                     } catch (imgError) {
-                         console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                         const fallbackText = `Image: ${imgUrl}`;
-                         await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                     }
-                });
-                
-                await Promise.all(uploadPromises);
-                console.log(`[Image Group] All images sent.`);
+    
+                if (!sentViaCarousel) {
+                    // We send them sequentially to ensure order, but we can try to do it efficiently.
+                    console.log(`[Image Send] Sending ${images.length} images via Binary Upload (Parallel)...`);
+                    
+                    // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
+                    // Using Promise.all to send them as fast as possible
+                    const uploadPromises = images.map(async (imgUrl) => {
+                         try {
+                             await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                             console.log(`[Image Sent] ${imgUrl}`);
+                         } catch (imgError) {
+                             console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                             // FALLBACK FOR NON-IMAGE LINKS (User Requirement #5)
+                             // If upload fails (e.g. it's a product page URL), send it as a text link.
+                             const fallbackText = `Link: ${imgUrl}`;
+                             await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                         }
+                    });
+                    
+                    await Promise.all(uploadPromises);
+                    console.log(`[Image Group] All images sent.`);
+                }
             }
         }
 
