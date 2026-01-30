@@ -612,6 +612,14 @@ async function transcribeAudio(audioUrl, pageConfig) {
             let mimeType = bufferResponse.headers['content-type'] || 'audio/mp4';
             // Facebook often sends "video/mp4" for audio clips, but Gemini prefers specific audio mimes or generic "audio/mp4" for audio context
             if (mimeType === 'video/mp4') mimeType = 'audio/mp4';
+
+            // Facebook Specific Fix: Force audio/aac for fbsbx.com URLs if they identify as mp4
+            // Gemini often rejects "audio/mp4" from Facebook but accepts "audio/aac"
+            if (audioUrl.includes('cdn.fbsbx.com') && (mimeType === 'audio/mp4' || mimeType === 'video/mp4')) {
+                 console.log(`[Audio] Force-correcting MIME type to audio/aac for Facebook URL`);
+                 mimeType = 'audio/aac'; 
+            }
+
             // If header is missing or generic octet-stream, guess from URL
             if (!mimeType || mimeType === 'application/octet-stream') {
                 if (audioUrl.includes('.mp3')) mimeType = 'audio/mp3';
@@ -661,7 +669,20 @@ async function transcribeAudio(audioUrl, pageConfig) {
                     // Continue to next model
                 }
             }
-            throw new Error("All Gemini models failed to transcribe.");
+            
+            console.warn("[Audio] All Gemini models failed. Falling back to Groq/Whisper...");
+            // FALLBACK TO GROQ
+            // 1. Get Groq Key
+            const groqKeyObj = await keyService.getSmartKey('groq', 'whisper-large-v3');
+            if (groqKeyObj) {
+                apiKey = groqKeyObj.key;
+                provider = 'groq';
+                model = 'whisper-large-v3';
+                baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+                console.log(`[Audio] Switching provider to GROQ (Fallback)`);
+            } else {
+                 throw new Error("All Gemini models failed and no Groq fallback key available.");
+            }
         }
 
         // CASE 2: Groq / OpenAI / OpenRouter (Standard Whisper API)
