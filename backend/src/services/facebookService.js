@@ -111,6 +111,53 @@ async function getConversationMessages(pageId, userId, accessToken, limit = 5) {
     }
 }
 
+const FormData = require('form-data');
+
+// Upload Image Binary (Bypasses URL reachability issues)
+async function sendImageUpload(pageId, recipientId, imageUrl, accessToken) {
+    try {
+        console.log(`Downloading image for upload: ${imageUrl}`);
+        
+        // 1. Download Image
+        const imageResponse = await axios.get(imageUrl, {
+            responseType: 'stream'
+        });
+
+        // 2. Prepare Form Data
+        const form = new FormData();
+        form.append('recipient', JSON.stringify({ id: recipientId }));
+        form.append('message', JSON.stringify({
+            attachment: {
+                type: 'image',
+                payload: {
+                    is_reusable: true
+                }
+            }
+        }));
+        form.append('filedata', imageResponse.data, {
+            filename: 'image.jpg', // Default filename
+            contentType: imageResponse.headers['content-type']
+        });
+
+        // 3. Upload to Facebook
+        const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
+        
+        console.log(`Uploading image to ${recipientId} from ${pageId}`);
+        const response = await axios.post(url, form, {
+            headers: {
+                ...form.getHeaders()
+            }
+        });
+        
+        return response.data;
+    } catch (error) {
+        console.error(`Error uploading image for page ${pageId}:`, error.response ? error.response.data : error.message);
+        // Fallback to URL method if upload fails (e.g. file too big)
+        console.log('Falling back to URL send method...');
+        return sendImageMessage(pageId, recipientId, imageUrl, accessToken);
+    }
+}
+
 async function sendImageMessage(pageId, recipientId, imageUrl, accessToken) {
     try {
         const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
@@ -219,6 +266,7 @@ async function getMessageById(messageId, accessToken) {
 module.exports = {
     sendMessage,
     sendImageMessage,
+    sendImageUpload,
     sendCarouselMessage,
     sendTypingAction,
     getConversationMessages,

@@ -501,21 +501,24 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // ----------------------------------------
 
         // Send Text
-        const sendResult = await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
-        const botMessageId = sendResult?.message_id || `bot_${Date.now()}`;
+        let botMessageId = `bot_${Date.now()}`;
+        if (replyText && replyText.length > 0) {
+            const sendResult = await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
+            botMessageId = sendResult?.message_id || botMessageId;
 
-        // --- SAVE BOT REPLY TO fb_chats ---
-        await dbService.saveFbChat({
-            page_id: pageId,
-            sender_id: pageId, // Bot is sender
-            recipient_id: senderId,
-            message_id: botMessageId,
-            text: replyText,
-            timestamp: Date.now(),
-            status: 'bot_reply',
-            reply_by: 'bot'
-        });
-        // ----------------------------------
+            // --- SAVE BOT REPLY TO fb_chats ---
+            await dbService.saveFbChat({
+                page_id: pageId,
+                sender_id: pageId, // Bot is sender
+                recipient_id: senderId,
+                message_id: botMessageId,
+                text: replyText,
+                timestamp: Date.now(),
+                status: 'bot_reply',
+                reply_by: 'bot'
+            });
+            // ----------------------------------
+        }
 
         // Send Images (if any)
         if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {
@@ -525,13 +528,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             // User Request: "Group akare asuk" -> Send as sequential attachments instead of Carousel.
             // Carousel requires user to scroll horizontally, which some find annoying.
             // Sending sequential images allows them to be viewed easily.
+            // "ekta ekta kore" (one by one) - using Binary Upload to bypass URL reachability issues
             
             for (const imgUrl of images) {
                 try {
-                    await facebookService.sendImageMessage(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                    // Use sendImageUpload to download and upload binary (More robust than URL)
+                    await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
                 } catch (imgError) {
                     console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                    // Fallback to text link if upload fails (but usually we stripped it, so we add it back here)
+                    // Fallback to text link if upload fails
                     const fallbackText = `Image: ${imgUrl}`;
                     await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
                 }
