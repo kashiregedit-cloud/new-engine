@@ -28,7 +28,7 @@ setInterval(flushUsageStats, 5 * 1000);
 const DEFAULT_LIMITS = {
     'gemini-3-pro': { rpm: 2, rpd: 50 }, // Assuming high tier/strict
     'gemini-3-flash': { rpm: 10, rpd: 1500 },
-    'gemini-2.5-flash': { rpm: 10, rpd: 1500 },
+    'gemini-2.5-flash': { rpm: 5, rpd: 20 }, // User reported strict limits (RPM 5, RPD 20)
     'gemini-2.5-flash-lite': { rpm: 15, rpd: 1500 }, // Likely higher limits
     'gemini-2.5-pro': { rpm: 2, rpd: 50 },
     'gemini-2.0-flash': { rpm: 10, rpd: 1500 },
