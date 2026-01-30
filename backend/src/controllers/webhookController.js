@@ -474,20 +474,25 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         const driveRegex = /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*/g;
         let match;
         while ((match = driveRegex.exec(replyText)) !== null) {
+            const fullMatch = match[0];
             const fileId = match[1];
             const directLink = `https://drive.google.com/uc?export=view&id=${fileId}`;
             if (!aiResponse.images.includes(directLink)) {
                 aiResponse.images.push(directLink);
             }
+            // Remove the link from text to prevent double showing (Link + Image)
+            replyText = replyText.replace(fullMatch, '').trim();
         }
 
         // 2. Direct Image URLs (jpg, png, etc)
         const imgRegex = /(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
         while ((match = imgRegex.exec(replyText)) !== null) {
-             const imgUrl = match[1];
+             const imgUrl = match[0];
              if (!aiResponse.images.includes(imgUrl)) {
                  aiResponse.images.push(imgUrl);
              }
+             // Remove the link from text
+             replyText = replyText.replace(imgUrl, '').trim();
         }
         
         if (aiResponse.images.length > 0) {
@@ -517,40 +522,18 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const images = aiResponse.images;
             console.log(`[AI] Found ${images.length} images to send.`);
 
-            if (images.length === 1) {
-                // Single Image Strategy
+            // User Request: "Group akare asuk" -> Send as sequential attachments instead of Carousel.
+            // Carousel requires user to scroll horizontally, which some find annoying.
+            // Sending sequential images allows them to be viewed easily.
+            
+            for (const imgUrl of images) {
                 try {
-                    await facebookService.sendImageMessage(pageId, senderId, images[0], pageConfig.page_access_token);
+                    await facebookService.sendImageMessage(pageId, senderId, imgUrl, pageConfig.page_access_token);
                 } catch (imgError) {
-                    console.error(`[Image Fallback] Failed to send image, sending link instead: ${imgError.message}`);
-                    const fallbackText = `Here is the image: ${images[0]}`;
+                    console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                    // Fallback to text link if upload fails (but usually we stripped it, so we add it back here)
+                    const fallbackText = `Image: ${imgUrl}`;
                     await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                }
-            } else {
-                // Multiple Images Strategy (Carousel)
-                // FB Limit: 10 elements per carousel. User requested grouping for 1-20 images.
-                const chunkSize = 10;
-                for (let i = 0; i < images.length; i += chunkSize) {
-                    const chunk = images.slice(i, i + chunkSize);
-                    
-                    const elements = chunk.map((imgUrl, index) => ({
-                        title: `Product Image ${i + index + 1}`,
-                        image_url: imgUrl,
-                        subtitle: "Recommended for you",
-                        default_action: {
-                            type: "web_url",
-                            url: imgUrl,
-                            webview_height_ratio: "tall"
-                        }
-                    }));
-                    
-                    try {
-                        await facebookService.sendCarouselMessage(pageId, senderId, elements, pageConfig.page_access_token);
-                    } catch (carouselError) {
-                        console.error(`[Carousel Fallback] Failed to send carousel, sending links instead: ${carouselError.message}`);
-                        const fallbackText = `Here are the images:\n${chunk.join('\n')}`;
-                        await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                    }
                 }
             }
         }

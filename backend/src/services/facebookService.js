@@ -17,12 +17,29 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
                 let splitIndex = MAX_LENGTH;
                 
                 if (currentText.length > MAX_LENGTH) {
-                    // Try to split at a newline or space
-                    const lastNewline = currentText.lastIndexOf('\n', MAX_LENGTH);
-                    const lastSpace = currentText.lastIndexOf(' ', MAX_LENGTH);
+                    // Smart Split Strategy:
+                    // 1. Priority: Double Newline (Paragraph/Section break) near end
+                    // 2. Priority: Single Newline
+                    // 3. Priority: Space
                     
-                    if (lastNewline > 1500) splitIndex = lastNewline; // Prefer newline
-                    else if (lastSpace > 1500) splitIndex = lastSpace; // Fallback to space
+                    const chunkSafeLimit = 1900; // Leave buffer
+                    const minChunkSize = 1000;   // Don't make chunks too small if possible
+                    
+                    const subString = currentText.substring(0, chunkSafeLimit);
+                    
+                    const lastDoubleNewline = subString.lastIndexOf('\n\n');
+                    const lastNewline = subString.lastIndexOf('\n');
+                    const lastSpace = subString.lastIndexOf(' ');
+                    
+                    if (lastDoubleNewline > minChunkSize) {
+                        splitIndex = lastDoubleNewline; // Best split (end of section)
+                    } else if (lastNewline > minChunkSize) {
+                        splitIndex = lastNewline; // Okay split (end of line)
+                    } else if (lastSpace > minChunkSize) {
+                        splitIndex = lastSpace; // Fallback split (end of word)
+                    } else {
+                        splitIndex = chunkSafeLimit; // Hard split
+                    }
                 } else {
                     splitIndex = currentText.length;
                 }
