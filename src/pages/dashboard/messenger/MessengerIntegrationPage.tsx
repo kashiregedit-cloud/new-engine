@@ -182,13 +182,35 @@ export default function MessengerIntegrationPage() {
     if (!userEmail) return;
     
     try {
-      const { data, error } = await supabase
+      // 1. Fetch user's own pages
+      const { data: userPages, error } = await supabase
         .from('page_access_token_message')
         .select('*')
         .eq('email', userEmail);
       
       if (error) throw error;
-      setPages(data || []);
+      
+      let finalPages: any[] = userPages || [];
+
+      // 2. Fetch currently active page if not in the list (Shared Access Mode)
+      const activeId = localStorage.getItem("active_fb_page_id");
+      if (activeId) {
+           const isAlreadyInList = finalPages.some((p: any) => p.page_id === activeId);
+           if (!isAlreadyInList) {
+               const { data: activePageData } = await supabase
+                   .from('page_access_token_message')
+                   .select('*')
+                   .eq('page_id', activeId)
+                   .maybeSingle();
+               
+               if (activePageData) {
+                   // Mark as "Guest" or handled in UI? For now just add it.
+                   finalPages = [activePageData, ...finalPages];
+               }
+           }
+      }
+
+      setPages(finalPages);
     } catch (error) {
       console.error("Error fetching pages:", error);
       toast.error("Failed to load Facebook pages");
@@ -493,7 +515,8 @@ export default function MessengerIntegrationPage() {
             return;
         }
         
-        const realPageId = pageData.page_id;
+        const page = pageData as any;
+        const realPageId = page.page_id;
         
         // 2. Search in fb_message_database using the retrieved page_id
         const { data: dbData, error: dbError } = await supabase
@@ -508,17 +531,17 @@ export default function MessengerIntegrationPage() {
         
         let dbId = dbData ? (dbData as any).id : null;
         
-        if (pageData.page_access_token) {
+        if (page.page_access_token) {
             // Set as active
             if (dbId) {
                 localStorage.setItem("active_fb_db_id", String(dbId));
             }
             localStorage.setItem("active_fb_page_id", realPageId);
             
-            // Refresh list
+            // Refresh list - this will re-fetch and show the newly connected page in the list
             await fetchPages();
             
-            toast.success(`Connected to ${pageData.name || 'Page'} successfully!`);
+            toast.success(`Connected to ${page.name || 'Page'} successfully!`);
             setManualPageId("");
         } else {
              toast.error("Page found but has no access token. Please reconnect via Facebook.");
