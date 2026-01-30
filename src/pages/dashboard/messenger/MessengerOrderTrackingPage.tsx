@@ -34,6 +34,12 @@ export default function MessengerOrderTrackingPage() {
       setOrderLoading(true);
       try {
         let query = (supabase.from('fb_order_tracking') as any).select('*').order('created_at', { ascending: false });
+        
+        // Filter by active page ID to prevent data leakage
+        const activePageId = localStorage.getItem("active_fb_page_id");
+        if (activePageId) {
+           query = query.eq('page_id', activePageId);
+        }
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);

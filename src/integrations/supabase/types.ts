@@ -348,6 +348,7 @@ export interface Database {
       fb_order_tracking: {
         Row: {
           id: number
+          page_id: string | null
           product_name: string | null
           number: number | null
           location: string | null
@@ -357,6 +358,7 @@ export interface Database {
         }
         Insert: {
           id?: number
+          page_id?: string | null
           product_name?: string | null
           number?: number | null
           location?: string | null
@@ -366,6 +368,7 @@ export interface Database {
         }
         Update: {
           id?: number
+          page_id?: string | null
           product_name?: string | null
           number?: number | null
           location?: string | null

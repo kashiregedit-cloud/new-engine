@@ -308,6 +308,7 @@ async function saveOrderTracking(orderData) {
     const { data, error } = await supabase
         .from('fb_order_tracking')
         .insert([{
+            page_id,
             product_name,
             number, // Using sender_id or extracted phone number
             location,

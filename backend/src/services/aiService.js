@@ -1,7 +1,7 @@
 const keyService = require('./keyService');
 const ragService = require('./ragService');
 const axios = require('axios');
-const OpenAI = require('openai');
+const { OpenAI } = require('openai');
 const FormData = require('form-data');
 
 // Step 2: Business Logic / AI Brain
