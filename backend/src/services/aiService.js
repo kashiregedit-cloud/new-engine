@@ -234,6 +234,65 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
  
 }
 
+// Helper: Optimize System Prompt
+async function optimizeSystemPrompt(rawText) {
+    if (!rawText || rawText.length < 10) return rawText;
+
+    const META_PROMPT = `
+You are an expert AI Prompt Engineer.
+Your task is to REWRITE and STRUCTURE the following raw information into a highly optimized "System Prompt" for an AI Customer Service Agent.
+
+RULES:
+1. **PRESERVE ALL FACTS**: Do NOT delete any prices, phone numbers, addresses, policy details, or specific product info. Keep 100% of the factual content.
+2. **REMOVE FLUFF**: Remove repetitive marketing sentences ("We are the best", "Choose us") IF they are redundant, but keep the core brand tone.
+3. **STRUCTURE**: Organize the content into these clear Markdown sections:
+   - # IDENTITY (Who the AI is, Name, Role)
+   - # CORE BEHAVIOR (Tone, Language, Emoji usage)
+   - # BUSINESS INFO (About, Mission, Location)
+   - # KNOWLEDGE BASE (Products, Services, Pricing, Policies)
+   - # FAQ & OBJECTIONS (Common questions and answers)
+4. **LANGUAGE**: Keep the *content* in its original language (Bengali/English). Use English HEADERS for structure.
+5. **OUTPUT**: Return ONLY the rewritten prompt text. Do not add conversational filler like "Here is your prompt".
+
+RAW INPUT:
+${rawText}
+    `;
+
+    // Use a fast, smart model (Gemini 1.5 Flash or 2.0 Flash Lite)
+    const model = 'gemini-1.5-flash'; 
+    const keyObj = await keyService.getSmartKey('google', model); // Use system pool for this admin task
+    const apiKey = keyObj?.key || process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+        throw new Error("No System API Key available for optimization");
+    }
+
+    const openai = new OpenAI({
+        apiKey: apiKey,
+        baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"
+    });
+
+    try {
+        const completion = await openai.chat.completions.create({
+            model: model,
+            messages: [
+                { role: "system", content: "You are a helpful assistant." },
+                { role: "user", content: META_PROMPT }
+            ],
+            temperature: 0.3, // Low temp for precision
+        });
+
+        if (completion.choices && completion.choices.length > 0) {
+            return completion.choices[0].message.content.trim();
+        }
+    } catch (error) {
+        console.error("Prompt Optimization Failed:", error);
+        throw error;
+    }
+    
+    return rawText; // Fallback
+}
+
 // Helper: Process Image with Vision
 async function processImageWithVision(imageUrl, pageConfig) {
   // STRATEGY (Updated as per User Request): 
@@ -569,5 +628,6 @@ async function transcribeAudio(audioUrl, pageConfig) {
 module.exports = {
     generateReply,
     processImageWithVision,
-    transcribeAudio
+    transcribeAudio,
+    optimizeSystemPrompt
 };

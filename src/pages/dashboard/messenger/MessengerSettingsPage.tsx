@@ -81,6 +81,9 @@ export default function MessengerSettingsPage() {
   // New State for Behavior Settings
   const [wait, setWait] = useState<number>(8);
   const [behaviorSaving, setBehaviorSaving] = useState(false);
+  
+  // New State for Optimization
+  const [optimizing, setOptimizing] = useState(false);
 
   const handleApplyCoupon = () => {
     // Simple validation for demo - in production this would verify with backend
@@ -226,6 +229,35 @@ export default function MessengerSettingsPage() {
         toast.error("Failed to save behavior: " + error.message);
     } finally {
         setBehaviorSaving(false);
+    }
+  };
+
+  const handleOptimizePrompt = async () => {
+    if (!tempPrompt || tempPrompt.length < 10) {
+        toast.error("Please enter some prompt text to optimize.");
+        return;
+    }
+
+    setOptimizing(true);
+    try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/optimize-prompt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ promptText: tempPrompt })
+        });
+
+        const data = await response.json();
+        if (data.success && data.optimizedPrompt) {
+            setTempPrompt(data.optimizedPrompt);
+            toast.success("Prompt optimized successfully! Please review before saving.");
+        } else {
+            throw new Error(data.error || "Unknown error");
+        }
+    } catch (error: any) {
+        console.error("Optimization failed:", error);
+        toast.error("Optimization failed: " + error.message);
+    } finally {
+        setOptimizing(false);
     }
   };
 
@@ -418,12 +450,29 @@ export default function MessengerSettingsPage() {
                     placeholder="You are a helpful assistant..."
                 />
             </div>
-            <DialogFooter>
-                <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
-                <Button onClick={handleSavePrompt} disabled={promptSaving}>
-                    {promptSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" /> : <Save className="mr-2 h-4 w-4" />}
-                    Save Prompt Only
-                </Button>
+            <DialogFooter className="flex justify-between items-center sm:justify-between w-full">
+                <div className="flex gap-2">
+                    <Button 
+                        variant="secondary" 
+                        onClick={handleOptimizePrompt} 
+                        disabled={optimizing || promptSaving}
+                        className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                    >
+                        {optimizing ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
+                        ) : (
+                            <Sparkles className="mr-2 h-4 w-4" />
+                        )}
+                        Auto-Format for Zero Cost
+                    </Button>
+                </div>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
+                    <Button onClick={handleSavePrompt} disabled={promptSaving || optimizing}>
+                        {promptSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" /> : <Save className="mr-2 h-4 w-4" />}
+                        Save Prompt Only
+                    </Button>
+                </div>
             </DialogFooter>
         </DialogContent>
       </Dialog>
