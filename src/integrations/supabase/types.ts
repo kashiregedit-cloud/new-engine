@@ -18,6 +18,13 @@ export interface Database {
           usage_count: number | null
           is_active: boolean | null
           created_at: string | null
+          usage_today: number | null
+          usage_tokens_today: number | null
+          rpm_limit: number | null
+          rpd_limit: number | null
+          tpm_limit: number | null
+          tpd_limit: number | null
+          last_date_checked: string | null
         }
         Insert: {
           id?: number
@@ -27,6 +34,13 @@ export interface Database {
           usage_count?: number | null
           is_active?: boolean | null
           created_at?: string | null
+          usage_today?: number | null
+          usage_tokens_today?: number | null
+          rpm_limit?: number | null
+          rpd_limit?: number | null
+          tpm_limit?: number | null
+          tpd_limit?: number | null
+          last_date_checked?: string | null
         }
         Update: {
           id?: number
@@ -36,6 +50,13 @@ export interface Database {
           usage_count?: number | null
           is_active?: boolean | null
           created_at?: string | null
+          usage_today?: number | null
+          usage_tokens_today?: number | null
+          rpm_limit?: number | null
+          rpd_limit?: number | null
+          tpm_limit?: number | null
+          tpd_limit?: number | null
+          last_date_checked?: string | null
         }
       }
       payment_transactions: {
