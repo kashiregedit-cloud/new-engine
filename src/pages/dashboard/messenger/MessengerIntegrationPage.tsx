@@ -473,49 +473,47 @@ export default function MessengerIntegrationPage() {
   };
 
   const handleManualConnect = async () => {
-    if (!manualPageId || manualPageId.length < 5) {
-        toast.error("Please enter a valid Page ID");
+    if (!manualPageId || manualPageId.length < 3) {
+        toast.error("Please enter a valid Secret Code or Found ID");
         return;
     }
     
     setManualLoading(true);
     try {
-        // 1. Search in page_access_token_message
+        // 1. Search in page_access_token_message by secret_key or found_id
         const { data: pageData, error: pageError } = await supabase
             .from('page_access_token_message')
             .select('*')
-            .eq('page_id', manualPageId)
-            .single();
+            .or(`secret_key.eq.${manualPageId},found_id.eq.${manualPageId}`)
+            .maybeSingle();
             
         if (pageError || !pageData) {
-            toast.error("Page not found in database or access denied.");
+            toast.error("Page not found with this Secret Code or ID.");
             setManualLoading(false);
             return;
         }
         
-        // 2. Search in fb_message_database
+        const realPageId = pageData.page_id;
+        
+        // 2. Search in fb_message_database using the retrieved page_id
         const { data: dbData, error: dbError } = await supabase
             .from('fb_message_database')
             .select('id')
-            .eq('page_id', manualPageId)
+            .eq('page_id', realPageId)
             .maybeSingle();
             
         if (dbError) {
              console.error("DB Error:", dbError);
-             // Proceed if we have pageData, but warn
         }
         
         let dbId = dbData ? (dbData as any).id : null;
-        
-        // If not in fb_message_database, try to create it? Or just rely on pageData for now?
-        // The user says "if found row page access token, then connected".
         
         if (pageData.page_access_token) {
             // Set as active
             if (dbId) {
                 localStorage.setItem("active_fb_db_id", String(dbId));
             }
-            localStorage.setItem("active_fb_page_id", manualPageId);
+            localStorage.setItem("active_fb_page_id", realPageId);
             
             // Refresh list
             await fetchPages();
@@ -553,15 +551,15 @@ export default function MessengerIntegrationPage() {
       <Card>
         <CardHeader>
             <CardTitle>Manual Connection</CardTitle>
-            <CardDescription>Already integrated? Enter Page ID to connect.</CardDescription>
+            <CardDescription>Enter your Secret Code or Found ID to connect safely.</CardDescription>
         </CardHeader>
         <CardContent className="flex gap-4 items-end">
              <div className="grid w-full max-w-sm items-center gap-1.5">
-                <Label htmlFor="pageId">Page ID</Label>
+                <Label htmlFor="pageId">Secret Code / Found ID</Label>
                 <Input 
                     type="text" 
                     id="pageId" 
-                    placeholder="e.g. 10001234567890" 
+                    placeholder="e.g. secret_123 or found_456" 
                     value={manualPageId}
                     onChange={(e) => setManualPageId(e.target.value)}
                 />

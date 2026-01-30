@@ -594,6 +594,18 @@ async function transcribeAudio(audioUrl, pageConfig) {
             const bufferResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
             const base64Audio = Buffer.from(bufferResponse.data).toString('base64');
             
+            // Determine MIME type
+            let mimeType = bufferResponse.headers['content-type'] || 'audio/mp4';
+            // Facebook often sends "video/mp4" for audio clips, but Gemini prefers specific audio mimes or generic "audio/mp4" for audio context
+            if (mimeType === 'video/mp4') mimeType = 'audio/mp4';
+            // If header is missing or generic octet-stream, guess from URL
+            if (!mimeType || mimeType === 'application/octet-stream') {
+                if (audioUrl.includes('.mp3')) mimeType = 'audio/mp3';
+                else if (audioUrl.includes('.wav')) mimeType = 'audio/wav';
+                else mimeType = 'audio/mp4';
+            }
+            console.log(`[Audio] Detected MIME Type: ${mimeType}`);
+
             // Try multiple models if one fails (404/500)
             // USER INSTRUCTION: Prioritize the selected 'model' first.
             let modelsToTry = [model];
@@ -615,7 +627,7 @@ async function transcribeAudio(audioUrl, pageConfig) {
                                 { text: "Please transcribe this audio message exactly as spoken. Do not add any commentary." },
                                 {
                                     inline_data: {
-                                        mime_type: "audio/mp3", // Generic mime, Gemini is usually smart enough
+                                        mime_type: mimeType, 
                                         data: base64Audio
                                     }
                                 }
