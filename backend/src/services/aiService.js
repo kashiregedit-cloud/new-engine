@@ -7,26 +7,20 @@ const FormData = require('form-data');
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
     // --- MULTI-TENANCY SAFETY CHECK ---
-    // Ensure we are using the correct context for this specific page
     const pageId = pageConfig.page_id;
     const promptPreview = pagePrompts?.text_prompt ? pagePrompts.text_prompt.substring(0, 30) : "DEFAULT";
     console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
     // ----------------------------------
 
-    // 1. Prepare Key Pool (Smart Rotation Strategy)
-    let keyPool = [];
+    // 1. Prepare Configuration
     let defaultProvider = pageConfig.ai || 'gemini';
     // Ensure model name is trimmed to avoid whitespace issues
     let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
-    // Update: Google now lists 'Gemini 2.5 Flash' and 'Gemini 3 Pro' in docs.
-    // We will support these models natively if the user selects them.
-    // We only map 'experimental' or 'old preview' tags to stable versions where appropriate.
     const MODEL_ALIASES = {
         'gemini-2.0-flash-exp': 'gemini-2.0-flash', // Auto-upgrade old "exp" users to latest 2.0
-        'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now, or let it pass if stable
-        // We REMOVED the mapping of 2.5 -> 2.0 because 2.5 is now a real separate model family.
+        'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now
     };
 
     if (MODEL_ALIASES[defaultModel]) {
@@ -35,18 +29,18 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }
     // -------------------------------------------------
     
-    // --- IMAGE DETECTION & VISION SUPPORT ---
+    // --- IMAGE DETECTION ---
     let imageUrls = [];
     let cleanUserMessage = userMessage;
     // Regex to extract "[User sent images: url1, url2]" pattern from webhookController
     const imageMatch = userMessage.match(/\[User sent images: (.*?)\]/);
     if (imageMatch && imageMatch[1]) {
         imageUrls = imageMatch[1].split(',').map(url => url.trim());
-        cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); // Remove the text tag to avoid duplication
+        cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); 
         console.log(`[AI] Detected ${imageUrls.length} images. Enabling Vision Mode.`);
     }
 
-    // Updated Vision Models List with latest 2.5 and 3.0 support
+    // Updated Vision Models List
     const VISION_MODELS = [
         'gemini-3-pro', 'gemini-3-flash', 
         'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro',
@@ -56,71 +50,137 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     ];
     // ----------------------------------------
 
+    // --- PROMPT & MESSAGE CONSTRUCTION ---
+    // Moved UP before Key Logic to ensure 'messages' is available for all cases
+    
+    // Define base system prompt
+    let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
+    
+    // Construct the System Message (n8n style)
+    const n8nSystemPrompt = `
+You are a helpful AI assistant for a business page.
+Your name is ${pageConfig.bot_name || 'Assistant'}.
+You are talking to ${senderName}.
+
+CONTEXT:
+${basePrompt}
+
+INSTRUCTIONS:
+1. You MUST reply in BENGALI (Bangla) unless the user explicitly asks in English.
+2. If the user asks for price/order, encourage them politely.
+3. You MUST output your response in valid JSON format with these fields:
+   - "reply": The text reply to the user (in Bengali).
+   - "sentiment": "positive", "neutral", or "negative".
+   - "dm_message": (Optional) A private message if needed, otherwise null.
+   - "bad_words": (Optional) Any detected bad words, otherwise null.
+   - "order_details": (Optional) If the user provides order info (Name, Address, Phone), return an object: { "product_name": "...", "quantity": 1, "address": "...", "phone": "...", "price": "..." }, otherwise null.
+
+IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the raw JSON string.
+`;
+
+    const systemMessage = { role: 'system', content: n8nSystemPrompt };
+    
+    // Construct Messages Array
+    const messages = [
+        systemMessage,
+        ...history,
+        { role: 'user', content: cleanUserMessage }
+    ];
+    // -------------------------------------
+
     // Case A: Managed Mode (Fetch from DB using Smart Key Service)
     if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
-         // Get a SINGLE smart key first (optimization)
-         // But wait, the retry loop below expects a list. 
-         // Strategy: Fetch a small batch of valid keys (e.g., 3) to allow local retries without hitting DB every time.
-         // However, getSmartKey returns only one.
-         // Let's modify logic: We want to try multiple keys if one fails.
-         
-         // 1. Fetch one best candidate
-         const smartKey = await keyService.getSmartKey(defaultProvider, defaultModel);
-         if (smartKey) {
-             keyPool.push(smartKey);
-         }
+         // DYNAMIC RETRY LOOP (Max 5 attempts)
+         let attempts = 0;
+         const MAX_ATTEMPTS = 5;
+         let lastError = null;
 
-         // 2. Add a few more backups just in case the first one fails immediately (optional, but good for robustness)
-         // Actually, if the first one fails, the loop will exit and we return error? No, we want retry.
-         // Let's fetch a few more if possible.
-         // For now, let's just stick to the main one + fallback. 
-         // If we want true robustness, we should fetch a list. 
-         // Let's assume we fetch a small list using the existing getAllManagedKeys but filtered by model?
-         // No, getAllManagedKeys doesn't filter by model.
-         
-         // Let's rely on the first key. If it fails, we can try to fetch another one dynamically? 
-         // Complex. Let's stick to the previous approach of fetching a pool, but filtered by model.
-         
-         // RE-FETCHING ALL KEYS IS EXPENSIVE FOR 1000 KEYS.
-         // But we only fetch "active" keys. 
-         // Let's assume for now we use the `getSmartKey` logic which is cleaner.
-         // If that fails, we have the fallback environment key.
-         
-         // To support retry, we can loop X times calling getSmartKey? 
-         // No, that's redundant DB calls.
-         
-         // Solution: We will trust `getSmartKey` to give us a good key. 
-         // If that fails (e.g. 500 error), we probably want to try one more time with a different key.
-         // So let's push 2-3 unique keys into the pool if possible.
-         
-         for (let i = 0; i < 3; i++) {
-             const k = await keyService.getSmartKey(defaultProvider, defaultModel);
-             if (k && !keyPool.some(existing => existing.key === k.key)) {
-                 keyPool.push(k);
+         while (attempts < MAX_ATTEMPTS) {
+             attempts++;
+             
+             // 1. Fetch ONE best candidate (that is NOT dead)
+             const keyObj = await keyService.getSmartKey(defaultProvider, defaultModel);
+             
+             if (!keyObj) {
+                 console.error(`[AI] No healthy keys found for ${defaultProvider}/${defaultModel}. Stopping.`);
+                 break; 
+             }
+
+             const currentKey = keyObj.key;
+             let currentProvider = keyObj.provider || defaultProvider;
+             let currentModel = keyObj.model || defaultModel;
+
+             // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
+             if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
+             else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
+             else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
+             else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
+             // ------------------------------------------------
+
+             let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+             if (currentProvider.includes('openrouter')) baseURL = 'https://openrouter.ai/api/v1';
+             else if (currentProvider.includes('gemini') || currentProvider.includes('google')) baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+             else if (currentProvider.includes('openai')) baseURL = 'https://api.openai.com/v1';
+             else if (currentProvider.includes('groq')) baseURL = 'https://api.groq.com/openai/v1';
+             else if (currentProvider.includes('xai') || currentProvider.includes('grok')) baseURL = 'https://api.x.ai/v1';
+             else if (currentProvider.includes('deepseek')) baseURL = 'https://api.deepseek.com';
+
+             try {
+                 const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
+                 console.log(`[AI] Attempt ${attempts}/${MAX_ATTEMPTS}: Calling ${currentProvider}/${currentModel}...`);
+                 
+                 const completion = await openai.chat.completions.create({
+                     model: currentModel,
+                     messages: messages,
+                     response_format: { type: "json_object" }
+                 });
+
+                 if (completion.choices && completion.choices.length > 0) {
+                     const rawContent = completion.choices[0].message.content;
+                     const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                     keyService.recordKeyUsage(currentKey, tokenUsage);
+                     
+                     try {
+                         const parsed = JSON.parse(rawContent);
+                         return parsed; 
+                     } catch (e) {
+                         console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
+                         return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                     }
+                 }
+             } catch (error) {
+                 console.warn(`[AI] Error with key ...${currentKey.slice(-4)}: ${error.message}`);
+                 lastError = error;
+                 
+                 // Mark key as dead so getSmartKey skips it next time
+                 keyService.markKeyAsDead(currentKey);
+                 
+                 if (error.response && error.response.headers) {
+                    keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
+                 }
+                 
+                 // If 400 Error (Bad Request), we just mark as dead and continue to next key.
+                 // NO FALLBACK to other models as per user instruction.
              }
          }
          
-         // Always add Fallback Key from Env to the end of the pool if available
-         // REMOVED FALLBACK LOGIC AS PER USER REQUEST ("fallback er dorkar nai")
-         /*
-         const fallbackKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-         if (fallbackKey) {
-             const isDuplicate = keyPool.some(k => k.key === fallbackKey);
-             if (!isDuplicate) {
-                console.log("Adding Fallback API Key from Environment Variables to Key Pool.");
-                keyPool.push({ key: fallbackKey, provider: 'google', model: 'gemini-1.5-flash' });
-             }
-         }
-         */
-
-         if (keyPool.length === 0) {
-             console.error(`CRITICAL: No Managed Keys found for ${defaultProvider}/${defaultModel}. System will fail.`);
-         }
-    } else {
-        // Case B: User Provided Keys (Comma separated)
+         // If loop finishes without return -> All attempts failed
+         console.error("All AI attempts failed in Managed Mode.");
+         return { 
+            reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
+            sentiment: "neutral",
+            dm_message: null,
+            bad_words: null
+        };
+    } 
+    
+    // Case B: User Provided Keys (Legacy/Single Page Mode)
+    // NOTE: This part is for users who bring their own keys via UI
+    let keyPool = [];
+    if (pageConfig.api_key && pageConfig.api_key !== 'MANAGED_SECRET_KEY') {
         const keys = pageConfig.api_key.split(',').map(k => k.trim()).filter(k => k);
         if (keys.length > 0) {
-            // Shuffle user keys too
+            // Shuffle user keys
             for (let i = keys.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [keys[i], keys[j]] = [keys[j], keys[i]];
@@ -129,182 +189,59 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         }
     }
 
-    // 2. Construct System Prompt (Streamlined & Dynamic)
-    const basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
-    
-    // Streamlined System Prompt to save tokens and prevent hallucinations
-    const n8nSystemPrompt = `
-    ROLE: AI Customer Support Agent.
-    CUSTOMER NAME: ${senderName}
-    LANGUAGE: Reply in the same language as the user (mostly Bengali/English mixed).
-
-    INSTRUCTIONS:
-    1. **Source of Truth**: Use the "BUSINESS CONTEXT" below as your ONLY source of information about the business, products, and policies.
-    2. **Identity**: Adopt the persona defined in the BUSINESS CONTEXT. Do NOT invent a business name.
-    3. **Context**: 
-       - "Old Message": Previous conversation history.
-       - "Current Message": User's latest input (including reply context).
-       - **CRITICAL**: You MUST look at the ENTIRE conversation history (last 50 messages) to find missing order details (Phone, Address, Product). Users often provide these in separate messages.
-    4. **Behavior**: Be helpful, concise, and polite. If the answer is not in the context, ask for clarification.
-
-    OUTPUT FORMAT (JSON ONLY):
-    You must output a VALID JSON object. Do not wrap in markdown code blocks.
-    {
-        "reply": "Your reply text here",
-        "images": ["url1", "url2"], 
-        "sentiment": "positive|neutral|negative",
-        "dm_message": "Any direct message logic if needed, else null",
-        "bad_words": "Any bad words detected, else null",
-        "order_details": {
-             "product_name": "Name of product if user is ordering, else null",
-             "quantity": "Quantity if specified, else null", 
-             "price": "Price if mentioned, else null",
-             "address": "Address if mentioned, else null (Check history!)",
-             "phone": "Phone number if mentioned, else null (Check history!)"
-        }
-    }
-    `;
-
-    const systemMessage = {
-        role: 'system',
-        content: `${n8nSystemPrompt}\n\n=== BUSINESS CONTEXT ===\n${basePrompt}`
-    };
-
-    const messages = [
-        systemMessage,
-        ...history,
-        { role: 'user', content: userMessage }
-    ]; 
-
+    // Loop through User Key Pool (Legacy Loop)
     let lastError = null;
-
-    // 3. Iterate through Key Pool
     for (const keyObj of keyPool) {
         const currentKey = keyObj.key;
-        let currentProvider = keyObj.provider || defaultProvider;
+        let currentProvider = keyObj.provider;
+        let currentModel = keyObj.model;
         
-        // Strict Model Handling:
-        // If the key object comes with a specific model (from DB), USE IT.
-        // Otherwise, fallback to the requested defaultModel.
-        let currentModel = keyObj.model || defaultModel;
-        
-        // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
-        // This overrides DB provider if it's clearly mismatched (e.g. OpenRouter key labeled as Gemini)
-        if (currentKey.startsWith('sk-or-v1')) {
-            currentProvider = 'openrouter';
-        } else if (currentKey.startsWith('AIzaSy')) {
-            currentProvider = 'google';
-        } else if (currentKey.startsWith('gsk_')) {
-            currentProvider = 'groq';
-        } else if (currentKey.startsWith('xai-')) {
-            currentProvider = 'xai';
-        }
-        // ------------------------------------------------
+        // --- AUTO-DETECT PROVIDER ---
+        if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
+        else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
+        else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
+        else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
+        // ----------------------------
 
-        // STRICT MODE: Use EXACTLY the model defined in the DB/Key configuration.
-        // No normalization, no forcing. User's input is the source of truth.
-        // "je api token and chatmodel takbe setai use korte hobe"
-
-        let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/'; // Default to Gemini
-        
-        if (currentProvider.includes('openrouter')) {
-            baseURL = 'https://openrouter.ai/api/v1';
-        } else if (currentProvider.includes('gemini') || currentProvider.includes('google')) {
-            // Official Google Gemini OpenAI Compatibility Endpoint
-            baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-        } else if (currentProvider.includes('openai')) {
-            baseURL = 'https://api.openai.com/v1';
-        } else if (currentProvider.includes('groq')) {
-            baseURL = 'https://api.groq.com/openai/v1';
-        } else if (currentProvider.includes('xai') || currentProvider.includes('grok')) {
-            baseURL = 'https://api.x.ai/v1';
-        } else if (currentProvider.includes('deepseek')) {
-            // DeepSeek Official Base URL
-            baseURL = 'https://api.deepseek.com'; 
-        }
+        let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        if (currentProvider.includes('openrouter')) baseURL = 'https://openrouter.ai/api/v1';
+        else if (currentProvider.includes('gemini') || currentProvider.includes('google')) baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+        else if (currentProvider.includes('openai')) baseURL = 'https://api.openai.com/v1';
+        else if (currentProvider.includes('groq')) baseURL = 'https://api.groq.com/openai/v1';
+        else if (currentProvider.includes('xai')) baseURL = 'https://api.x.ai/v1';
 
         try {
-            const openai = new OpenAI({
-                apiKey: currentKey,
-                baseURL: baseURL
-            });
+            const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
+            console.log(`[AI] Case B: Calling ${currentProvider}/${currentModel}...`);
 
-            console.log(`[AI] Calling ${currentProvider}/${currentModel}...`);
             const completion = await openai.chat.completions.create({
                 model: currentModel,
-                messages: messages,
+                messages: messages, // Uses the same messages object
                 response_format: { type: "json_object" }
             });
 
             if (completion.choices && completion.choices.length > 0) {
                 const rawContent = completion.choices[0].message.content;
+                const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                keyService.recordKeyUsage(currentKey, tokenUsage);
+                
                 try {
-                    const parsed = JSON.parse(rawContent);
-                    // Record Usage
-                    const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
-                    keyService.recordKeyUsage(currentKey, tokenUsage);
-                    return parsed; // Return Object
+                     return JSON.parse(rawContent);
                 } catch (e) {
-                    console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
-                    // Even if JSON failed, the API call succeeded, so we record usage
-                    const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
-                    keyService.recordKeyUsage(currentKey, tokenUsage);
-                    return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                     return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
                 }
             }
         } catch (error) {
-            // --- FALLBACK LOGIC FOR 400 ERRORS (Model Mismatch) ---
-            // If the model name was invalid (e.g. gemini-2.5 not found), retry with a stable model.
-            if (error.status === 400 && currentModel !== 'gemini-1.5-flash' && (currentProvider.includes('google') || currentProvider.includes('gemini'))) {
-                console.warn(`[AI] 400 Error with ${currentModel}. Attempting fallback to 'gemini-1.5-flash' with same key...`);
-                try {
-                    const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
-                    const fallbackCompletion = await openai.chat.completions.create({
-                        model: 'gemini-1.5-flash',
-                        messages: messages,
-                        response_format: { type: "json_object" }
-                    });
-
-                    if (fallbackCompletion.choices && fallbackCompletion.choices.length > 0) {
-                        const rawContent = fallbackCompletion.choices[0].message.content;
-                        try {
-                            const parsed = JSON.parse(rawContent);
-                            keyService.recordKeyUsage(currentKey, fallbackCompletion.usage ? fallbackCompletion.usage.total_tokens : 0);
-                            return parsed;
-                        } catch (e) {
-                            return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
-                        }
-                    }
-                } catch (fallbackError) {
-                    console.warn(`[AI] Fallback failed too: ${fallbackError.message}`);
-                    // Proceed to mark key as dead
-                }
-            }
-            // -----------------------------------------------------
-
-            console.warn(`AI Generation failed with key ...${currentKey.slice(-4)}. Provider: ${currentProvider}. Error: ${error.message}`);
-            
-            // Mark key as dead so we don't try it again immediately
-            keyService.markKeyAsDead(currentKey);
-
-            if (error.response) {
-                 console.warn(`Error Response:`, error.response.data);
-                 // If error response has headers, we might also want to check them
-                 if (error.response.headers) {
-                    keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
-                 }
-            }
+            console.warn(`[AI] Case B Error: ${error.message}`);
             lastError = error;
-            // Continue to next key
+            // Continue to next key in pool
         }
     }
 
-    // 4. All Keys Failed
-    console.error("All AI keys failed. Last error:", lastError ? lastError.message : 'Unknown');
-    
-    // Return safe fallback
+    // 4. All Keys Failed (Case B)
+    console.error("All AI keys failed (Case B).");
     return { 
-        reply: "Sorry, I am currently experiencing high traffic. Please try again later or leave your number.",
+        reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
         sentiment: "neutral",
         dm_message: null,
         bad_words: null
