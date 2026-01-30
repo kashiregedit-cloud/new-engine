@@ -1,4 +1,3 @@
-const { OpenAI } = require('openai'); // Using OpenAI SDK for compatibility with OpenRouter/Gemini
 const keyService = require('./keyService');
 const ragService = require('./ragService');
 const axios = require('axios');
@@ -277,35 +276,51 @@ RAW INPUT:
 ${rawText}
     `;
 
-    // Use a fast, smart model (Gemini 1.5 Flash or 2.0 Flash Lite)
-    const model = 'gemini-1.5-flash'; 
-    const keyObj = await keyService.getSmartKey('google', model); // Use system pool for this admin task
+    // Use a fast, smart model (Gemini 2.5 Flash) as requested
+    const model = 'gemini-2.5-flash'; 
+    
+    process.stdout.write(`\n[Optimization] Starting with model: ${model}\n`);
+
+    // Force cache update
+    try {
+        await keyService.updateKeyCache(false); 
+    } catch (e) {
+        process.stdout.write(`[Optimization] Cache update error: ${e.message}\n`);
+    }
+
+    const keyObj = await keyService.getSmartKey('google', model); 
     const apiKey = keyObj?.key || process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
+        process.stdout.write(`[Optimization] NO API KEY FOUND\n`);
         throw new Error("No System API Key available for optimization");
     }
 
-    const openai = new OpenAI({
-        apiKey: apiKey,
-        baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"
-    });
+    // Direct Gemini API Call via Axios (Zero Dependency)
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    
+    process.stdout.write(`[Optimization] URL: ${url.replace(apiKey, 'HIDDEN')}\n`);
+    process.stdout.write(`[Optimization] Key Prefix: ${apiKey.substring(0, 5)}...\n`);
 
     try {
-        const completion = await openai.chat.completions.create({
-            model: model,
-            messages: [
-                { role: "system", content: "You are a helpful assistant." },
-                { role: "user", content: META_PROMPT }
-            ],
-            temperature: 0.3, // Low temp for precision
+        const response = await axios.post(url, {
+            contents: [{
+                parts: [{ text: META_PROMPT }]
+            }]
         });
 
-        if (completion.choices && completion.choices.length > 0) {
-            return completion.choices[0].message.content.trim();
+        if (response.data && response.data.candidates && response.data.candidates.length > 0) {
+            const candidate = response.data.candidates[0];
+            if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+                return candidate.content.parts[0].text.trim();
+            }
         }
     } catch (error) {
-        console.error("Prompt Optimization Failed:", error);
+        process.stdout.write(`[Optimization] Error: ${error.message}\n`);
+        if (error.response) {
+            process.stdout.write(`[Optimization] Response Data: ${JSON.stringify(error.response.data)}\n`);
+        }
+        console.error("Prompt Optimization Failed:", JSON.stringify(error.response?.data || error.message, null, 2));
         throw error;
     }
     

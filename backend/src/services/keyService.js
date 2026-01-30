@@ -385,5 +385,6 @@ module.exports = {
     getSmartKey, 
     markKeyAsDead,
     recordKeyUsage,
-    updateKeyStatusFromHeaders
+    updateKeyStatusFromHeaders,
+    updateKeyCache // Export this!
 };
