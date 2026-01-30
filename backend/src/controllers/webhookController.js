@@ -95,82 +95,24 @@ async function queueMessage(event) {
         logToFile(logMsg);
     }
 
-    // 2. Handle Attachments (Images)
+    // 2. Handle Attachments (Images) - DEFERRED PROCESSING
     if (event.message?.attachments) {
         const imageUrls = event.message.attachments
             .filter(att => att.type === 'image')
             .map(att => att.payload.url);
         
         if (imageUrls.length > 0) {
-            // Process Images with Vision AI if enabled
-            try {
-                const pageConfig = await dbService.getPageConfig(pageId);
-                const pagePrompts = await dbService.getPagePrompts(pageId); // Fetch from fb_message_database
-                
-                console.log(`[Webhook] Image received. Page: ${pageId}. Image Analysis Enabled (DB): ${pagePrompts?.image_detection}`);
-
-                // Check if image analysis is enabled in page prompts (fb_message_database)
-                if (pagePrompts && pagePrompts.image_detection) {
-                    const descriptions = [];
-                    console.log(`[Webhook] Starting analysis for ${imageUrls.length} images...`);
-                    
-                    for (const url of imageUrls) {
-                        // Loop through images and analyze using chat model
-                        console.log(`[Webhook] Analyzing image: ${url}`);
-                        const desc = await aiService.processImageWithVision(url, pageConfig);
-                        console.log(`[Webhook] Analysis result: ${desc}`);
-                        descriptions.push(desc);
-                    }
-                    
-                    // Append analysis result to message text
-                    // The prompt ensures it starts with "Based on the image this is..."
-                    if (descriptions.length > 0) {
-                        const analysisText = descriptions.join('\n');
-                        // Store the analysis result in messageText so it flows into the AI context
-                        // The user wants this to be the "total summary content"
-                        if (messageText) {
-                            messageText += `\n${analysisText}`;
-                        } else {
-                            messageText = analysisText;
-                        }
-                        console.log(`[Webhook] Final Message Text with Analysis: ${messageText}`);
-                    }
-                } else {
-                     // Fallback: Just append URLs if analysis is disabled or config missing
-                     console.log('[Webhook] Image analysis disabled or config missing. Appending URLs.');
-                     messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
-                }
-            } catch (err) {
-                console.error("Image Processing Error:", err);
-                messageText += `\n[User sent images: ${imageUrls.join(', ')}]`;
-            }
+            console.log(`[Webhook] Image URLs Queued: ${imageUrls.length}`);
+            // We just store the URLs now, analysis happens in processBufferedMessages
         }
         
-        // 3. Handle Audio (Voice Messages)
+        // 3. Handle Audio (Voice Messages) - DEFERRED PROCESSING
         const audioUrls = event.message.attachments
             .filter(att => att.type === 'audio')
             .map(att => att.payload.url);
             
         if (audioUrls.length > 0) {
-            console.log(`[Webhook] Audio received. Count: ${audioUrls.length}`);
-            try {
-                // Fetch Page Config for API Keys
-                const pageConfig = await dbService.getPageConfig(pageId);
-                
-                for (const url of audioUrls) {
-                     // Transcribe
-                     const transcription = await aiService.transcribeAudio(url, pageConfig);
-                     if (messageText) {
-                         messageText += `\n${transcription}`;
-                     } else {
-                         messageText = transcription;
-                     }
-                }
-                console.log(`[Webhook] Final Message Text with Audio: ${messageText}`);
-            } catch (err) {
-                console.error("Audio Processing Error:", err);
-                messageText += `\n[User sent voice message (Processing Failed)]`;
-            }
+            console.log(`[Webhook] Audio URLs Queued: ${audioUrls.length}`);
         }
 
         // Handle other attachments (file, video) placeholders
@@ -180,7 +122,7 @@ async function queueMessage(event) {
         }
     }
 
-    if (!messageText) return; // Ignore if still empty
+    if (!messageText && !event.message?.attachments) return; // Ignore if empty and no attachments
 
     // Check Duplicate immediately to avoid processing same message twice
     const isDuplicate = await dbService.checkDuplicate(messageId);
@@ -191,16 +133,14 @@ async function queueMessage(event) {
 
     const replyToId = event.message?.reply_to?.mid || null;
 
-    // --- SAVE USER MESSAGE TO fb_chats (Immediate) ---
-    // This ensures every incoming message (including Swipe/Postback) is logged.
+    // --- SAVE USER MESSAGE TO fb_chats (Immediate - Raw) ---
     try {
         await dbService.saveFbChat({
             page_id: pageId,
             sender_id: senderId,
             recipient_id: pageId,
             message_id: messageId,
-            text: messageText,
-            // reply_to: replyToId, // Removed because fb_chats table doesn't have this column
+            text: messageText || '[Media Message]', // Placeholder if text is empty
             timestamp: Date.now(),
             status: 'received',
             reply_by: 'user'
@@ -218,24 +158,33 @@ async function queueMessage(event) {
     }
 
     const sessionData = debounceMap.get(sessionId);
-    // Push Object instead of String to preserve metadata
+    
+    // Extract URLs for this specific message
+    const thisMsgImages = event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || [];
+    const thisMsgAudios = event.message?.attachments?.filter(att => att.type === 'audio').map(att => att.payload.url) || [];
+
+    // Push Object
     sessionData.messages.push({
         text: messageText,
         reply_to: replyToId,
-        images: event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || [],
+        images: thisMsgImages,
+        audios: thisMsgAudios,
         isPostback: !!event.postback
     });
 
-    console.log(`Queued message for ${sessionId}: ${messageText}`);
-    if (!sessionData.timer) {
-        sessionData.timer = setTimeout(() => {
-            // Clone messages and clear buffer immediately to allow new messages
-            const messagesToProcess = [...sessionData.messages];
-            debounceMap.delete(sessionId);
-            
-            processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
-        }, 3000); // 3 seconds
+    console.log(`Queued message for ${sessionId}. Buffer size: ${sessionData.messages.length}`);
+    
+    if (sessionData.timer) {
+        clearTimeout(sessionData.timer); // Reset timer on new message
     }
+
+    sessionData.timer = setTimeout(() => {
+        // Clone messages and clear buffer immediately
+        const messagesToProcess = [...sessionData.messages];
+        debounceMap.delete(sessionId);
+        
+        processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
+    }, 8000); // 8 seconds Debounce (User Requested)
 }
 
 // Core Logic Function (Debounced)
@@ -244,25 +193,60 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     let combinedText = "";
     let replyToId = null;
     let allImages = [];
+    let allAudios = [];
     let hasPostback = false;
 
     for (const msg of messages) {
         if (typeof msg === 'string') {
-            // Handle legacy string format (just in case)
             combinedText += msg + "\n";
         } else {
-            combinedText += msg.text + "\n";
-            if (msg.reply_to) replyToId = msg.reply_to; // Capture the last reply_to ID
+            if (msg.text) combinedText += msg.text + "\n";
+            if (msg.reply_to) replyToId = msg.reply_to; 
             if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
+            if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
             if (msg.isPostback) hasPostback = true;
         }
     }
     combinedText = combinedText.trim();
-    console.log(`Processing buffered messages for ${sessionId}: ${combinedText}`);
+    console.log(`Processing buffered messages for ${sessionId}. Text: ${combinedText.substring(0,50)}... Images: ${allImages.length}, Audios: ${allAudios.length}`);
 
     try {
         // 1. Fetch Config
         const pageConfig = await dbService.getPageConfig(pageId);
+        if (!pageConfig) return;
+
+        // --- BATCH PROCESSING: IMAGES & AUDIO ---
+        // Now we process all media together BEFORE generating the reply.
+        
+        // A. Process Images (Vision)
+        if (allImages.length > 0) {
+            const pagePrompts = await dbService.getPagePrompts(pageId);
+            if (pagePrompts && pagePrompts.image_detection) {
+                console.log(`[Batch] Analyzing ${allImages.length} images...`);
+                // Process in parallel
+                const imagePromises = allImages.map(url => aiService.processImageWithVision(url, pageConfig));
+                const imageResults = await Promise.all(imagePromises);
+                
+                const combinedImageAnalysis = imageResults.join('\n');
+                combinedText += `\n\n[System: User sent ${allImages.length} images. Analysis follows:]\n${combinedImageAnalysis}`;
+            } else {
+                combinedText += `\n[User sent ${allImages.length} images: ${allImages.join(', ')}]`;
+            }
+        }
+
+        // B. Process Audio (Voice)
+        if (allAudios.length > 0) {
+            console.log(`[Batch] Transcribing ${allAudios.length} voice messages...`);
+            // Process in parallel
+            const audioPromises = allAudios.map(url => aiService.transcribeAudio(url, pageConfig));
+            const audioResults = await Promise.all(audioPromises);
+            
+            const combinedAudioTranscript = audioResults.join('\n');
+            combinedText += `\n\n[System: User sent ${allAudios.length} voice messages. Transcripts follow:]\n${combinedAudioTranscript}`;
+        }
+        
+        console.log(`[Batch] Final Context for AI:\n${combinedText}`);
+        // ----------------------------------------
         
         console.log("Config fetched:", pageConfig ? "Found" : "Null");
         
