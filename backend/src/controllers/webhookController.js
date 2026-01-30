@@ -484,15 +484,21 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         while ((strictMatch = strictImageRegex.exec(replyText)) !== null) {
             const fullMatch = strictMatch[0];
             const title = strictMatch[1].trim();
-            const url = strictMatch[2].trim();
+            let url = strictMatch[2].trim();
             
+            // Fix Google Drive Links (Convert View to Direct)
+            const driveIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (driveIdMatch && driveIdMatch[1]) {
+                url = `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
+            }
+
             if (!extractedImages.some(img => img.url === url)) {
                 extractedImages.push({ url: url, title: title });
             }
             replyText = replyText.replace(fullMatch, '').trim();
         }
 
-        // 2. Google Drive Viewer Links
+        // 2. Google Drive Viewer Links (Standalone)
         const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*)/gi;
         let driveMatch;
         while ((driveMatch = driveRegex.exec(replyText)) !== null) {
