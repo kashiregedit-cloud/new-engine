@@ -513,7 +513,14 @@ async function transcribeAudio(audioUrl, pageConfig) {
             const base64Audio = Buffer.from(bufferResponse.data).toString('base64');
             
             // Try multiple models if one fails (404/500)
-            const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
+            // USER INSTRUCTION: Prioritize the selected 'model' first.
+            let modelsToTry = [model];
+            
+            // Add fallbacks only if they are different from the primary model
+            const fallbacks = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
+            for (const fb of fallbacks) {
+                if (fb !== model) modelsToTry.push(fb);
+            }
             
             for (const m of modelsToTry) {
                 try {
