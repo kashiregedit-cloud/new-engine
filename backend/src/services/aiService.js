@@ -18,6 +18,11 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     let defaultProvider = pageConfig.ai || 'gemini';
     // Ensure model name is trimmed to avoid whitespace issues
     let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
+
+    // --- MODEL NAME NORMALIZATION (User Requested 2.5 Support) ---
+    // Gemini 2.5 is now valid (e.g. gemini-2.5-flash-lite).
+    // We only correct obvious old typos if needed, but we TRUST the user's input for 2.5.
+    // -------------------------------------------------
     
     // --- IMAGE DETECTION & VISION SUPPORT ---
     let imageUrls = [];
@@ -30,7 +35,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         console.log(`[AI] Detected ${imageUrls.length} images. Enabling Vision Mode.`);
     }
 
-    const VISION_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet'];
+    const VISION_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet'];
     // ----------------------------------------
 
     // Case A: Managed Mode (Fetch from DB using Smart Key Service)
