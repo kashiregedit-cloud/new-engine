@@ -88,135 +88,113 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
     ];
     // -------------------------------------
 
-    // Case A: Managed Mode (Fetch from DB using Smart Key Service)
-    if (pageConfig.api_key === 'MANAGED_SECRET_KEY' || !pageConfig.api_key) {
-         // DYNAMIC RETRY LOOP (Max 5 attempts)
-         let attempts = 0;
-         const MAX_ATTEMPTS = 5;
-         let lastError = null;
+    // --- UNIFIED AI REQUEST LOGIC ---
 
-         while (attempts < MAX_ATTEMPTS) {
-             attempts++;
-             
-             // 1. Fetch ONE best candidate (that is NOT dead)
-             const keyObj = await keyService.getSmartKey(defaultProvider, defaultModel);
-             
-             if (!keyObj) {
-                 console.error(`[AI] No healthy keys found for ${defaultProvider}/${defaultModel}. Stopping.`);
-                 break; 
-             }
-
-             const currentKey = keyObj.key;
-             let currentProvider = keyObj.provider || defaultProvider;
-             let currentModel = keyObj.model || defaultModel;
-
-             // --- AUTO-DETECT PROVIDER BASED ON KEY PREFIX ---
-             if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
-             else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
-             else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
-             else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
-             // ------------------------------------------------
-
-             let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-             if (currentProvider.includes('openrouter')) baseURL = 'https://openrouter.ai/api/v1';
-             else if (currentProvider.includes('gemini') || currentProvider.includes('google')) baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-             else if (currentProvider.includes('openai')) baseURL = 'https://api.openai.com/v1';
-             else if (currentProvider.includes('groq')) baseURL = 'https://api.groq.com/openai/v1';
-             else if (currentProvider.includes('xai') || currentProvider.includes('grok')) baseURL = 'https://api.x.ai/v1';
-             else if (currentProvider.includes('deepseek')) baseURL = 'https://api.deepseek.com';
-
-             try {
-                 const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
-                 console.log(`[AI] Attempt ${attempts}/${MAX_ATTEMPTS}: Calling ${currentProvider}/${currentModel}...`);
-                 
-                 const completion = await openai.chat.completions.create({
-                     model: currentModel,
-                     messages: messages,
-                     response_format: { type: "json_object" }
-                 });
-
-                 if (completion.choices && completion.choices.length > 0) {
-                     const rawContent = completion.choices[0].message.content;
-                     const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
-                     keyService.recordKeyUsage(currentKey, tokenUsage);
-                     
-                     try {
-                         const parsed = JSON.parse(rawContent);
-                         return parsed; 
-                     } catch (e) {
-                         console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
-                         return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
-                     }
-                 }
-             } catch (error) {
-                 console.warn(`[AI] Error with key ...${currentKey.slice(-4)}: ${error.message}`);
-                 lastError = error;
-                 
-                 // Mark key as dead so getSmartKey skips it next time
-                 keyService.markKeyAsDead(currentKey);
-                 
-                 if (error.response && error.response.headers) {
-                    keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
-                 }
-                 
-                 // If 400 Error (Bad Request), we just mark as dead and continue to next key.
-                 // NO FALLBACK to other models as per user instruction.
-             }
-         }
-         
-         // If loop finishes without return -> All attempts failed
-         console.error("All AI attempts failed in Managed Mode.");
-         return { 
-            reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
-            sentiment: "neutral",
-            dm_message: null,
-            bad_words: null
-        };
-    } 
-    
-    // Case B: User Provided Keys (Legacy/Single Page Mode)
-    // NOTE: This part is for users who bring their own keys via UI
-    let keyPool = [];
+    // PHASE 1: Try User-Provided Keys (if available)
     if (pageConfig.api_key && pageConfig.api_key !== 'MANAGED_SECRET_KEY') {
-        const keys = pageConfig.api_key.split(',').map(k => k.trim()).filter(k => k);
-        if (keys.length > 0) {
-            // Shuffle user keys
-            for (let i = keys.length - 1; i > 0; i--) {
+        const userKeys = pageConfig.api_key.split(',').map(k => k.trim()).filter(k => k);
+        if (userKeys.length > 0) {
+            // Shuffle user keys for load balancing
+            for (let i = userKeys.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [keys[i], keys[j]] = [keys[j], keys[i]];
+                [userKeys[i], userKeys[j]] = [userKeys[j], userKeys[i]];
             }
-            keyPool = keys.map(k => ({ key: k, provider: defaultProvider, model: defaultModel }));
+
+            for (const currentKey of userKeys) {
+                // Auto-Detect Provider
+                let currentProvider = defaultProvider;
+                if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
+                else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
+                else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
+                else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
+
+                // Configure Base URL
+                let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+                if (currentProvider.includes('openrouter')) baseURL = 'https://openrouter.ai/api/v1';
+                else if (currentProvider.includes('gemini') || currentProvider.includes('google')) baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+                else if (currentProvider.includes('openai')) baseURL = 'https://api.openai.com/v1';
+                else if (currentProvider.includes('groq')) baseURL = 'https://api.groq.com/openai/v1';
+                else if (currentProvider.includes('xai')) baseURL = 'https://api.x.ai/v1';
+
+                try {
+                    const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
+                    console.log(`[AI] Phase 1: Calling User Key (${currentProvider}/${defaultModel})...`);
+
+                    const completion = await openai.chat.completions.create({
+                        model: defaultModel,
+                        messages: messages,
+                        response_format: { type: "json_object" }
+                    });
+
+                    if (completion.choices && completion.choices.length > 0) {
+                        const rawContent = completion.choices[0].message.content;
+                        // Attempt to record usage (safe to fail if key not in DB)
+                        try {
+                            const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                            keyService.recordKeyUsage(currentKey, tokenUsage);
+                        } catch (err) { /* ignore */ }
+                        
+                        try {
+                            return JSON.parse(rawContent);
+                        } catch (e) {
+                            return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`[AI] Phase 1 Error: ${error.message}`);
+                    // Continue to next user key
+                }
+            }
+            console.warn("[AI] All user-provided keys failed. Falling back to Managed Pool...");
         }
     }
 
-    // Loop through User Key Pool (Legacy Loop)
+    // PHASE 2: Managed Mode (Dynamic Retry Loop from DB)
+    // We enter here if:
+    // a) User didn't provide keys (Managed Mode)
+    // b) User keys failed (Fallback)
+    
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
     let lastError = null;
-    for (const keyObj of keyPool) {
-        const currentKey = keyObj.key;
-        let currentProvider = keyObj.provider;
-        let currentModel = keyObj.model;
+
+    while (attempts < MAX_ATTEMPTS) {
+        attempts++;
         
-        // --- AUTO-DETECT PROVIDER ---
+        // Fetch ONE best candidate from DB
+        // NOTE: keyService is now relaxed to return ANY provider key if model-specific key is missing.
+        const keyObj = await keyService.getSmartKey(defaultProvider, defaultModel);
+        
+        if (!keyObj) {
+            console.error(`[AI] Phase 2: No healthy keys found for ${defaultProvider}/${defaultModel}. Stopping.`);
+            break; 
+        }
+
+        const currentKey = keyObj.key;
+        let currentProvider = keyObj.provider || defaultProvider;
+        let currentModel = keyObj.model || defaultModel;
+
+        // Auto-Detect Provider
         if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
         else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
         else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
         else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
-        // ----------------------------
 
         let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
         if (currentProvider.includes('openrouter')) baseURL = 'https://openrouter.ai/api/v1';
         else if (currentProvider.includes('gemini') || currentProvider.includes('google')) baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
         else if (currentProvider.includes('openai')) baseURL = 'https://api.openai.com/v1';
         else if (currentProvider.includes('groq')) baseURL = 'https://api.groq.com/openai/v1';
-        else if (currentProvider.includes('xai')) baseURL = 'https://api.x.ai/v1';
+        else if (currentProvider.includes('xai') || currentProvider.includes('grok')) baseURL = 'https://api.x.ai/v1';
+        else if (currentProvider.includes('deepseek')) baseURL = 'https://api.deepseek.com';
 
         try {
             const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
-            console.log(`[AI] Case B: Calling ${currentProvider}/${currentModel}...`);
-
+            console.log(`[AI] Phase 2 (Attempt ${attempts}): Calling ${currentProvider}/${currentModel}...`);
+            
             const completion = await openai.chat.completions.create({
                 model: currentModel,
-                messages: messages, // Uses the same messages object
+                messages: messages,
                 response_format: { type: "json_object" }
             });
 
@@ -226,26 +204,34 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
                 keyService.recordKeyUsage(currentKey, tokenUsage);
                 
                 try {
-                     return JSON.parse(rawContent);
+                    return JSON.parse(rawContent);
                 } catch (e) {
-                     return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                    console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
+                    return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
                 }
             }
         } catch (error) {
-            console.warn(`[AI] Case B Error: ${error.message}`);
+            console.warn(`[AI] Phase 2 Error with ...${currentKey.slice(-4)}: ${error.message}`);
             lastError = error;
-            // Continue to next key in pool
+            
+            // Mark key as dead
+            keyService.markKeyAsDead(currentKey);
+            
+            if (error.response && error.response.headers) {
+               keyService.updateKeyStatusFromHeaders(currentKey, error.response.headers);
+            }
         }
     }
-
-    // 4. All Keys Failed (Case B)
-    console.error("All AI keys failed (Case B).");
+    
+    // Final Failure
+    console.error("All AI attempts failed (User + Managed).");
     return { 
-        reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
-        sentiment: "neutral",
-        dm_message: null,
-        bad_words: null
-    }; 
+       reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
+       sentiment: "neutral",
+       dm_message: null,
+       bad_words: null
+   };
+ 
 }
 
 // Helper: Process Image with Vision
