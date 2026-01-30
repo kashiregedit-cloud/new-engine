@@ -68,6 +68,21 @@ export default function MessengerConversionPage() {
 
         const botReplies = filtered.filter((msg: any) => msg.reply_by === 'bot').length;
         setFilteredBotReplyCount(botReplies);
+
+        // Calculate Filtered Tokens
+        const filteredTokens = filtered.reduce((acc: number, msg: any) => acc + (msg.token || 0), 0);
+        setFilteredTokenCount(filteredTokens);
+
+        // Calculate Token Breakdown
+        const breakdown: Record<string, number> = {};
+        filtered.forEach((msg: any) => {
+            if (msg.reply_by === 'bot' && msg.token > 0) {
+                const model = msg.ai_model || 'Unknown';
+                breakdown[model] = (breakdown[model] || 0) + msg.token;
+            }
+        });
+        setTokenBreakdown(breakdown);
+
     } else if (messages.length > 0 && !date?.from) {
          // If no date selected, maybe show all? Or 0? 
          // Usually we default to today, so date is usually set.
@@ -117,6 +132,10 @@ export default function MessengerConversionPage() {
       // Calculate All Time Bot Replies
       const allBotReplies = data?.filter((msg: any) => msg.reply_by === 'bot').length || 0;
       setAllTimeBotReplies(allBotReplies);
+
+      // Calculate All Time Tokens
+      const allTokens = data?.reduce((acc: number, msg: any) => acc + (msg.token || 0), 0) || 0;
+      setAllTimeTokenCount(allTokens);
 
       // Initial filter calculation will be handled by the useEffect dependent on 'messages'
 
@@ -315,17 +334,18 @@ export default function MessengerConversionPage() {
                 <TableHead>Sender ID</TableHead>
                 <TableHead>Message</TableHead>
                 <TableHead>Reply By</TableHead>
+                <TableHead>Tokens</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && messages.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center">Loading...</TableCell>
+                  <TableCell colSpan={6} className="text-center">Loading...</TableCell>
                 </TableRow>
               ) : messages.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center">No messages found for this page</TableCell>
+                  <TableCell colSpan={6} className="text-center">No messages found for this page</TableCell>
                 </TableRow>
               ) : (
                 messages.map((msg) => (
@@ -337,6 +357,16 @@ export default function MessengerConversionPage() {
                       <span className={`px-2 py-1 rounded-full text-xs ${msg.reply_by === 'bot' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'}`}>
                         {msg.reply_by || 'Unknown'}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                      {msg.token ? (
+                          <div className="flex flex-col">
+                              <span className="font-bold">{msg.token}</span>
+                              {msg.ai_model && <span className="text-[10px] text-muted-foreground">{msg.ai_model}</span>}
+                          </div>
+                      ) : (
+                          <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs ${msg.status === 'sent' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'}`}>

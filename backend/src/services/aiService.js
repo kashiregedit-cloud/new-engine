@@ -221,14 +221,16 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
 
             if (completion.choices && completion.choices.length > 0) {
                 const rawContent = completion.choices[0].message.content;
-                const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                const usage = completion.usage || {};
+                const tokenUsage = usage.total_tokens || usage.totalTokens || 0;
                 keyService.recordKeyUsage(currentKey, tokenUsage);
                 
                 try {
-                    return JSON.parse(rawContent);
+                    const parsed = JSON.parse(rawContent);
+                    return { ...parsed, token_usage: tokenUsage, model: currentModel };
                 } catch (e) {
                     console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
-                    return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                    return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: currentModel };
                 }
             }
         } catch (error) {

@@ -249,14 +249,56 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     try {
         // 1. Fetch Config
         const pageConfig = await dbService.getPageConfig(pageId);
-        if (!pageConfig) return;
+        
+        console.log("Config fetched:", pageConfig ? "Found" : "Null");
+        
+        if (!pageConfig) {
+            const logMsg = `Page ${pageId} not configured.`;
+            console.log(logMsg);
+            logToFile(logMsg);
+            return;
+        }
+
+        if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
+             const logMsg = `Page ${pageId} subscription inactive.`;
+             console.log(logMsg);
+             logToFile(logMsg);
+             return;
+        }
+        
+        if (pageConfig.message_credit <= 0) {
+            const logMsg = `Page ${pageId} out of credits.`;
+            console.log(logMsg);
+            logToFile(logMsg);
+            return;
+        }
+
+        // --- OPTIMIZATION: PARALLEL DATA FETCHING ---
+        // We fetch Prompts, User Profile, Chat History, and FB Messages (for handover) in parallel
+        // This significantly reduces latency (User Feedback: "1s debounce but late reply")
+        
+        console.log("Fetching context data in parallel...");
+        
+        const historyLimit = 50; // Default history limit
+        
+        const [pagePrompts, userProfile, fbMessages, history, typingResult] = await Promise.all([
+            dbService.getPagePrompts(pageId),
+            facebookService.getUserProfile(senderId, pageConfig.page_access_token),
+            facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10), // For Handover Check
+            dbService.getChatHistory(sessionId, historyLimit),
+            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on') // Fire and forget (awaited in parallel)
+        ]);
+
+        const senderName = userProfile.name || 'Customer';
+        
+        // --------------------------------------------
 
         // --- BATCH PROCESSING: IMAGES & AUDIO ---
         // Now we process all media together BEFORE generating the reply.
         
         // A. Process Images (Vision)
         if (allImages.length > 0) {
-            const pagePrompts = await dbService.getPagePrompts(pageId);
+            // Use the already fetched pagePrompts
             if (pagePrompts && pagePrompts.image_detection) {
                 console.log(`[Batch] Analyzing ${allImages.length} images...`);
                 // Process in parallel
@@ -289,41 +331,16 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         console.log(`[Batch] Final Context for AI:\n${combinedText}`);
         // ----------------------------------------
         
-        console.log("Config fetched:", pageConfig ? "Found" : "Null");
-        
-        if (!pageConfig) {
-            const logMsg = `Page ${pageId} not configured.`;
-            console.log(logMsg);
-            logToFile(logMsg);
-            return;
-        }
-
-        if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
-             const logMsg = `Page ${pageId} subscription inactive.`;
-             console.log(logMsg);
-             logToFile(logMsg);
-             return;
-        }
-        
-        if (pageConfig.message_credit <= 0) {
-            const logMsg = `Page ${pageId} out of credits.`;
-            console.log(logMsg);
-            logToFile(logMsg);
-            return;
-        }
 
         // 2. HUMAN HANDOVER & RACE CONDITION CHECK
         console.log("Checking human handover...");
-        // Fetch last 10 messages from real Facebook Thread
-        const fbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10);
+        // fbMessages already fetched in parallel
         
         // 3. Send Typing Indicator
-        console.log("Sending typing...");
-        await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on');
+        // Already sent in parallel
 
         // 4. Get Knowledge Base & Chat History
-        console.log("Fetching prompts...");
-        const pagePrompts = await dbService.getPagePrompts(pageId);
+        // pagePrompts already fetched in parallel
         
         // --- FEATURE FLAGS CHECK ---
         if (pagePrompts) {
@@ -359,20 +376,21 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // --- FETCH SENDER NAME ---
-        const userProfile = await facebookService.getUserProfile(senderId, pageConfig.page_access_token);
-        const senderName = userProfile.name || 'Customer';
+        // senderName already fetched
         // -------------------------
         
         // Dynamic History Limit from DB (check_conversion) or default 10
-        let historyLimit = 50; // Updated default to 50 as per user request ("max 50 tai drolam")
+        // history already fetched with default 50. If check_conversion is different, we might have fetched too much or too little.
+        // But 50 is a safe upper bound for context window usually.
+        // If we really need strict limit, we can slice the array locally.
+        
+        let effectiveHistory = history;
         if (pagePrompts?.check_conversion) {
-            historyLimit = Number(pagePrompts.check_conversion);
+             const limit = Number(pagePrompts.check_conversion);
+             if (limit > 0 && limit < 50) {
+                 effectiveHistory = history.slice(0, limit);
+             }
         }
-        
-        // Ensure we don't fetch too less if the user has a small config but wants robust order tracking
-        if (historyLimit < 30) historyLimit = 30; 
-        
-        const history = await dbService.getChatHistory(sessionId, historyLimit); 
 
         // --- STOP EMOJI CHECK (Dynamic Logic via Graph API) ---
         const blockEmoji = pagePrompts?.block_emoji;
@@ -440,7 +458,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         // -----------------------------------------------------------------------
 
-        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, history, senderName);
+        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, effectiveHistory, senderName);
         
         // --- ZERO COST ORDER TRACKING LOGIC ---
         // If AI detects order details, save to DB immediately.

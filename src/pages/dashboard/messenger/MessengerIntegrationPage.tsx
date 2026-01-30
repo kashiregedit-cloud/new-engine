@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Settings, Database, Plus, Facebook, Trash2, CreditCard, Sparkles, Gift, Check } from "lucide-react";
+import { Loader2, Settings, Database, Plus, Facebook, Trash2, CreditCard, Sparkles, Gift, Check, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Dialog,
@@ -52,6 +52,9 @@ export default function MessengerIntegrationPage() {
     "FREE7": 7,
     "START7": 7
   };
+
+  const [manualPageId, setManualPageId] = useState("");
+  const [manualLoading, setManualLoading] = useState(false);
 
   useEffect(() => {
     // Get user email
@@ -469,6 +472,68 @@ export default function MessengerIntegrationPage() {
     }
   };
 
+  const handleManualConnect = async () => {
+    if (!manualPageId || manualPageId.length < 5) {
+        toast.error("Please enter a valid Page ID");
+        return;
+    }
+    
+    setManualLoading(true);
+    try {
+        // 1. Search in page_access_token_message
+        const { data: pageData, error: pageError } = await supabase
+            .from('page_access_token_message')
+            .select('*')
+            .eq('page_id', manualPageId)
+            .single();
+            
+        if (pageError || !pageData) {
+            toast.error("Page not found in database or access denied.");
+            setManualLoading(false);
+            return;
+        }
+        
+        // 2. Search in fb_message_database
+        const { data: dbData, error: dbError } = await supabase
+            .from('fb_message_database')
+            .select('id')
+            .eq('page_id', manualPageId)
+            .maybeSingle();
+            
+        if (dbError) {
+             console.error("DB Error:", dbError);
+             // Proceed if we have pageData, but warn
+        }
+        
+        let dbId = dbData ? (dbData as any).id : null;
+        
+        // If not in fb_message_database, try to create it? Or just rely on pageData for now?
+        // The user says "if found row page access token, then connected".
+        
+        if (pageData.page_access_token) {
+            // Set as active
+            if (dbId) {
+                localStorage.setItem("active_fb_db_id", String(dbId));
+            }
+            localStorage.setItem("active_fb_page_id", manualPageId);
+            
+            // Refresh list
+            await fetchPages();
+            
+            toast.success(`Connected to ${pageData.name || 'Page'} successfully!`);
+            setManualPageId("");
+        } else {
+             toast.error("Page found but has no access token. Please reconnect via Facebook.");
+        }
+
+    } catch (err) {
+        console.error("Manual connect error:", err);
+        toast.error("Failed to connect page.");
+    } finally {
+        setManualLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -483,6 +548,30 @@ export default function MessengerIntegrationPage() {
             {connecting ? "Connecting..." : "Connect with Facebook"}
         </Button>
       </div>
+
+      {/* Manual Connection Card */}
+      <Card>
+        <CardHeader>
+            <CardTitle>Manual Connection</CardTitle>
+            <CardDescription>Already integrated? Enter Page ID to connect.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-4 items-end">
+             <div className="grid w-full max-w-sm items-center gap-1.5">
+                <Label htmlFor="pageId">Page ID</Label>
+                <Input 
+                    type="text" 
+                    id="pageId" 
+                    placeholder="e.g. 10001234567890" 
+                    value={manualPageId}
+                    onChange={(e) => setManualPageId(e.target.value)}
+                />
+             </div>
+             <Button onClick={handleManualConnect} disabled={manualLoading}>
+                 {manualLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                 Search & Connect
+             </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
