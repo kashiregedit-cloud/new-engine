@@ -1,20 +1,56 @@
 const axios = require('axios');
 
-// Step 4: HTTP Request to Send Message
+// Step 4: HTTP Request to Send Message (with Splitting)
 async function sendMessage(pageId, recipientId, text, accessToken) {
     try {
         const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
         
-        // Payload Builder (Step 3)
-        const payload = {
-            recipient: { id: recipientId },
-            message: { text: text }
-        };
-
-        console.log(`Sending FB Message to ${recipientId} from ${pageId}`);
+        // Split message if too long (limit is 2000, we use 1900 for safety)
+        const MAX_LENGTH = 1900;
         
-        const response = await axios.post(url, payload);
-        return response.data;
+        if (text.length > MAX_LENGTH) {
+            console.log(`Message too long (${text.length} chars). Splitting...`);
+            const chunks = [];
+            let currentText = text;
+            
+            while (currentText.length > 0) {
+                let splitIndex = MAX_LENGTH;
+                
+                if (currentText.length > MAX_LENGTH) {
+                    // Try to split at a newline or space
+                    const lastNewline = currentText.lastIndexOf('\n', MAX_LENGTH);
+                    const lastSpace = currentText.lastIndexOf(' ', MAX_LENGTH);
+                    
+                    if (lastNewline > 1500) splitIndex = lastNewline; // Prefer newline
+                    else if (lastSpace > 1500) splitIndex = lastSpace; // Fallback to space
+                } else {
+                    splitIndex = currentText.length;
+                }
+                
+                chunks.push(currentText.substring(0, splitIndex));
+                currentText = currentText.substring(splitIndex).trim();
+            }
+            
+            // Send chunks sequentially
+            for (const chunk of chunks) {
+                if (!chunk) continue;
+                const payload = {
+                    recipient: { id: recipientId },
+                    message: { text: chunk }
+                };
+                await axios.post(url, payload);
+            }
+            return { status: 'split_sent', chunks: chunks.length };
+        } else {
+            // Normal Send
+            const payload = {
+                recipient: { id: recipientId },
+                message: { text: text }
+            };
+            console.log(`Sending FB Message to ${recipientId} from ${pageId}`);
+            const response = await axios.post(url, payload);
+            return response.data;
+        }
     } catch (error) {
         console.error(`Error sending FB message for page ${pageId}:`, error.response ? error.response.data : error.message);
         throw error;

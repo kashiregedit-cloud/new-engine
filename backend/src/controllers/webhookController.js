@@ -245,8 +245,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 const imagePromises = allImages.map(url => aiService.processImageWithVision(url, pageConfig));
                 const imageResults = await Promise.all(imagePromises);
                 
-                const combinedImageAnalysis = imageResults.join('\n');
-                combinedText += `\n\n[System: User sent ${allImages.length} images. Analysis follows:]\n${combinedImageAnalysis}`;
+                // Format clearly for AI
+                let combinedImageAnalysis = "";
+                imageResults.forEach((result, index) => {
+                    combinedImageAnalysis += `\n[Image ${index + 1} Analysis]: ${result}\n`;
+                });
+                
+                combinedText += `\n\n[System: User sent ${allImages.length} images. Analysis follows:]${combinedImageAnalysis}`;
             } else {
                 combinedText += `\n[User sent ${allImages.length} images: ${allImages.join(', ')}]`;
             }
@@ -458,8 +463,38 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // -------------------------------------------------------
 
         // 6. Send Reply (Text + Images)
-        const replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
+        let replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
         
+        // --- SMART IMAGE EXTRACTION FROM TEXT ---
+        // If AI put image links in text (especially Google Drive), extract them to send as attachments.
+        if (!aiResponse.images) aiResponse.images = [];
+        
+        // 1. Google Drive Viewer Links -> Direct Links
+        // Regex: https://drive.google.com/file/d/FILE_ID/view...
+        const driveRegex = /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*/g;
+        let match;
+        while ((match = driveRegex.exec(replyText)) !== null) {
+            const fileId = match[1];
+            const directLink = `https://drive.google.com/uc?export=view&id=${fileId}`;
+            if (!aiResponse.images.includes(directLink)) {
+                aiResponse.images.push(directLink);
+            }
+        }
+
+        // 2. Direct Image URLs (jpg, png, etc)
+        const imgRegex = /(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
+        while ((match = imgRegex.exec(replyText)) !== null) {
+             const imgUrl = match[1];
+             if (!aiResponse.images.includes(imgUrl)) {
+                 aiResponse.images.push(imgUrl);
+             }
+        }
+        
+        if (aiResponse.images.length > 0) {
+            console.log(`[Smart Extraction] Found ${aiResponse.images.length} images in text.`);
+        }
+        // ----------------------------------------
+
         // Send Text
         const sendResult = await facebookService.sendMessage(pageId, senderId, replyText, pageConfig.page_access_token);
         const botMessageId = sendResult?.message_id || `bot_${Date.now()}`;
