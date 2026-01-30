@@ -391,25 +391,44 @@ async function transcribeAudio(audioUrl, pageConfig) {
         form.append('file', response.data, { filename: 'audio.mp4', contentType: 'audio/mp4' }); 
         
         // 3. Select Provider & Key
-        // Priority: Groq (Fast/Free) -> Gemini 1.5 Flash (Free/Multimodal) -> OpenRouter/OpenAI
+        // USER INSTRUCTION: "Use the same model as image/chat"
         
         let apiKey = null;
         let baseURL = null;
         let model = 'whisper-large-v3'; 
         let provider = 'groq';
 
-        // A. Check Page Config for Groq Key
-        if (pageConfig.api_key && pageConfig.api_key.includes('gsk_')) {
-             const keys = pageConfig.api_key.split(',');
-             const groqKey = keys.find(k => k.trim().startsWith('gsk_'));
+        // --- STRATEGY: Prioritize Page Config (User Selection) ---
+        const userModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash';
+        const userKeys = pageConfig.api_key ? pageConfig.api_key.split(',') : [];
+
+        // CASE A: User Selected a Gemini Model (Native Multimodal)
+        if (userModel.startsWith('gemini')) {
+             // Find a Google Key in User's List
+             const googleKey = userKeys.find(k => k.trim().startsWith('AIzaSy'));
+             if (googleKey) {
+                 apiKey = googleKey.trim();
+                 provider = 'gemini';
+                 model = userModel; // Use exact user model (e.g. gemini-2.0-flash)
+                 console.log(`[Audio] Using User Preference: ${provider} / ${model}`);
+             }
+        }
+        
+        // CASE B: User Selected Groq (Native Whisper)
+        if (!apiKey) {
+             const groqKey = userKeys.find(k => k.trim().startsWith('gsk_'));
              if (groqKey) {
                  apiKey = groqKey.trim();
-                 baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
                  provider = 'groq';
+                 model = 'whisper-large-v3'; 
+                 baseURL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+                 console.log(`[Audio] Using User Preference: ${provider} / ${model}`);
              }
         }
 
-        // B. Smart Key Lookup (Groq)
+        // --- FALLBACKS (If User Config is invalid/missing or not applicable) ---
+
+        // Fallback 1: Groq Smart Key (Fast/Free)
         if (!apiKey) {
             const keyObj = await keyService.getSmartKey('groq', 'whisper-large-v3');
             if (keyObj) {
@@ -419,15 +438,14 @@ async function transcribeAudio(audioUrl, pageConfig) {
             }
         }
 
-        // C. Gemini 1.5 Flash (Free Tier Fallback)
+        // Fallback 2: Gemini Smart Key (Free Tier Fallback)
         if (!apiKey) {
              // Look for Gemini Key (AIzaSy...)
              let geminiKey = null;
              
-             // 1. Try Page Config (Best chance to find a valid key)
+             // 1. Try Page Config (Best chance to find a valid key if we missed it above)
              if (pageConfig.api_key) {
-                 const keys = pageConfig.api_key.split(',');
-                 geminiKey = keys.find(k => k.trim().startsWith('AIzaSy'));
+                 geminiKey = userKeys.find(k => k.trim().startsWith('AIzaSy'));
              }
 
              // 2. Smart Key Lookup (Try 1.5 Flash)
@@ -436,15 +454,9 @@ async function transcribeAudio(audioUrl, pageConfig) {
                  if (keyObj) geminiKey = keyObj.key;
              }
              
-             // 3. Smart Key Lookup (Try 2.0 Flash - User might have this)
+             // 3. Smart Key Lookup (Try 2.0 Flash)
              if (!geminiKey) {
                  const keyObj = await keyService.getSmartKey('google', 'gemini-2.0-flash');
-                 if (keyObj) geminiKey = keyObj.key;
-             }
-
-             // 4. Smart Key Lookup (Try 2.5 Flash - User might have this)
-             if (!geminiKey) {
-                 const keyObj = await keyService.getSmartKey('google', 'gemini-2.5-flash');
                  if (keyObj) geminiKey = keyObj.key;
              }
              
@@ -454,7 +466,7 @@ async function transcribeAudio(audioUrl, pageConfig) {
              if (geminiKey) {
                  apiKey = geminiKey;
                  provider = 'gemini';
-                 model = 'gemini-1.5-flash'; // Model name for transcription (can be any multimodal model)
+                 model = 'gemini-1.5-flash'; // Fallback model if user model wasn't set
              }
         }
 
