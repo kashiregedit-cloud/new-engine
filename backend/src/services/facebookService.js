@@ -18,27 +18,43 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
                 
                 if (currentText.length > FB_LIMIT) {
                     // Smart Split Strategy:
-                    // 1. Priority: Double Newline (Paragraph/Section break) near end
-                    // 2. Priority: Single Newline
-                    // 3. Priority: Space
+                    // 1. Priority: "Section Header" (Emoji + Text + Newline) - Best for user experience
+                    // 2. Priority: Double Newline (Paragraph break)
+                    // 3. Priority: Single Newline
                     
                     const chunkSafeLimit = 1950; // Leave buffer
-                    const minChunkSize = 500;    // Lowered from 1000 to allow more natural breaks
+                    const minChunkSize = 300;    // Allow smaller chunks if it means a clean section break
                     
                     const subString = currentText.substring(0, chunkSafeLimit);
                     
+                    // Regex for Section Headers (e.g., "🌟 Basic Plan", "📦 Pro Plan")
+                    // Looks for Newline + Emoji/Bullet + Text
+                    const headerRegex = /\n[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}].{1,50}(\n|$)/gu;
+                    
+                    let bestSplit = -1;
+                    let match;
+                    
+                    // Find the last header that fits in the chunk
+                    while ((match = headerRegex.exec(subString)) !== null) {
+                         if (match.index > minChunkSize) {
+                             bestSplit = match.index; // Split BEFORE the header (at the newline)
+                         }
+                    }
+
                     const lastDoubleNewline = subString.lastIndexOf('\n\n');
                     const lastNewline = subString.lastIndexOf('\n');
                     const lastSpace = subString.lastIndexOf(' ');
                     
-                    if (lastDoubleNewline > minChunkSize) {
-                        splitIndex = lastDoubleNewline; // Best split (end of section)
+                    if (bestSplit !== -1) {
+                        splitIndex = bestSplit; // Perfect Split: Before a new Section
+                    } else if (lastDoubleNewline > minChunkSize) {
+                        splitIndex = lastDoubleNewline; // Good Split: Paragraph end
                     } else if (lastNewline > minChunkSize) {
-                        splitIndex = lastNewline; // Okay split (end of line)
+                        splitIndex = lastNewline; // Okay Split: Line end
                     } else if (lastSpace > minChunkSize) {
-                        splitIndex = lastSpace; // Fallback split (end of word)
+                        splitIndex = lastSpace; // Fallback: Word end
                     } else {
-                        splitIndex = chunkSafeLimit; // Hard split
+                        splitIndex = chunkSafeLimit; // Hard Split
                     }
                 } else {
                     splitIndex = currentText.length;

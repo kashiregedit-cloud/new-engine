@@ -418,7 +418,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         
         // --- INJECT FORMATTING INSTRUCTION (User Request: "n8n style split") ---
         if (pagePrompts && pagePrompts.text_prompt) {
-             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. If you include images, mention them briefly.`;
+             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. Include the IMAGE LINK for EVERY item/plan described. DO NOT MISS ANY IMAGES. If you describe 3 plans, provide 3 image links.\n4. Use Emojis at the start of each plan title (e.g., "🌟 Basic Plan") to help with formatting.`;
         }
         // -----------------------------------------------------------------------
 
@@ -539,17 +539,25 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             // We send them sequentially to ensure order, but we can try to do it efficiently.
             console.log(`[Image Send] Sending ${images.length} images sequentially via Binary Upload...`);
             
-            for (const imgUrl of images) {
-                try {
-                    // Use sendImageUpload to download and upload binary (More robust than URL)
-                    await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                } catch (imgError) {
-                    console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                    // Final Fallback to text link if upload fails
-                    const fallbackText = `Image: ${imgUrl}`;
-                    await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                }
-            }
+            // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
+            // Although FB API is sequential per token usually, small parallel batches might work better than strict await.
+            // Risk: Rate limit or Out of Order.
+            // Benefit: "Group" appearance (images arrive together).
+            
+            // Using Promise.all to send them as fast as possible
+            const uploadPromises = images.map(async (imgUrl) => {
+                 try {
+                     await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                     console.log(`[Image Sent] ${imgUrl}`);
+                 } catch (imgError) {
+                     console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                     const fallbackText = `Image: ${imgUrl}`;
+                     await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                 }
+            });
+            
+            await Promise.all(uploadPromises);
+            console.log(`[Image Group] All images sent.`);
         }
 
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
