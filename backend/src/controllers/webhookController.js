@@ -532,32 +532,61 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const images = aiResponse.images;
             console.log(`[AI] Found ${images.length} images to send.`);
             
-            // User Request: "Template akare na" (No Carousel/Generic Template).
-            // User Request: "Group akare asuk" -> Send sequentially but quickly using Binary Upload.
-            // Using `sendImageUpload` ensures high success rate (bypassing URL blocks).
+            // User Request: Control via "template button" (template_reply)
+            // If template_reply is ON -> Send as Carousel (Group Card)
+            // If template_reply is OFF -> Send as Sequential/Parallel Binary Upload (Native Group)
             
-            // We send them sequentially to ensure order, but we can try to do it efficiently.
-            console.log(`[Image Send] Sending ${images.length} images sequentially via Binary Upload...`);
+            let sentViaCarousel = false;
             
-            // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
-            // Although FB API is sequential per token usually, small parallel batches might work better than strict await.
-            // Risk: Rate limit or Out of Order.
-            // Benefit: "Group" appearance (images arrive together).
-            
-            // Using Promise.all to send them as fast as possible
-            const uploadPromises = images.map(async (imgUrl) => {
-                 try {
-                     await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                     console.log(`[Image Sent] ${imgUrl}`);
-                 } catch (imgError) {
-                     console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                     const fallbackText = `Image: ${imgUrl}`;
-                     await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                 }
-            });
-            
-            await Promise.all(uploadPromises);
-            console.log(`[Image Group] All images sent.`);
+            // Check Config (Assuming 'template_reply' is the boolean field in fb_message_database)
+            const useCarousel = pagePrompts?.template_reply === true || pagePrompts?.template_reply === 'true';
+
+            if (useCarousel && images.length > 1) {
+                console.log(`[Image Group] Template Reply ON. Sending via Carousel...`);
+                try {
+                    const elements = images.map((imgUrl, index) => ({
+                        title: `View Image ${index + 1}`, // Todo: Map to actual Product Name if available from AI
+                        subtitle: 'Tap to expand',
+                        image_url: imgUrl,
+                        default_action: {
+                            type: "web_url",
+                            url: imgUrl,
+                            webview_height_ratio: "tall"
+                        }
+                    }));
+                    
+                    // Limit to 10 elements (FB limit)
+                    const carouselElements = elements.slice(0, 10);
+                    
+                    await facebookService.sendCarouselMessage(pageId, senderId, carouselElements, pageConfig.page_access_token);
+                    sentViaCarousel = true;
+                    console.log(`[Image Group] Sent ${images.length} images via Carousel.`);
+                } catch (carouselError) {
+                    console.error(`[Image Group] Carousel failed. Falling back to Binary Upload. Error: ${carouselError.message}`);
+                    sentViaCarousel = false;
+                }
+            }
+
+            if (!sentViaCarousel) {
+                // We send them sequentially to ensure order, but we can try to do it efficiently.
+                console.log(`[Image Send] Sending ${images.length} images via Binary Upload (Parallel)...`);
+                
+                // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
+                // Using Promise.all to send them as fast as possible
+                const uploadPromises = images.map(async (imgUrl) => {
+                     try {
+                         await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                         console.log(`[Image Sent] ${imgUrl}`);
+                     } catch (imgError) {
+                         console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                         const fallbackText = `Image: ${imgUrl}`;
+                         await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                     }
+                });
+                
+                await Promise.all(uploadPromises);
+                console.log(`[Image Group] All images sent.`);
+            }
         }
 
         await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_off');
