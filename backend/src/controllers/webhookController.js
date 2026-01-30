@@ -95,11 +95,26 @@ async function queueMessage(event) {
         logToFile(logMsg);
     }
 
-    // 2. Handle Attachments (Images) - DEFERRED PROCESSING
+    // 2. Handle Attachments (Images & Stickers)
     if (event.message?.attachments) {
-        const imageUrls = event.message.attachments
-            .filter(att => att.type === 'image')
-            .map(att => att.payload.url);
+        // Separate Stickers from Real Images
+        const stickers = event.message.attachments.filter(att => 
+            att.type === 'image' && (event.message.sticker_id || att.payload.sticker_id)
+        );
+        
+        const realImages = event.message.attachments.filter(att => 
+            att.type === 'image' && !event.message.sticker_id && !att.payload.sticker_id
+        );
+
+        // Handle Stickers -> Convert to Emoji
+        if (stickers.length > 0) {
+            console.log(`[Webhook] Detected ${stickers.length} Sticker(s). Converting to Emoji.`);
+            // Default to Thumbs Up 👍 for stickers as it's the most common (Blue Thumb)
+            // We can append it to text so AI sees it as an emoji
+            messageText = (messageText ? messageText + " " : "") + "👍"; 
+        }
+
+        const imageUrls = realImages.map(att => att.payload.url);
         
         if (imageUrls.length > 0) {
             console.log(`[Webhook] Image URLs Queued: ${imageUrls.length}`);
@@ -159,8 +174,11 @@ async function queueMessage(event) {
 
     const sessionData = debounceMap.get(sessionId);
     
-    // Extract URLs for this specific message
-    const thisMsgImages = event.message?.attachments?.filter(att => att.type === 'image').map(att => att.payload.url) || [];
+    // Extract URLs for this specific message (EXCLUDING STICKERS)
+    const thisMsgImages = event.message?.attachments?.filter(att => 
+        att.type === 'image' && !event.message.sticker_id && !att.payload.sticker_id
+    ).map(att => att.payload.url) || [];
+    
     const thisMsgAudios = event.message?.attachments?.filter(att => att.type === 'audio').map(att => att.payload.url) || [];
 
     // Push Object
