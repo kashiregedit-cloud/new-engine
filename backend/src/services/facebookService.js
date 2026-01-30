@@ -5,25 +5,25 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
     try {
         const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
         
-        // Split message if too long (limit is 2000, we use 1900 for safety)
-        const MAX_LENGTH = 1900;
+        // Split message if too long (limit is 2000, we use 1990 for safety check)
+        const FB_LIMIT = 2000;
         
-        if (text.length > MAX_LENGTH) {
+        if (text.length > FB_LIMIT) {
             console.log(`Message too long (${text.length} chars). Splitting...`);
             const chunks = [];
             let currentText = text;
             
             while (currentText.length > 0) {
-                let splitIndex = MAX_LENGTH;
+                let splitIndex = FB_LIMIT;
                 
-                if (currentText.length > MAX_LENGTH) {
+                if (currentText.length > FB_LIMIT) {
                     // Smart Split Strategy:
                     // 1. Priority: Double Newline (Paragraph/Section break) near end
                     // 2. Priority: Single Newline
                     // 3. Priority: Space
                     
-                    const chunkSafeLimit = 1900; // Leave buffer
-                    const minChunkSize = 1000;   // Don't make chunks too small if possible
+                    const chunkSafeLimit = 1950; // Leave buffer
+                    const minChunkSize = 500;    // Lowered from 1000 to allow more natural breaks
                     
                     const subString = currentText.substring(0, chunkSafeLimit);
                     

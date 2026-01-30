@@ -532,48 +532,22 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const images = aiResponse.images;
             console.log(`[AI] Found ${images.length} images to send.`);
             
-            let sentViaCarousel = false;
-
-            // User Request: "1 tar besi holei group akare jabe" (If > 1, send as Group/Carousel)
-            if (images.length > 1) {
+            // User Request: "Template akare na" (No Carousel/Generic Template).
+            // User Request: "Group akare asuk" -> Send sequentially but quickly using Binary Upload.
+            // Using `sendImageUpload` ensures high success rate (bypassing URL blocks).
+            
+            // We send them sequentially to ensure order, but we can try to do it efficiently.
+            console.log(`[Image Send] Sending ${images.length} images sequentially via Binary Upload...`);
+            
+            for (const imgUrl of images) {
                 try {
-                    const elements = images.map((imgUrl, index) => ({
-                        title: `View Image ${index + 1}`, // Generic Title
-                        subtitle: 'Tap to expand',
-                        image_url: imgUrl,
-                        default_action: {
-                            type: "web_url",
-                            url: imgUrl,
-                            webview_height_ratio: "tall"
-                        }
-                    }));
-                    
-                    // Limit to 10 elements (FB limit)
-                    const carouselElements = elements.slice(0, 10);
-                    
-                    await facebookService.sendCarouselMessage(pageId, senderId, carouselElements, pageConfig.page_access_token);
-                    sentViaCarousel = true;
-                    console.log(`[Image Group] Sent ${images.length} images via Carousel.`);
-                } catch (carouselError) {
-                    console.error(`[Image Group] Carousel failed (likely URL block). Falling back to sequential upload. Error: ${carouselError.message}`);
-                    sentViaCarousel = false;
-                }
-            }
-
-            // Fallback or Single Image: Send sequentially via Binary Upload
-            if (!sentViaCarousel) {
-                if (images.length > 1) console.log(`[Image Fallback] Sending images sequentially (Binary Upload)...`);
-                
-                for (const imgUrl of images) {
-                    try {
-                        // Use sendImageUpload to download and upload binary (More robust than URL)
-                        await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                    } catch (imgError) {
-                        console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                        // Final Fallback to text link if upload fails
-                        const fallbackText = `Image: ${imgUrl}`;
-                        await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
-                    }
+                    // Use sendImageUpload to download and upload binary (More robust than URL)
+                    await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                } catch (imgError) {
+                    console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                    // Final Fallback to text link if upload fails
+                    const fallbackText = `Image: ${imgUrl}`;
+                    await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
                 }
             }
         }
