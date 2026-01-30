@@ -204,6 +204,17 @@ export default function MessengerSettingsPage() {
         form.setValue('text_prompt', tempPrompt);
         
         toast.success("System prompt updated successfully!");
+        
+        // Auto-Trigger RAG Ingestion in Background
+        if (pageId) {
+            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/ingest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId: pageId, promptText: tempPrompt })
+            }).then(() => console.log("RAG Ingestion Triggered"))
+              .catch(err => console.error("RAG Ingestion Failed", err));
+        }
+
         setIsPromptOpen(false);
     } catch (error: any) {
         console.error("Error saving prompt:", error);

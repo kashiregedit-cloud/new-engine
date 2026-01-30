@@ -1,4 +1,5 @@
 const aiService = require('../services/aiService');
+const ragService = require('../services/ragService');
 
 async function optimizePrompt(req, res) {
     try {
@@ -24,6 +25,28 @@ async function optimizePrompt(req, res) {
     }
 }
 
+async function ingestKnowledge(req, res) {
+    try {
+        const { pageId, promptText } = req.body;
+        
+        if (!pageId || !promptText) {
+            return res.status(400).json({ error: "Page ID and Text required" });
+        }
+
+        // Run ingestion in background (don't block response)
+        ragService.ingestPrompt(pageId, promptText).catch(err => {
+            console.error("Background Ingestion Error:", err);
+        });
+
+        return res.json({ success: true, message: "Ingestion started in background" });
+
+    } catch (error) {
+        console.error("Ingestion Controller Error:", error);
+        return res.status(500).json({ error: "Failed to start ingestion" });
+    }
+}
+
 module.exports = {
-    optimizePrompt
+    optimizePrompt,
+    ingestKnowledge
 };

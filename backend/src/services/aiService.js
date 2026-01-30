@@ -1,5 +1,6 @@
 const { OpenAI } = require('openai'); // Using OpenAI SDK for compatibility with OpenRouter/Gemini
 const keyService = require('./keyService');
+const ragService = require('./ragService');
 const axios = require('axios');
 const FormData = require('form-data');
 
@@ -50,9 +51,24 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     ];
     // ----------------------------------------
 
+    // --- RAG: HYBRID CONTEXT INJECTION (The Brain + The Book) ---
+    let contextChunk = "";
+    try {
+        // Only fetch context if we have a valid pageId
+        if (pageId) {
+            const knowledge = await ragService.searchKnowledge(cleanUserMessage, pageId);
+            if (knowledge && knowledge.length > 0) {
+                contextChunk = knowledge.map(k => k.content).join("\n\n");
+                console.log(`[RAG] Injected ${knowledge.length} knowledge chunks for Page ${pageId}`);
+            }
+        }
+    } catch (err) {
+        console.error(`[RAG] Failed to retrieve context: ${err.message}`);
+        // Proceed without RAG, do not fail the request
+    }
+    // ------------------------------------------------------------
+
     // --- PROMPT & MESSAGE CONSTRUCTION ---
-    // Moved UP before Key Logic to ensure 'messages' is available for all cases
-    
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
     
@@ -62,8 +78,11 @@ You are a helpful AI assistant for a business page.
 Your name is ${pageConfig.bot_name || 'Assistant'}.
 You are talking to ${senderName}.
 
-CONTEXT:
+CONTEXT (System Knowledge):
 ${basePrompt}
+
+RELEVANT KNOWLEDGE (From Database):
+${contextChunk ? contextChunk : "No specific database knowledge found for this query."}
 
 INSTRUCTIONS:
 1. You MUST reply in BENGALI (Bangla) unless the user explicitly asks in English.
