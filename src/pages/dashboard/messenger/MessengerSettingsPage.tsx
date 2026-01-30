@@ -778,13 +778,13 @@ export default function MessengerSettingsPage() {
             <CardContent>
                 <div className="space-y-4">
                     <div className="flex flex-col space-y-2">
-                        <Label>Smart Reply Delay (Check if Reply)</Label>
+                        <Label>Smart Reply Delay <span className="text-amber-600 dark:text-amber-400 font-normal ml-2">(Best time frame 8 sec)</span></Label>
                         <div className="flex items-center space-x-4">
                             <Input 
                                 type="number" 
                                 value={wait} 
                                 onChange={(e) => setWait(Number(e.target.value))} 
-                                min={3} 
+                                min={1} 
                                 max={60}
                                 className="w-24 font-mono"
                             />

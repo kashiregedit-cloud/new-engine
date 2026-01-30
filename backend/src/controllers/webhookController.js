@@ -210,7 +210,7 @@ async function queueMessage(event) {
     }
     
     // Safety check
-    if (debounceTime < 3000) debounceTime = 3000; // Minimum 3s
+    if (debounceTime < 1000) debounceTime = 1000; // Minimum 1s
 
     console.log(`[Debounce] Using wait time: ${debounceTime}ms for ${sessionId}`);
 
