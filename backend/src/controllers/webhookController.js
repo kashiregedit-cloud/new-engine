@@ -196,13 +196,31 @@ async function queueMessage(event) {
         clearTimeout(sessionData.timer); // Reset timer on new message
     }
 
+    // Dynamic Debounce from DB
+    // We need to fetch the wait time. Since we can't await in top level easily without refactoring,
+    // we'll fetch it inside the timeout or pre-fetch?
+    // Better: Fetch it now, async.
+    // NOTE: This adds a small DB read overhead per message.
+    // Optimization: Cache this in memory or just accept the slight delay.
+    
+    const pagePrompts = await dbService.getPagePrompts(pageId);
+    let debounceTime = 8000; // Default 8s
+    if (pagePrompts && pagePrompts.wait) {
+        debounceTime = Number(pagePrompts.wait) * 1000; // Convert sec to ms
+    }
+    
+    // Safety check
+    if (debounceTime < 3000) debounceTime = 3000; // Minimum 3s
+
+    console.log(`[Debounce] Using wait time: ${debounceTime}ms for ${sessionId}`);
+
     sessionData.timer = setTimeout(() => {
         // Clone messages and clear buffer immediately
         const messagesToProcess = [...sessionData.messages];
         debounceMap.delete(sessionId);
         
         processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
-    }, 8000); // 8 seconds Debounce (User Requested)
+    }, debounceTime); 
 }
 
 // Core Logic Function (Debounced)

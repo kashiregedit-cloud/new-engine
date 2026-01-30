@@ -77,6 +77,10 @@ export default function MessengerSettingsPage() {
   const [isPromptOpen, setIsPromptOpen] = useState(false);
   const [tempPrompt, setTempPrompt] = useState("");
   const [promptSaving, setPromptSaving] = useState(false);
+  
+  // New State for Behavior Settings
+  const [wait, setWait] = useState<number>(8);
+  const [behaviorSaving, setBehaviorSaving] = useState(false);
 
   const handleApplyCoupon = () => {
     // Simple validation for demo - in production this would verify with backend
@@ -170,6 +174,9 @@ export default function MessengerSettingsPage() {
         
         // Set temp prompt for modal
         setTempPrompt(dbRow.text_prompt || "");
+        
+        // Set wait time
+        setWait(dbRow.wait || 8);
       }
     } catch (error) {
       console.error("Error fetching config:", error);
@@ -183,8 +190,8 @@ export default function MessengerSettingsPage() {
     if (!dbId) return;
     setPromptSaving(true);
     try {
-        const { error } = await supabase
-            .from('fb_message_database')
+        const { error } = await (supabase
+            .from('fb_message_database') as any)
             .update({ text_prompt: tempPrompt })
             .eq('id', parseInt(dbId));
 
@@ -200,6 +207,25 @@ export default function MessengerSettingsPage() {
         toast.error("Failed to save prompt: " + error.message);
     } finally {
         setPromptSaving(false);
+    }
+  };
+
+  const handleSaveBehavior = async () => {
+    if (!dbId) return;
+    setBehaviorSaving(true);
+    try {
+        const { error } = await (supabase
+            .from('fb_message_database') as any)
+            .update({ wait: wait })
+            .eq('id', parseInt(dbId));
+
+        if (error) throw error;
+        toast.success("Behavior settings saved!");
+    } catch (error: any) {
+        console.error("Error saving behavior:", error);
+        toast.error("Failed to save behavior: " + error.message);
+    } finally {
+        setBehaviorSaving(false);
     }
   };
 
@@ -682,6 +708,49 @@ export default function MessengerSettingsPage() {
               </form>
             </Form>
           </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-blue-500 shadow-md">
+            <CardHeader>
+                <CardTitle>Response Behavior</CardTitle>
+                <CardDescription>Control how and when the AI replies.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="space-y-4">
+                    <div className="flex flex-col space-y-2">
+                        <Label>Smart Reply Delay (Check if Reply)</Label>
+                        <div className="flex items-center space-x-4">
+                            <Input 
+                                type="number" 
+                                value={wait} 
+                                onChange={(e) => setWait(Number(e.target.value))} 
+                                min={3} 
+                                max={60}
+                                className="w-24 font-mono"
+                            />
+                            <span className="text-sm text-muted-foreground">seconds</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                            Wait {wait} seconds to detect multiple messages or human intervention before replying.
+                        </p>
+                    </div>
+                    <div className="flex justify-end">
+                        <Button onClick={handleSaveBehavior} disabled={behaviorSaving} variant="secondary">
+                            {behaviorSaving ? (
+                                <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
+                                    Saving...
+                                </>
+                            ) : (
+                                <>
+                                    <Save className="mr-2 h-4 w-4" />
+                                    Save Behavior
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </div>
+            </CardContent>
         </Card>
       </div>
     </div>
