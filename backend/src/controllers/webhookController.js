@@ -631,13 +631,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                     
                     const uploadPromises = images.map(async (imgObj) => {
                          try {
+                             // Use Smart Downloader & Uploader
+                             // This handles downloading the image to a buffer and uploading it as multipart/form-data
+                             // This fixes issues where FB rejects direct URLs (like Google Drive or protected links)
                              await facebookService.sendImageUpload(pageId, senderId, imgObj.url, pageConfig.page_access_token);
                              console.log(`[Image Sent] ${imgObj.url}`);
                          } catch (imgError) {
                              console.error(`[Image Fallback] Failed to send image ${imgObj.url}: ${imgError.message}`);
-                             // FALLBACK FOR NON-IMAGE LINKS (User Requirement #5)
-                             // If upload fails (e.g. it's a product page URL), send it as a text link.
-                             // FORCE LINK FORMAT if Binary Upload Fails to ensure user sees it
+                             
+                             // FINAL FALLBACK: If binary upload fails, send as a Link
                              const fallbackText = `Link: ${imgObj.url}`;
                              await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
                          }
