@@ -73,6 +73,11 @@ export default function MessengerSettingsPage() {
   const [planActive, setPlanActive] = useState(false);
   const [messageCredit, setMessageCredit] = useState(0);
   
+  // New State for System Prompt Modal
+  const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [tempPrompt, setTempPrompt] = useState("");
+  const [promptSaving, setPromptSaving] = useState(false);
+
   const handleApplyCoupon = () => {
     // Simple validation for demo - in production this would verify with backend
     if (couponCode.toUpperCase() === "FREE500" || couponCode.toUpperCase() === "START500") {
@@ -162,12 +167,39 @@ export default function MessengerSettingsPage() {
           chatmodel: pageRow.chat_model || "xiaomi/mimo-v2-flash:free",
           text_prompt: dbRow.text_prompt || "",
         });
+        
+        // Set temp prompt for modal
+        setTempPrompt(dbRow.text_prompt || "");
       }
     } catch (error) {
       console.error("Error fetching config:", error);
       toast.error("Failed to load AI settings");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSavePrompt = async () => {
+    if (!dbId) return;
+    setPromptSaving(true);
+    try {
+        const { error } = await supabase
+            .from('fb_message_database')
+            .update({ text_prompt: tempPrompt })
+            .eq('id', parseInt(dbId));
+
+        if (error) throw error;
+        
+        // Also update form state to keep in sync
+        form.setValue('text_prompt', tempPrompt);
+        
+        toast.success("System prompt updated successfully!");
+        setIsPromptOpen(false);
+    } catch (error: any) {
+        console.error("Error saving prompt:", error);
+        toast.error("Failed to save prompt: " + error.message);
+    } finally {
+        setPromptSaving(false);
     }
   };
 
@@ -326,14 +358,49 @@ export default function MessengerSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
            <h2 className="text-3xl font-bold tracking-tight">Messenger AI Intelligence</h2>
            <p className="text-muted-foreground">
              Connect your preferred AI brain for your Facebook Page.
            </p>
         </div>
+        <Button 
+            onClick={() => setIsPromptOpen(true)} 
+            variant="outline"
+            className="border-purple-500 text-purple-600 hover:bg-purple-50"
+        >
+            <Bot className="mr-2 h-4 w-4" />
+            Edit System Prompt
+        </Button>
       </div>
+
+      {/* System Prompt Full Screen Dialog */}
+      <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
+            <DialogHeader>
+                <DialogTitle>Edit System Prompt</DialogTitle>
+                <DialogDescription>
+                    Define your AI's persona, knowledge base, and behavior rules. This update is independent of your plan.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 py-4">
+                <Textarea 
+                    value={tempPrompt}
+                    onChange={(e) => setTempPrompt(e.target.value)}
+                    className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
+                    placeholder="You are a helpful assistant..."
+                />
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
+                <Button onClick={handleSavePrompt} disabled={promptSaving}>
+                    {promptSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Prompt Only
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-6">
         <Card className="border-l-4 border-l-purple-500 shadow-md">
@@ -346,22 +413,23 @@ export default function MessengerSettingsPage() {
           <CardContent>
             <div className="mb-6">
                 <RadioGroup defaultValue={mode} value={mode} onValueChange={(v) => {
-                    if (planActive && v === "own") {
-                        toast.error("You have an active plan with credits. Use 'Managed' mode until credits expire.");
+                    // Force Managed Mode (Locked)
+                    if (v === "own") {
+                        toast.error("This feature is temporarily locked by administrator.");
                         return;
                     }
-                    setMode(v as "own" | "managed");
-                    if (v === "managed") setIsPricingOpen(true);
+                    setMode("managed");
+                    setIsPricingOpen(true);
                 }} className="grid grid-cols-2 gap-4">
                   <div>
-                    <RadioGroupItem value="own" id="own" className="peer sr-only" disabled={planActive} />
+                    <RadioGroupItem value="own" id="own" className="peer sr-only" disabled={true} />
                     <Label
                       htmlFor="own"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer ${planActive ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 opacity-50 cursor-not-allowed`}
                     >
-                      {planActive && <Lock className="mb-1 h-4 w-4 text-destructive" />}
+                      <Lock className="mb-1 h-4 w-4 text-destructive" />
                       <Key className="mb-3 h-6 w-6" />
-                      Use Own API
+                      Use Own API (Locked)
                     </Label>
                   </div>
                   <div>
@@ -588,27 +656,6 @@ export default function MessengerSettingsPage() {
                         </Dialog>
                     </div>
                 )}
-
-                <FormField
-                  control={form.control}
-                  name="text_prompt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>System Prompt</FormLabel>
-                      <FormControl>
-                        <Textarea 
-                          placeholder="You are a helpful assistant..." 
-                          className="min-h-[150px]"
-                          {...field} 
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Define how the AI should behave and what it knows about your business.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <div className="flex justify-end">
                   <Button type="submit" size="lg" disabled={loading} className={mode === 'managed' ? (selectedPlan === '500_free' ? 'bg-green-600 hover:bg-green-700 w-full md:w-auto' : 'bg-purple-600 hover:bg-purple-700 w-full md:w-auto') : ''}>
