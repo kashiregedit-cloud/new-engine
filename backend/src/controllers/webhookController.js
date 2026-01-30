@@ -416,9 +416,9 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // 5. Generate AI Reply
         // Use finalUserMessage which includes reply context
         
-        // --- INJECT FORMATTING INSTRUCTION (User Request: "n8n style split") ---
+        // --- INJECT FORMATTING INSTRUCTION (User Request: "n8n style split" & "Carousel Titles") ---
         if (pagePrompts && pagePrompts.text_prompt) {
-             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. Include the IMAGE LINK for EVERY item/plan described. DO NOT MISS ANY IMAGES. If you describe 3 plans, provide 3 image links.\n4. Use Emojis at the start of each plan title (e.g., "🌟 Basic Plan") to help with formatting.`;
+             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. Include the IMAGE LINK for EVERY item/plan described.\n4. **STRICT IMAGE FORMAT**: You MUST output images using this EXACT format:\n   IMAGE: Plan Name | https://your-image-url.com\n   (Example: "IMAGE: 🌟 Basic Plan | https://i.imgur.com/xyz.jpg")\n5. DO NOT use [Image] placeholders. ONLY use the 'IMAGE: Title | URL' format.`;
         }
         // -----------------------------------------------------------------------
 
@@ -475,49 +475,70 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // --- SMART IMAGE EXTRACTION & CLEANING ---
         if (!aiResponse.images) aiResponse.images = [];
         
-        // Helper to extract and clean
-        const extractAndClean = (regex) => {
-            let match;
-            while ((match = regex.exec(replyText)) !== null) {
-                const fullMatch = match[0]; // The whole string "Image: http..."
-                const url = match[1];       // Just the URL
-                
-                if (!aiResponse.images.includes(url)) {
-                    aiResponse.images.push(url);
-                }
-                // Remove the FULL MATCH from text (Label + URL)
-                replyText = replyText.replace(fullMatch, '').trim();
-            }
-        };
+        const extractedImages = []; // Array<{ url: string, title: string }>
 
-        // 1. Google Drive Viewer Links
-        // Regex handles optional label: (Image: )? https://...
-        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*)/gi;
-        let driveMatch;
-        while ((driveMatch = driveRegex.exec(replyText)) !== null) {
-            const fullMatch = driveMatch[0];
-            const originalUrl = driveMatch[1];
-            const fileId = driveMatch[2];
-            const directLink = `https://drive.google.com/uc?export=view&id=${fileId}`;
+        // 1. STRICT FORMAT: IMAGE: Title | URL
+        // Matches: IMAGE: Basic Plan | https://...
+        const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s]+)/gi;
+        let strictMatch;
+        while ((strictMatch = strictImageRegex.exec(replyText)) !== null) {
+            const fullMatch = strictMatch[0];
+            const title = strictMatch[1].trim();
+            const url = strictMatch[2].trim();
             
-            if (!aiResponse.images.includes(directLink)) {
-                aiResponse.images.push(directLink);
+            if (!extractedImages.some(img => img.url === url)) {
+                extractedImages.push({ url: url, title: title });
             }
             replyText = replyText.replace(fullMatch, '').trim();
         }
 
-        // 2. Direct Image URLs (jpg, png, etc)
-        // Regex handles optional label: (Image: )? https://...
-        const imgRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
-        extractAndClean(imgRegex);
+        // 2. Google Drive Viewer Links
+        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*)/gi;
+        let driveMatch;
+        while ((driveMatch = driveRegex.exec(replyText)) !== null) {
+            const fullMatch = driveMatch[0];
+            const fileId = driveMatch[2];
+            const directLink = `https://drive.google.com/uc?export=view&id=${fileId}`;
+            
+            if (!extractedImages.some(img => img.url === directLink)) {
+                extractedImages.push({ url: directLink, title: 'View Image' });
+            }
+            replyText = replyText.replace(fullMatch, '').trim();
+        }
 
-        // 3. Generic Labeled Links (Catch-all for "Image: https://website.com")
-        // Catches non-image URLs (like product pages) IF they are explicitly labeled as Image/Link/Sobi
+        // 3. Direct Image URLs (Fallback)
+        const imgRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
+        let imgMatch;
+        while ((imgMatch = imgRegex.exec(replyText)) !== null) {
+            const fullMatch = imgMatch[0];
+            const url = imgMatch[1];
+            if (!extractedImages.some(img => img.url === url)) {
+                extractedImages.push({ url: url, title: 'View Image' });
+            }
+            replyText = replyText.replace(fullMatch, '').trim();
+        }
+
+        // 4. Generic Labeled Links (Fallback)
         const labeledLinkRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)(https?:\/\/[^\s]+)/gi;
-        extractAndClean(labeledLinkRegex);
+        let labeledMatch;
+        while ((labeledMatch = labeledLinkRegex.exec(replyText)) !== null) {
+             const fullMatch = labeledMatch[0];
+             const url = labeledMatch[1];
+             if (!extractedImages.some(img => img.url === url)) {
+                extractedImages.push({ url: url, title: 'View Link' });
+            }
+            replyText = replyText.replace(fullMatch, '').trim();
+        }
         
+        // Cleanup leftover [Image] artifacts (User Issue)
+        replyText = replyText.replace(/\[Image.*?\]/gi, '').trim();
+        replyText = replyText.replace(/^Image:$/gm, '').trim();
+
+        // Update aiResponse.images with our new object array
+        aiResponse.images = extractedImages;
+
         if (aiResponse.images.length > 0) {
-            console.log(`[Smart Extraction] Found ${aiResponse.images.length} images in text.`);
+            console.log(`[Smart Extraction] Found ${aiResponse.images.length} images.`);
         }
         // ----------------------------------------
 
@@ -543,7 +564,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // Send Images (if any)
         if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {
-            const images = aiResponse.images;
+            const images = aiResponse.images; // Array of {url, title}
             console.log(`[AI] Found ${images.length} images to send.`);
             
             // MASTER SWITCH: check if 'image_reply' is FALSE (default TRUE if undefined)
@@ -554,7 +575,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 console.log(`[Image Send] Disabled by Config (image_reply=false). Sending links as text.`);
                 // Append links back to text since we stripped them
                 if (replyText.length > 0) replyText += "\n\n";
-                replyText += "Attached Links:\n" + images.join("\n");
+                replyText += "Attached Links:\n" + images.map(img => img.url).join("\n");
                 
                 // If text was already sent (unlikely here as we haven't sent yet, but let's be safe), we just send a new message.
                 // But wait, the code above sends text FIRST. 
@@ -563,7 +584,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 // 'replyText' was modified by our cleaning logic.
                 // So the text sent at 513 DOES NOT contain the links.
                 // So here, we must send them as a new text message.
-                const linksText = "Attached Links:\n" + images.join("\n");
+                const linksText = "Attached Links:\n" + images.map(img => img.url).join("\n");
                 await facebookService.sendMessage(pageId, senderId, linksText, pageConfig.page_access_token);
                 
             } else {
@@ -581,13 +602,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 if (useCarousel && images.length > 1) {
                     console.log(`[Image Group] Template Reply ON. Sending via Carousel...`);
                     try {
-                        const elements = images.map((imgUrl, index) => ({
-                            title: `View Image ${index + 1}`,
+                        const elements = images.map((imgObj, index) => ({
+                            title: imgObj.title || `View Image ${index + 1}`,
                             subtitle: 'Tap to expand',
-                            image_url: imgUrl,
+                            image_url: imgObj.url,
                             default_action: {
                                 type: "web_url",
-                                url: imgUrl,
+                                url: imgObj.url,
                                 webview_height_ratio: "tall"
                             }
                         }));
@@ -610,15 +631,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                     
                     // OPTIMIZATION: Process uploads in parallel to maximize "Group" effect on client
                     // Using Promise.all to send them as fast as possible
-                    const uploadPromises = images.map(async (imgUrl) => {
+                    const uploadPromises = images.map(async (imgObj) => {
                          try {
-                             await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                             console.log(`[Image Sent] ${imgUrl}`);
+                             await facebookService.sendImageUpload(pageId, senderId, imgObj.url, pageConfig.page_access_token);
+                             console.log(`[Image Sent] ${imgObj.url}`);
                          } catch (imgError) {
-                             console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                             console.error(`[Image Fallback] Failed to send image ${imgObj.url}: ${imgError.message}`);
                              // FALLBACK FOR NON-IMAGE LINKS (User Requirement #5)
                              // If upload fails (e.g. it's a product page URL), send it as a text link.
-                             const fallbackText = `Link: ${imgUrl}`;
+                             const fallbackText = `Link: ${imgObj.url}`;
                              await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
                          }
                     });
