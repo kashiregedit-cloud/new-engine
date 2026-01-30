@@ -572,7 +572,11 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 let sentViaCarousel = false;
                 
                 // Check Config for Template/Carousel
-                const useCarousel = pagePrompts?.template_reply === true || pagePrompts?.template_reply === 'true';
+                // Robust check: handles boolean true, string 'true', integer 1, string '1'
+                const tVal = pagePrompts?.template_reply;
+                const useCarousel = (tVal === true || tVal === 'true' || tVal === 1 || tVal === '1');
+                
+                console.log(`[Image Group] Template Check: Value=${tVal}, Result=${useCarousel}, ImageCount=${images.length}`);
     
                 if (useCarousel && images.length > 1) {
                     console.log(`[Image Group] Template Reply ON. Sending via Carousel...`);
