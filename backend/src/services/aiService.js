@@ -148,15 +148,17 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
                     if (completion.choices && completion.choices.length > 0) {
                         const rawContent = completion.choices[0].message.content;
                         // Attempt to record usage (safe to fail if key not in DB)
+                        let tokenUsage = 0;
                         try {
-                            const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                            tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
                             keyService.recordKeyUsage(currentKey, tokenUsage);
                         } catch (err) { /* ignore */ }
                         
                         try {
-                            return JSON.parse(rawContent);
+                            const parsed = JSON.parse(rawContent);
+                            return { ...parsed, token_usage: tokenUsage, model: defaultModel };
                         } catch (e) {
-                            return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null };
+                            return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: defaultModel };
                         }
                     }
                 } catch (error) {

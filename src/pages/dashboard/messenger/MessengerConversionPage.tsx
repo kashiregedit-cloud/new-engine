@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { MessageSquare, RefreshCw, AlertCircle, Calendar as CalendarIcon } from "lucide-react";
+import { MessageSquare, RefreshCw, AlertCircle, Calendar as CalendarIcon, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "react-router-dom";
@@ -15,6 +15,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -29,6 +35,9 @@ export default function MessengerConversionPage() {
   const [loading, setLoading] = useState(false);
   const [filteredBotReplyCount, setFilteredBotReplyCount] = useState(0);
   const [allTimeBotReplies, setAllTimeBotReplies] = useState(0);
+  const [filteredTokenCount, setFilteredTokenCount] = useState(0);
+  const [allTimeTokenCount, setAllTimeTokenCount] = useState(0);
+  const [tokenBreakdown, setTokenBreakdown] = useState<Record<string, number>>({});
   const [activePageId, setActivePageId] = useState<string | null>(null);
   
   // Date Filter State
@@ -241,6 +250,51 @@ export default function MessengerConversionPage() {
             <div className="text-2xl font-bold">{filteredBotReplyCount}</div>
             <p className="text-xs text-muted-foreground">
               Replies in selected range
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">All Time Tokens</CardTitle>
+            <Zap className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{allTimeTokenCount.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">
+              Total tokens consumed
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tokens (Filtered)</CardTitle>
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger>
+                        <Zap className="h-4 w-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p className="font-semibold mb-1">Model Breakdown:</p>
+                        {Object.entries(tokenBreakdown).length > 0 ? (
+                            Object.entries(tokenBreakdown).map(([model, count]) => (
+                                <div key={model} className="text-xs flex justify-between gap-4">
+                                    <span>{model}:</span>
+                                    <span className="font-mono">{count.toLocaleString()}</span>
+                                </div>
+                            ))
+                        ) : (
+                            <span className="text-xs text-muted-foreground">No data</span>
+                        )}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{filteredTokenCount.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">
+              Tokens in selected range
             </p>
           </CardContent>
         </Card>
