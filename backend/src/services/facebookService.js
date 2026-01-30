@@ -84,6 +84,33 @@ async function sendImageMessage(pageId, recipientId, imageUrl, accessToken) {
     }
 }
 
+// Send Generic Template (Carousel) for multiple images
+async function sendCarouselMessage(pageId, recipientId, elements, accessToken) {
+    try {
+        const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${accessToken}`;
+        
+        const payload = {
+            recipient: { id: recipientId },
+            message: {
+                attachment: {
+                    type: "template",
+                    payload: {
+                        template_type: "generic",
+                        elements: elements
+                    }
+                }
+            }
+        };
+
+        console.log(`Sending Carousel to ${recipientId} from ${pageId} with ${elements.length} elements`);
+        const response = await axios.post(url, payload);
+        return response.data;
+    } catch (error) {
+        console.error(`Error sending carousel for page ${pageId}:`, error.response ? error.response.data : error.message);
+        throw error;
+    }
+}
+
 // Reply to a Comment (Private or Public)
 async function replyToComment(commentId, message, accessToken) {
     try {
@@ -139,6 +166,7 @@ async function getMessageById(messageId, accessToken) {
 module.exports = {
     sendMessage,
     sendImageMessage,
+    sendCarouselMessage,
     sendTypingAction,
     getConversationMessages,
     replyToComment,

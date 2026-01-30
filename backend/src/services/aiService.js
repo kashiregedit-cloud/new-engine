@@ -121,6 +121,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     3. **Context**: 
        - "Old Message": Previous conversation history.
        - "Current Message": User's latest input (including reply context).
+       - **CRITICAL**: You MUST look at the ENTIRE conversation history (last 50 messages) to find missing order details (Phone, Address, Product). Users often provide these in separate messages.
     4. **Behavior**: Be helpful, concise, and polite. If the answer is not in the context, ask for clarification.
 
     OUTPUT FORMAT (JSON ONLY):
@@ -130,7 +131,14 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         "images": ["url1", "url2"], 
         "sentiment": "positive|neutral|negative",
         "dm_message": "Any direct message logic if needed, else null",
-        "bad_words": "Any bad words detected, else null"
+        "bad_words": "Any bad words detected, else null",
+        "order_details": {
+             "product_name": "Name of product if user is ordering, else null",
+             "quantity": "Quantity if specified, else null", 
+             "price": "Price if mentioned, else null",
+             "address": "Address if mentioned, else null (Check history!)",
+             "phone": "Phone number if mentioned, else null (Check history!)"
+        }
     }
     `;
 

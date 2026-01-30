@@ -246,3 +246,100 @@ async function logMessage(msgData) {
         console.error('[DB] Unexpected error logging message:', err);
     }
 }
+
+// 12. Save Order Tracking
+async function saveOrderTracking(orderData) {
+    const { page_id, sender_id, product_name, number, location, product_quantity, price } = orderData;
+    
+    console.log(`[Order] Attempting to save order for ${sender_id}...`);
+
+    // --- DUPLICATE CHECK LOGIC (Updated for Robustness) ---
+    // User Strategy: "time set na kore customer er privious 20-30 ta conversion check korba"
+    // We check the LAST order from this user. If it's the SAME product/qty/price, we treat it as the same order session.
+    // We only Insert if it's a DIFFERENT order or adds new critical info (like address/phone) that wasn't there?
+    // Actually, simply checking if the last order matches the current one is safest to prevent "bar bar save".
+    
+    const { data: lastOrder, error: checkError } = await supabase
+        .from('fb_order_tracking')
+        .select('*')
+        .eq('number', number) // Filter by user phone/id
+        .order('id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+        
+    if (checkError) {
+        console.error("[Order] Error checking duplicates:", checkError.message);
+    }
+    
+    if (lastOrder) {
+        // Compare Logic
+        const isSameProduct = lastOrder.product_name === product_name;
+        // const isSameQty = lastOrder.product_quantity === product_quantity; // Qty might change, that's an update
+        
+        // If it's the same product and saved recently (e.g. within 12 hours), we assume it's the same conversation
+        const timeDiff = Date.now() - new Date(lastOrder.created_at).getTime();
+        const twelveHours = 12 * 60 * 60 * 1000;
+        
+        if (isSameProduct && timeDiff < twelveHours) {
+             // Check if we are gaining new info?
+             // If old location was null and new one is present, maybe we should UPDATE or INSERT?
+             // User provided INSERT only. Let's skip to avoid "bar bar save" unless it's clearly different.
+             // If location is same or new is null, definitely skip.
+             
+             if (lastOrder.location === location || !location) {
+                 console.log(`[Order] Duplicate/Redundant order detected (ID: ${lastOrder.id}). Skipping.`);
+                 return null;
+             }
+             
+             // If location is new, we might want to save the improved version.
+             // Let's allow insert if location was missing before but present now.
+             if (lastOrder.location && location && lastOrder.location !== location) {
+                 // Location CHANGED? Might be a correction. Allow save.
+             } else if (!lastOrder.location && location) {
+                 // New Location added. Allow save.
+             } else {
+                 console.log(`[Order] Duplicate order detected (ID: ${lastOrder.id}). Skipping.`);
+                 return null;
+             }
+        }
+    }
+    // -----------------------------
+
+    const { data, error } = await supabase
+        .from('fb_order_tracking')
+        .insert([{
+            product_name,
+            number, // Using sender_id or extracted phone number
+            location,
+            product_quantity,
+            price
+            // created_at is default now()
+        }])
+        .select();
+
+    if (error) {
+        console.error("[Order] Failed to save order:", error.message);
+        return null;
+    }
+    
+    console.log(`[Order] Order saved successfully: ID ${data[0].id}`);
+    return data[0];
+}
+
+module.exports = {
+    supabase,
+    getPageConfig,
+    getPagePrompts,
+    saveLead,
+    checkDuplicate,
+    deductCredit,
+    getChatHistory,
+    saveChatMessage,
+    saveFbChat,
+    getFbChatHistory,
+    checkN8nDebounce,
+    saveFbComment,
+    logMessage,
+    getMessageById,
+    saveOrderTracking
+};

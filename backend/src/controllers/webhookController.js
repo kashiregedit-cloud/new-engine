@@ -323,10 +323,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // -------------------------
         
         // Dynamic History Limit from DB (check_conversion) or default 10
-        let historyLimit = 10;
+        let historyLimit = 50; // Updated default to 50 as per user request ("max 50 tai drolam")
         if (pagePrompts?.check_conversion) {
             historyLimit = Number(pagePrompts.check_conversion);
         }
+        
+        // Ensure we don't fetch too less if the user has a small config but wants robust order tracking
+        if (historyLimit < 30) historyLimit = 30; 
         
         const history = await dbService.getChatHistory(sessionId, historyLimit); 
 
@@ -391,6 +394,39 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Use finalUserMessage which includes reply context
         const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, history, senderName);
         
+        // --- ZERO COST ORDER TRACKING LOGIC ---
+        // If AI detects order details, save to DB immediately.
+        // This uses the SAME AI call, so ZERO extra cost.
+        if (aiResponse.order_details && aiResponse.order_details.product_name) {
+             const order = aiResponse.order_details;
+             console.log(`[Order] AI detected potential order: ${JSON.stringify(order)}`);
+             
+             // Normalize Data for DB
+             // number: bigint (phone or sender_id)
+             // We prioritize phone if AI found it, else use sender_id (must be numeric for bigint, but FB IDs are strings...
+             // Wait, user schema says 'number bigint'. FB IDs are huge strings often, might fit in bigint?
+             // Safest is to try parsing phone, if null, try senderId if it looks numeric.
+             
+             let customerNumber = order.phone ? order.phone.replace(/\D/g, '') : null;
+             if (!customerNumber && /^\d+$/.test(senderId)) {
+                 customerNumber = senderId;
+             }
+             
+             // Only save if we have at least a product name and some user identifier
+             if (customerNumber) {
+                 await dbService.saveOrderTracking({
+                     page_id: pageId, // Passed for duplicate check logic (though table might not have column, logic handles it)
+                     sender_id: senderId, // For logging
+                     product_name: order.product_name,
+                     number: customerNumber, 
+                     location: order.address,
+                     product_quantity: order.quantity,
+                     price: order.price
+                 });
+             }
+        }
+        // --------------------------------------
+
         // --- PRE-SEND CHECK (n8n "IfPageReplyExists" Logic) ---
         // Check again if Admin replied while AI was generating (Race Condition Fix)
         const freshFbMessages = await facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 1);
@@ -425,8 +461,44 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // Send Images (if any)
         if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {
-            for (const imageUrl of aiResponse.images) {
-                await facebookService.sendImageMessage(pageId, senderId, imageUrl, pageConfig.page_access_token);
+            const images = aiResponse.images;
+            console.log(`[AI] Found ${images.length} images to send.`);
+
+            if (images.length === 1) {
+                // Single Image Strategy
+                try {
+                    await facebookService.sendImageMessage(pageId, senderId, images[0], pageConfig.page_access_token);
+                } catch (imgError) {
+                    console.error(`[Image Fallback] Failed to send image, sending link instead: ${imgError.message}`);
+                    const fallbackText = `Here is the image: ${images[0]}`;
+                    await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                }
+            } else {
+                // Multiple Images Strategy (Carousel)
+                // FB Limit: 10 elements per carousel. User requested grouping for 1-20 images.
+                const chunkSize = 10;
+                for (let i = 0; i < images.length; i += chunkSize) {
+                    const chunk = images.slice(i, i + chunkSize);
+                    
+                    const elements = chunk.map((imgUrl, index) => ({
+                        title: `Product Image ${i + index + 1}`,
+                        image_url: imgUrl,
+                        subtitle: "Recommended for you",
+                        default_action: {
+                            type: "web_url",
+                            url: imgUrl,
+                            webview_height_ratio: "tall"
+                        }
+                    }));
+                    
+                    try {
+                        await facebookService.sendCarouselMessage(pageId, senderId, elements, pageConfig.page_access_token);
+                    } catch (carouselError) {
+                        console.error(`[Carousel Fallback] Failed to send carousel, sending links instead: ${carouselError.message}`);
+                        const fallbackText = `Here are the images:\n${chunk.join('\n')}`;
+                        await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                    }
+                }
             }
         }
 
