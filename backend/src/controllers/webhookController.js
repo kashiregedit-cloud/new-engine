@@ -581,7 +581,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 text: replyText,
                 timestamp: Date.now(),
                 status: 'bot_reply',
-                reply_by: 'bot'
+                reply_by: 'bot',
+                token: aiResponse.token_usage || 0
             });
             // ----------------------------------
         }

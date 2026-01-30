@@ -248,7 +248,8 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
        reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
        sentiment: "neutral",
        dm_message: null,
-       bad_words: null
+       bad_words: null,
+       token_usage: 0
    };
  
 }
