@@ -415,6 +415,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // 5. Generate AI Reply
         // Use finalUserMessage which includes reply context
+        
+        // --- INJECT FORMATTING INSTRUCTION (User Request: "n8n style split") ---
+        if (pagePrompts && pagePrompts.text_prompt) {
+             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. If you include images, mention them briefly.`;
+        }
+        // -----------------------------------------------------------------------
+
         const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, history, senderName);
         
         // --- ZERO COST ORDER TRACKING LOGIC ---
@@ -524,21 +531,49 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         if (aiResponse.images && Array.isArray(aiResponse.images) && aiResponse.images.length > 0) {
             const images = aiResponse.images;
             console.log(`[AI] Found ${images.length} images to send.`);
-
-            // User Request: "Group akare asuk" -> Send as sequential attachments instead of Carousel.
-            // Carousel requires user to scroll horizontally, which some find annoying.
-            // Sending sequential images allows them to be viewed easily.
-            // "ekta ekta kore" (one by one) - using Binary Upload to bypass URL reachability issues
             
-            for (const imgUrl of images) {
+            let sentViaCarousel = false;
+
+            // User Request: "1 tar besi holei group akare jabe" (If > 1, send as Group/Carousel)
+            if (images.length > 1) {
                 try {
-                    // Use sendImageUpload to download and upload binary (More robust than URL)
-                    await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
-                } catch (imgError) {
-                    console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
-                    // Fallback to text link if upload fails
-                    const fallbackText = `Image: ${imgUrl}`;
-                    await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                    const elements = images.map((imgUrl, index) => ({
+                        title: `View Image ${index + 1}`, // Generic Title
+                        subtitle: 'Tap to expand',
+                        image_url: imgUrl,
+                        default_action: {
+                            type: "web_url",
+                            url: imgUrl,
+                            webview_height_ratio: "tall"
+                        }
+                    }));
+                    
+                    // Limit to 10 elements (FB limit)
+                    const carouselElements = elements.slice(0, 10);
+                    
+                    await facebookService.sendCarouselMessage(pageId, senderId, carouselElements, pageConfig.page_access_token);
+                    sentViaCarousel = true;
+                    console.log(`[Image Group] Sent ${images.length} images via Carousel.`);
+                } catch (carouselError) {
+                    console.error(`[Image Group] Carousel failed (likely URL block). Falling back to sequential upload. Error: ${carouselError.message}`);
+                    sentViaCarousel = false;
+                }
+            }
+
+            // Fallback or Single Image: Send sequentially via Binary Upload
+            if (!sentViaCarousel) {
+                if (images.length > 1) console.log(`[Image Fallback] Sending images sequentially (Binary Upload)...`);
+                
+                for (const imgUrl of images) {
+                    try {
+                        // Use sendImageUpload to download and upload binary (More robust than URL)
+                        await facebookService.sendImageUpload(pageId, senderId, imgUrl, pageConfig.page_access_token);
+                    } catch (imgError) {
+                        console.error(`[Image Fallback] Failed to send image ${imgUrl}: ${imgError.message}`);
+                        // Final Fallback to text link if upload fails
+                        const fallbackText = `Image: ${imgUrl}`;
+                        await facebookService.sendMessage(pageId, senderId, fallbackText, pageConfig.page_access_token);
+                    }
                 }
             }
         }
