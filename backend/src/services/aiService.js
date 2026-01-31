@@ -1,6 +1,6 @@
 const keyService = require('./keyService');
 const ragService = require('./ragService');
-const modelOptimizerService = require('./modelOptimizerService'); // Dynamic Free Engine
+const commandApiService = require('./commandApiService'); // Command API Table Strategy
 const axios = require('axios');
 const OpenAI = require('openai');
 const FormData = require('form-data');
@@ -24,17 +24,28 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // - If pageConfig.chat_model is set, use it (User strict choice).
     // - Cheap Engine flag is ignored if user explicitly sets configuration.
     
-    let defaultProvider = pageConfig.ai || (useCheapEngine ? 'openrouter' : 'gemini');
-    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : (useCheapEngine ? dynamicFreeModel : 'gemini-1.5-flash');
+    // FETCH DYNAMIC CONFIG from DB (Zero Cost Engine)
+    let dynamicProvider = 'openrouter'; // Default
+    let dynamicModel = 'arcee-ai/trinity-large-preview:free'; // Default
+    let fallbackModel = null;
 
-    // Override Provider if the dynamic model is from OpenRouter AND user hasn't specified a model
-    if (!pageConfig.chat_model && useCheapEngine) {
-        defaultProvider = 'openrouter';
-        defaultModel = dynamicFreeModel;
-        console.log(`[AI] Zero Cost Engine Active (Auto). Using Optimized Model: ${defaultModel}`);
-    } else {
-        console.log(`[AI] Using Configured Engine: ${defaultProvider} / ${defaultModel}`);
+    if (useCheapEngine) {
+        try {
+            const commandConfig = await commandApiService.getCommandConfig();
+            if (commandConfig) {
+                dynamicProvider = commandConfig.provider || 'openrouter';
+                dynamicModel = commandConfig.chatmodel || dynamicModel;
+                fallbackModel = commandConfig.fallback_chatmodel;
+            }
+        } catch (err) {
+            console.warn("[AI] Failed to fetch Command API config, using defaults:", err.message);
+        }
     }
+
+    let defaultProvider = pageConfig.ai || (useCheapEngine ? dynamicProvider : 'gemini');
+    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : (useCheapEngine ? dynamicModel : 'gemini-1.5-flash');
+
+    console.log(`[AI] Final Engine Config: ${defaultProvider} / ${defaultModel} (Fallback: ${fallbackModel || 'None'})`);
 
     // --- SMART FALLBACK: If Prompt is Huge, Groq will fail (12k TPM limit). Switch to Gemini. ---
     // Estimate: 1 Token ~= 3-4 chars (English), but 1 Token ~= 1-2 chars (Bengali).
