@@ -1,5 +1,8 @@
 const dbService = require('./dbService');
 
+// In-Memory Dynamic Limits (Learned from Headers)
+const dynamicLimits = new Map();
+
 // In-Memory Key Cache (Refresh every 5 minutes or manually)
 let keyCache = [];
 let lastCacheUpdate = 0;
@@ -48,6 +51,13 @@ const DEFAULT_LIMITS = {
     // Groq Limits (Based on Official Docs)
     'llama-3.3-70b-versatile': { rpm: 30, rpd: 1000 }, // High Intelligence, Lower Daily Limit
     'llama-3.1-8b-instant': { rpm: 30, rpd: 14400 },   // High Speed, Massive Daily Limit
+    // OpenRouter Free Limits (Safe Defaults)
+    'arcee-ai/trinity-large-preview:free': { rpm: 100, rpd: 10000 }, // User verified: High Limit
+    'upstage/solar-pro-3:free': { rpm: 10, rpd: 200 },
+    'liquid/lfm-2.5-1.2b-thinking:free': { rpm: 20, rpd: 500 },
+    'openrouter/default': { rpm: 10, rpd: 50 },
+    // DYNAMIC MODEL FALLBACK:
+    'dynamic': { rpm: 10, rpd: 500 }, // Generous default for whatever the optimizer picks
     'default': { rpm: 10, rpd: 1000 }
 };
 
@@ -128,14 +138,17 @@ function isKeyWithinLimits(keyDbObject) {
     // If DB date is not today, usage is 0.
     const usageToday = (dbDate === today) ? (keyDbObject.usage_today || 0) : 0;
     
-    // Determine Limits (DB > Default Map > Safe Fallback)
+    // Determine Limits (DB > Dynamic > Default Map > Safe Fallback)
     let rpdLimit = keyDbObject.rpd_limit;
     let rpmLimit = keyDbObject.rpm_limit;
 
     if (!rpdLimit || !rpmLimit) {
+        // Check Dynamic Limits first (Learned from Headers)
+        const dyn = dynamicLimits.get(keyDbObject.model);
         const modelDefaults = DEFAULT_LIMITS[keyDbObject.model] || DEFAULT_LIMITS['default'];
-        if (!rpdLimit) rpdLimit = modelDefaults.rpd;
-        if (!rpmLimit) rpmLimit = modelDefaults.rpm;
+
+        if (!rpdLimit) rpdLimit = (dyn && dyn.rpd) ? dyn.rpd : modelDefaults.rpd;
+        if (!rpmLimit) rpmLimit = (dyn && dyn.rpm) ? dyn.rpm : modelDefaults.rpm;
     }
 
     if (usageToday >= rpdLimit) {
@@ -275,8 +288,24 @@ async function flushUsageStats() {
 function updateKeyStatusFromHeaders(apiKey, headers) {
     if (!apiKey || !headers) return;
 
+    // 1. Check for Rate Limit Headers (Remaining)
     const remaining = headers['x-ratelimit-remaining-requests'] || headers['x-ratelimit-remaining'] || headers['ratelimit-remaining'];
     const resetTime = headers['x-ratelimit-reset-requests'] || headers['x-ratelimit-reset'] || headers['ratelimit-reset'];
+
+    // 2. Check for Rate Limit Headers (Limit Capacity) - LEARN THE LIMIT IN REAL-TIME
+    const limitCap = headers['x-ratelimit-limit-requests'] || headers['x-ratelimit-limit'] || headers['ratelimit-limit'];
+    
+    if (limitCap) {
+        const keyInfo = keyCache.find(k => k.api === apiKey);
+        if (keyInfo && keyInfo.model) {
+            const current = dynamicLimits.get(keyInfo.model) || {};
+            // Only update if it's different to avoid spamming
+            if (current.rpm !== parseInt(limitCap)) {
+                console.log(`[KeyService] 🧠 Learned Real-Time Limit for ${keyInfo.model}: ${limitCap} RPM (Config was ${DEFAULT_LIMITS[keyInfo.model]?.rpm || 'unknown'})`);
+                dynamicLimits.set(keyInfo.model, { ...current, rpm: parseInt(limitCap) });
+            }
+        }
+    }
 
     if (remaining !== undefined && parseInt(remaining) === 0) {
         console.warn(`[KeyService] Key ${apiKey.substring(0,8)}... exhausted (Headers).`);
@@ -292,7 +321,7 @@ function updateKeyStatusFromHeaders(apiKey, headers) {
         }
         
         if (timeoutMs > 0) {
-            markKeyAsDead(apiKey); 
+            markKeyAsDead(apiKey, timeoutMs, 'header_limit');
         }
     }
 }
@@ -448,5 +477,11 @@ module.exports = {
     markKeyAsQuotaExceeded,
     recordKeyUsage,
     updateKeyStatusFromHeaders,
-    updateKeyCache // Export this!
+    updateKeyCache, // Export this!
+    getLimitForModel: (modelId) => {
+        const dyn = dynamicLimits.get(modelId);
+        const def = DEFAULT_LIMITS[modelId] || DEFAULT_LIMITS['default'];
+        if (dyn) return { ...def, ...dyn, source: 'realtime' };
+        return { ...def, source: 'static' };
+    }
 };

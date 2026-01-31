@@ -1,5 +1,6 @@
 const keyService = require('./keyService');
 const ragService = require('./ragService');
+const modelOptimizerService = require('./modelOptimizerService'); // Dynamic Free Engine
 const axios = require('axios');
 const OpenAI = require('openai');
 const FormData = require('form-data');
@@ -18,9 +19,35 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // ----------------------------------
 
     // 1. Prepare Configuration
-    // If Cheap Engine is ON, we force Groq (Llama 3.3) as the Zero-Cost Engine
-    let defaultProvider = useCheapEngine ? 'groq' : (pageConfig.ai || 'gemini');
-    let defaultModel = useCheapEngine ? 'llama-3.3-70b-versatile' : (pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash');
+    // Logic: 
+    // - If pageConfig.ai is set, use it (Gemini vs OpenRouter).
+    // - If pageConfig.chat_model is set, use it (User strict choice).
+    // - Cheap Engine flag is ignored if user explicitly sets configuration.
+    
+    let defaultProvider = pageConfig.ai || (useCheapEngine ? 'openrouter' : 'gemini');
+    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : (useCheapEngine ? dynamicFreeModel : 'gemini-1.5-flash');
+
+    // Override Provider if the dynamic model is from OpenRouter AND user hasn't specified a model
+    if (!pageConfig.chat_model && useCheapEngine) {
+        defaultProvider = 'openrouter';
+        defaultModel = dynamicFreeModel;
+        console.log(`[AI] Zero Cost Engine Active (Auto). Using Optimized Model: ${defaultModel}`);
+    } else {
+        console.log(`[AI] Using Configured Engine: ${defaultProvider} / ${defaultModel}`);
+    }
+
+    // --- SMART FALLBACK: If Prompt is Huge, Groq will fail (12k TPM limit). Switch to Gemini. ---
+    // Estimate: 1 Token ~= 3-4 chars (English), but 1 Token ~= 1-2 chars (Bengali).
+    // Safe Limit for Groq: 6,000 - 8,000 tokens.
+    // Let's check the raw length of system prompt + user message.
+    const estimatedChars = (pagePrompts?.text_prompt?.length || 0) + userMessage.length + 2000; // +2000 for history/buffer
+    
+    if (useCheapEngine && estimatedChars > 15000) {
+        console.log(`[AI] Prompt is huge (~${estimatedChars} chars). Groq might fail (12k TPM). Switching to Gemini 1.5 Flash.`);
+        defaultProvider = 'gemini';
+        defaultModel = 'gemini-1.5-flash';
+    }
+    // -------------------------------------------------------------------------------------------
  
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
@@ -85,7 +112,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // 1. Limit History
         const MAX_HISTORY = 4; // Keep last 4 messages (2 turns) for safety
         if (history.length > MAX_HISTORY) {
-            console.log(`[AI] Truncating history from ${history.length} to ${MAX_HISTORY} for Groq/Cheap Engine.`);
+            console.log(`[AI] Truncating history from ${history.length} to ${MAX_HISTORY} for Cheap Engine.`);
             history = history.slice(-MAX_HISTORY);
         }
 
@@ -102,11 +129,23 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
     
+    // Inject "Gemini Persona" for Cheap/OpenRouter models
+    // User Requirement: "make it work like Gemini 2.5 Flash"
+    let personaInstruction = "";
+    if (useCheapEngine) {
+        personaInstruction = `
+IMPORTANT PERSONA: You are "Gemini 2.5 Flash", a highly advanced, fast, and efficient AI assistant by Google.
+- You MUST simulate the high speed, accuracy, and Bengali language proficiency of Gemini 2.5 Flash.
+- Be concise, professional, and strictly follow the JSON format.
+- Do not mention you are Llama, Qwen, or any other model. You are Gemini.
+`;
+    }
+
     // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
     const n8nSystemPrompt = `Role: Assistant ${pageConfig.bot_name || 'Assistant'} for business page. User: ${senderName}.
 Context: ${basePrompt}
 DB Knowledge: ${contextChunk ? contextChunk : "N/A"}
-
+${personaInstruction}
 Instructions:
 1. Reply in BENGALI (Bangla).
 2. Encourage orders politely.
@@ -261,8 +300,16 @@ Instructions:
                     const parsed = JSON.parse(rawContent);
                     return { ...parsed, token_usage: tokenUsage, model: currentModel };
                 } catch (e) {
-                    console.warn("AI returned invalid JSON, falling back to raw text:", rawContent);
-                    return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: currentModel };
+                    // CLEANUP: If model returns "Thinking" tags (DeepSeek R1), strip them
+                    let cleanContent = rawContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                    
+                    try {
+                        const parsed = JSON.parse(cleanContent);
+                        return { ...parsed, token_usage: tokenUsage, model: currentModel };
+                    } catch (e2) {
+                        console.warn("AI returned invalid JSON, falling back to raw text:", cleanContent.substring(0, 100) + "...");
+                        return { reply: cleanContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: currentModel };
+                    }
                 }
             }
         } catch (error) {
@@ -278,6 +325,15 @@ Instructions:
             if (isQuota) {
                 console.warn(`[AI] Key ...${currentKey.slice(-4)} QUOTA EXHAUSTED (RPD). Blocking until tomorrow.`);
                 keyService.markKeyAsQuotaExceeded(currentKey);
+
+                // --- BILLING/CREDIT FALLBACK ---
+                if (errorBody.includes('billing') || errorBody.includes('credit')) {
+                    console.warn(`[AI] Detected BILLING/CREDIT issue with ${currentProvider}. Switching to Cheap Engine (OpenRouter) for retry.`);
+                    defaultProvider = 'openrouter';
+                    defaultModel = modelOptimizerService.getBestFreeModel() || 'arcee-ai/trinity-large-preview:free';
+                    continue; // Retry immediately with new provider
+                }
+                // -------------------------------
 
                 // --- USER STRATEGY: 2.5 Flash -> 2.5 Flash Lite (SAME KEY) ---
                 if (defaultModel === 'gemini-2.5-flash' || currentModel === 'gemini-2.5-flash' || currentModel === 'gemini-2.0-flash') {
