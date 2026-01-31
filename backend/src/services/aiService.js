@@ -24,6 +24,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now
         'gemini-2.5-flash': 'gemini-2.0-flash', // Map 2.5 Flash to stable 2.0 Flash (API doesn't support 2.5 yet)
         'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // Map friendly name to official ID
+        // Groq Aliases
+        'groq-fast': 'llama-3.3-70b-versatile', // Best balance of speed/quality on Groq
+        'groq-speed': 'llama-3.1-8b-instant', // Fastest, lower intelligence
+        'grok-4.1-fast': 'llama-3.3-70b-versatile', // Map User's "Grok" request to Groq's Llama 3.3
     };
 
     if (MODEL_ALIASES[defaultModel]) {
@@ -74,30 +78,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
     
-    // Construct the System Message (n8n style)
-    const n8nSystemPrompt = `
-You are a helpful AI assistant for a business page.
-Your name is ${pageConfig.bot_name || 'Assistant'}.
-You are talking to ${senderName}.
+    // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
+    const n8nSystemPrompt = `Role: Assistant ${pageConfig.bot_name || 'Assistant'} for business page. User: ${senderName}.
+Context: ${basePrompt}
+DB Knowledge: ${contextChunk ? contextChunk : "N/A"}
 
-CONTEXT (System Knowledge):
-${basePrompt}
-
-RELEVANT KNOWLEDGE (From Database):
-${contextChunk ? contextChunk : "No specific database knowledge found for this query."}
-
-INSTRUCTIONS:
-1. You MUST reply in BENGALI (Bangla) unless the user explicitly asks in English.
-2. If the user asks for price/order, encourage them politely.
-3. You MUST output your response in valid JSON format with these fields:
-   - "reply": The text reply to the user (in Bengali).
-   - "sentiment": "positive", "neutral", or "negative".
-   - "dm_message": (Optional) A private message if needed, otherwise null.
-   - "bad_words": (Optional) Any detected bad words, otherwise null.
-   - "order_details": (Optional) If the user provides order info (Name, Address, Phone), return an object: { "product_name": "...", "quantity": 1, "address": "...", "phone": "...", "price": "..." }, otherwise null.
-
-IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the raw JSON string.
-`;
+Instructions:
+1. Reply in BENGALI (Bangla).
+2. Encourage orders politely.
+3. Output strictly RAW JSON (no markdown) with fields:
+   - "reply": Text reply (Bengali).
+   - "sentiment": "positive"|"neutral"|"negative".
+   - "dm_message": Private message or null.
+   - "bad_words": Detected bad words or null.
+   - "order_details": If order info present (Name, Address, Phone), return { "product_name", "quantity", "address", "phone", "price" }, else null.`;
 
     const systemMessage = { role: 'system', content: n8nSystemPrompt };
     
@@ -111,8 +105,10 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
 
     // --- UNIFIED AI REQUEST LOGIC ---
 
-    // PHASE 1: Try User-Provided Keys (if available)
-    if (pageConfig.api_key && pageConfig.api_key !== 'MANAGED_SECRET_KEY') {
+    const useCheapEngine = pageConfig.cheap_engine !== false; // Default to true if null/undefined
+
+    // PHASE 1: Try User-Provided Keys (if available and NOT using cheap engine)
+    if (!useCheapEngine && pageConfig.api_key && pageConfig.api_key !== 'MANAGED_SECRET_KEY') {
         const userKeys = pageConfig.api_key.split(',').map(k => k.trim()).filter(k => k);
         if (userKeys.length > 0) {
             // Shuffle user keys for load balancing
@@ -126,7 +122,13 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
                 let currentProvider = defaultProvider;
                 if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
                 else if (currentKey.startsWith('AIzaSy')) currentProvider = 'google';
-                else if (currentKey.startsWith('gsk_')) currentProvider = 'groq';
+                else if (currentKey.startsWith('gsk_')) {
+                    currentProvider = 'groq';
+                    // If user didn't specify a model (or left it as default gemini), force the BEST Groq model
+                    if (defaultModel.includes('gemini') || defaultModel === 'default') {
+                        defaultModel = 'llama-3.3-70b-versatile';
+                    }
+                }
                 else if (currentKey.startsWith('xai-')) currentProvider = 'xai';
 
                 // Configure Base URL
@@ -168,15 +170,21 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
                     // Continue to next user key
                 }
             }
-            console.warn("[AI] All user-provided keys failed. Falling back to Managed Pool...");
+            console.warn("[AI] All user-provided keys failed. Aborting (Cheap Engine Disabled).");
+            return { reply: "Error: Your API Keys are invalid or exhausted. Please check settings.", sentiment: 'neutral' };
         }
     }
 
     // PHASE 2: Managed Mode (Dynamic Retry Loop from DB)
-    // We enter here if:
-    // a) User didn't provide keys (Managed Mode)
-    // b) User keys failed (Fallback)
+    // We enter here ONLY if cheap_engine is TRUE (or null default)
     
+    if (!useCheapEngine) {
+        // If cheap engine is OFF, we should have returned in Phase 1.
+        // If we are here, it means no user keys were provided OR they all failed.
+        console.warn("[AI] Cheap Engine is OFF and User Keys failed/missing. Stopping.");
+        return { reply: "Configuration Error: Please provide valid API keys or enable Cheap Engine.", sentiment: 'neutral' };
+    }
+
     let attempts = 0;
     const MAX_ATTEMPTS = 5;
     let lastError = null;

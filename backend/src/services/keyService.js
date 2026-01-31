@@ -45,6 +45,9 @@ const DEFAULT_LIMITS = {
     'gemini-1.5-pro': { rpm: 2, rpd: 50 },
     'gemini-1.0-pro': { rpm: 15, rpd: 1500 },
     'gpt-4o-mini': { rpm: 3, rpd: 200 },
+    // Groq Limits (Based on Official Docs)
+    'llama-3.3-70b-versatile': { rpm: 30, rpd: 1000 }, // High Intelligence, Lower Daily Limit
+    'llama-3.1-8b-instant': { rpm: 30, rpd: 14400 },   // High Speed, Massive Daily Limit
     'default': { rpm: 10, rpd: 1000 }
 };
 

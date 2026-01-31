@@ -105,6 +105,7 @@ async function getChatHistory(sessionId, limit = 10) {
     }
 
     // Supabase returns newest first due to order by id desc, so reverse them to be chronological
+    // User Feedback: "Full message na asle AI bujbe na". Reverting truncation.
     return data.map(row => row.message).reverse(); 
 }
 
