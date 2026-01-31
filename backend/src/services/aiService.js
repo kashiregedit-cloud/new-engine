@@ -9,14 +9,19 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     
     // --- MULTI-TENANCY SAFETY CHECK ---
     const pageId = pageConfig.page_id;
+    
+    // Check Cheap Engine Flag (Default to TRUE if undefined/null, for zero-cost)
+    const useCheapEngine = pageConfig.cheap_engine !== false;
+
     const promptPreview = pagePrompts?.text_prompt ? pagePrompts.text_prompt.substring(0, 30) : "DEFAULT";
-    console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
+    console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | CheapEngine: ${useCheapEngine} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
     // ----------------------------------
 
     // 1. Prepare Configuration
-    let defaultProvider = pageConfig.ai || 'gemini';
-    // Ensure model name is trimmed to avoid whitespace issues
-    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash'; 
+    // If Cheap Engine is ON, we force Groq (Llama 3.3) as the Zero-Cost Engine
+    let defaultProvider = useCheapEngine ? 'groq' : (pageConfig.ai || 'gemini');
+    let defaultModel = useCheapEngine ? 'llama-3.3-70b-versatile' : (pageConfig.chat_model ? pageConfig.chat_model.trim() : 'gemini-1.5-flash');
+ 
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
     const MODEL_ALIASES = {
@@ -74,6 +79,25 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }
     // ------------------------------------------------------------
 
+    // --- OPTIMIZATION: Truncate Context for Cheap/Groq Engine ---
+    // Groq has strict TPM limits. We must limit context size.
+    if (useCheapEngine || defaultProvider === 'groq') {
+        // 1. Limit History
+        const MAX_HISTORY = 4; // Keep last 4 messages (2 turns) for safety
+        if (history.length > MAX_HISTORY) {
+            console.log(`[AI] Truncating history from ${history.length} to ${MAX_HISTORY} for Groq/Cheap Engine.`);
+            history = history.slice(-MAX_HISTORY);
+        }
+
+        // 2. Limit RAG Context (if any)
+        // Groq Limit: ~6000-15000 TPM (Tokens Per Minute) depending on model.
+        // 3500 chars ~= 800-900 tokens. Safe enough for 10-15 RPM.
+        if (contextChunk && contextChunk.length > 3500) {
+             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to 3500 chars.`);
+             contextChunk = contextChunk.substring(0, 3500) + "...(truncated)";
+        }
+    }
+
     // --- PROMPT & MESSAGE CONSTRUCTION ---
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
@@ -104,8 +128,6 @@ Instructions:
     // -------------------------------------
 
     // --- UNIFIED AI REQUEST LOGIC ---
-
-    const useCheapEngine = pageConfig.cheap_engine !== false; // Default to true if null/undefined
 
     // PHASE 1: Try User-Provided Keys (if available and NOT using cheap engine)
     if (!useCheapEngine && pageConfig.api_key && pageConfig.api_key !== 'MANAGED_SECRET_KEY') {
