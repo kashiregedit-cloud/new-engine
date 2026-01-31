@@ -326,12 +326,32 @@ Instructions:
                 console.warn(`[AI] Key ...${currentKey.slice(-4)} QUOTA EXHAUSTED (RPD). Blocking until tomorrow.`);
                 keyService.markKeyAsQuotaExceeded(currentKey);
 
-                // --- BILLING/CREDIT FALLBACK ---
+                // --- BILLING/CREDIT FALLBACK (Command API Fallback) ---
                 if (errorBody.includes('billing') || errorBody.includes('credit')) {
-                    console.warn(`[AI] Detected BILLING/CREDIT issue with ${currentProvider}. Switching to Cheap Engine (OpenRouter) for retry.`);
+                    console.warn(`[AI] Detected BILLING/CREDIT issue with ${currentProvider}. Switching Provider...`);
+                    
+                    // If we have a configured fallback model in Command API, use it
+                    if (fallbackModel && fallbackModel !== defaultModel) {
+                        console.log(`[AI] Switching to Fallback Model: ${fallbackModel}`);
+                        defaultModel = fallbackModel;
+                        // Assuming fallback uses same provider or we re-detect?
+                        // Usually fallback is 'openrouter' if primary is 'google'.
+                        // We should probably re-detect provider based on model name or just try 'openrouter' if it looks like one.
+                        // But wait, command_api has 'provider' column for PRIMARY.
+                        // Fallback provider is not specified. We assume fallback is OpenRouter usually?
+                        // Or we can infer?
+                        if (fallbackModel.includes(':free') || fallbackModel.includes('/')) {
+                            defaultProvider = 'openrouter';
+                        } else if (fallbackModel.includes('gemini')) {
+                            defaultProvider = 'google'; // or gemini
+                        }
+                        continue;
+                    }
+
+                    // Default hardcoded fallback if no specific fallback set
                     defaultProvider = 'openrouter';
-                    defaultModel = modelOptimizerService.getBestFreeModel() || 'arcee-ai/trinity-large-preview:free';
-                    continue; // Retry immediately with new provider
+                    defaultModel = 'arcee-ai/trinity-large-preview:free';
+                    continue; 
                 }
                 // -------------------------------
 

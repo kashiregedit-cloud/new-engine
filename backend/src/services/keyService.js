@@ -70,10 +70,11 @@ async function updateKeyCache(force = false) {
 
     console.log("[KeyService] Refreshing API Key Cache from DB...");
     // Fetch all active keys, sorted by ID for consistent serial order
+    // FILTER: Only fetch GLOBAL keys (where page_id is NULL)
     const { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
-        // .eq('status', 'active') // Column 'status' does not exist yet
+        .is('page_id', null) // Ensure we don't use private/page-specific keys
         .order('id', { ascending: true }); 
 
     if (error) {

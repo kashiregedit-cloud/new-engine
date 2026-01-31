@@ -1,9 +1,0 @@
-{
-  "bestFreeModel": "arcee-ai/trinity-large-preview:free",
-  "modelStats": {
-    "id": "arcee-ai/trinity-large-preview:free",
-    "context": 131000,
-    "score": 142.75,
-    "updatedAt": "2026-01-31T09:00:48.849Z"
-  }
-}
