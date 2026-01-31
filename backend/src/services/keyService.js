@@ -69,13 +69,26 @@ async function updateKeyCache(force = false) {
     }
 
     console.log("[KeyService] Refreshing API Key Cache from DB...");
+    
     // Fetch all active keys, sorted by ID for consistent serial order
-    // FILTER: Only fetch GLOBAL keys (where page_id is NULL)
-    const { data: keys, error } = await dbService.supabase
+    // ATTEMPT 1: Try filtering by page_id (Global Keys only)
+    let { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
         .is('page_id', null) // Ensure we don't use private/page-specific keys
-        .order('id', { ascending: true }); 
+        .order('id', { ascending: true });
+
+    // ATTEMPT 2: If 'page_id' column is missing, fetch ALL keys (Backwards Compatibility)
+    if (error && error.message && error.message.includes('column "page_id" does not exist')) {
+        console.warn("[KeyService] 'page_id' column missing in api_list. Fetching ALL keys (ignoring isolation).");
+        const fallbackResult = await dbService.supabase
+            .from('api_list')
+            .select('*')
+            .order('id', { ascending: true });
+            
+        keys = fallbackResult.data;
+        error = fallbackResult.error;
+    }
 
     if (error) {
         console.error("[KeyService] Failed to refresh key cache:", error.message);

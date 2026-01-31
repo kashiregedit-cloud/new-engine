@@ -25,25 +25,41 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // - Cheap Engine flag is ignored if user explicitly sets configuration.
     
     // FETCH DYNAMIC CONFIG from DB (Zero Cost Engine)
-    let dynamicProvider = 'openrouter'; // Default
-    let dynamicModel = 'arcee-ai/trinity-large-preview:free'; // Default
-    let fallbackModel = null;
+    // NOTE: Gemini models on OpenRouter are NOT free. We default to a truly free OpenRouter model.
+    let dynamicProvider = 'openrouter'; 
+    let dynamicModel = 'liquid/lfm-2.5-1.2b-thinking:free'; // Verified Free Model
+    let fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Try this as backup
 
     if (useCheapEngine) {
         try {
             const commandConfig = await commandApiService.getCommandConfig();
             if (commandConfig) {
-                dynamicProvider = commandConfig.provider || 'openrouter';
+                dynamicProvider = commandConfig.provider || dynamicProvider;
                 dynamicModel = commandConfig.chatmodel || dynamicModel;
-                fallbackModel = commandConfig.fallback_chatmodel;
+                fallbackModel = commandConfig.fallback_chatmodel || fallbackModel;
             }
         } catch (err) {
-            console.warn("[AI] Failed to fetch Command API config, using defaults:", err.message);
+            console.warn("[AI] Failed to fetch Command API config, using strong defaults:", err.message);
         }
     }
 
-    let defaultProvider = pageConfig.ai || (useCheapEngine ? dynamicProvider : 'gemini');
-    let defaultModel = pageConfig.chat_model ? pageConfig.chat_model.trim() : (useCheapEngine ? dynamicModel : 'gemini-1.5-flash');
+    // PRIORITIZE PAGE CONFIG (User's specific choice overrides everything)
+    // Treat 'default' or 'auto' as null to trigger fallback
+    const userModel = (pageConfig.chat_model && pageConfig.chat_model !== 'default') ? pageConfig.chat_model.trim() : null;
+    const userProvider = pageConfig.ai || pageConfig.operator;
+
+    // IF user explicitly wants Gemini (via AIzaSy key), we switch provider to 'google' (Direct API is free)
+    // BUT if they rely on OpenRouter (sk-or-v1), we must respect the free model default.
+    let defaultProvider = userProvider || (useCheapEngine ? dynamicProvider : 'gemini');
+    let defaultModel = userModel || (useCheapEngine ? dynamicModel : 'gemini-1.5-flash');
+
+    // CORRECTION: If provider is OpenRouter but model is Gemini (and not marked free), warn or switch?
+    // User says: "Gemini is not free on OpenRouter".
+    // So if we are using OpenRouter default, we ensure it's NOT Gemini unless configured.
+    if (defaultProvider === 'openrouter' && defaultModel.includes('gemini') && !defaultModel.includes(':free')) {
+        console.warn(`[AI] Warning: ${defaultModel} on OpenRouter might not be free. Switching to free fallback.`);
+        defaultModel = 'liquid/lfm-2.5-1.2b-thinking:free';
+    }
 
     console.log(`[AI] Final Engine Config: ${defaultProvider} / ${defaultModel} (Fallback: ${fallbackModel || 'None'})`);
 
@@ -261,6 +277,26 @@ Instructions:
     const MAX_ATTEMPTS = 5;
     let lastError = null;
 
+    // ROBUST FALLBACK CHAIN: If the primary model fails (404/400), we try these in order.
+    // 1. Configured Fallback (from DB)
+    // 2. Hardcoded Free Models (OpenRouter/Google)
+    let fallbackList = [
+        'liquid/lfm-2.5-1.2b-thinking:free',
+        'google/gemini-2.0-flash-lite-preview-02-05:free',
+        'google/gemini-2.0-flash-exp:free',
+        'mistralai/mistral-7b-instruct:free',
+        'qwen/qwen-2-7b-instruct:free'
+    ];
+
+    // Inject DB Fallback at the top
+    if (fallbackModel) {
+        fallbackList.unshift(fallbackModel);
+    }
+    // Remove duplicates
+    fallbackList = [...new Set(fallbackList)];
+
+    let fallbackIndex = 0;
+
     while (attempts < MAX_ATTEMPTS) {
         attempts++;
         
@@ -332,6 +368,47 @@ Instructions:
             const errorBody = error.response ? JSON.stringify(error.response.data || {}) : error.message;
             const isQuota = errorBody.includes('quota') || errorBody.includes('exhausted') || status === 403;
             const isRateLimit = status === 429 || errorBody.includes('Rate limit') || errorBody.includes('Too Many Requests');
+
+            // CRITICAL FALLBACK: If Model Not Found (404/400) or unavailable, switch to next fallback
+            if (status === 404 || errorBody.includes('model_not_found') || errorBody.includes('does not exist')) {
+                console.warn(`[AI] Model ${currentModel} failed (404). Checking Command API for live updates...`);
+
+                // 1. Try to fetch FRESH config from DB (User might have just updated it)
+                try {
+                    const freshConfig = await commandApiService.getCommandConfig(true); // Force Refresh
+                    if (freshConfig) {
+                        // Check if Primary Model changed
+                        if (freshConfig.chatmodel && freshConfig.chatmodel !== currentModel && freshConfig.chatmodel !== defaultModel) {
+                            console.log(`[AI] LIVE UPDATE: Found new model ${freshConfig.chatmodel}. Switching...`);
+                            defaultModel = freshConfig.chatmodel;
+                            continue; // Retry immediately
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[AI] Failed to refresh config:", err.message);
+                }
+
+                // 2. Proceed with Fallback Chain
+                
+                // DYNAMIC MERGE: Add live free models from OpenRouter to the chain
+                if (fallbackIndex === 0) { // Only fetch once at the start of fallback logic
+                    const dynamicFreeModels = await commandApiService.getFreeOpenRouterModels();
+                    if (dynamicFreeModels && dynamicFreeModels.length > 0) {
+                         // Append unique models to the end of the list
+                         const newModels = dynamicFreeModels.filter(m => !fallbackList.includes(m));
+                         fallbackList = [...fallbackList, ...newModels];
+                         console.log(`[AI] Extended Fallback Chain with ${newModels.length} dynamic free models.`);
+                    }
+                }
+
+                if (fallbackIndex < fallbackList.length) {
+                    const nextModel = fallbackList[fallbackIndex++];
+                    console.warn(`[AI] Switching to fallback: ${nextModel}`);
+                    defaultModel = nextModel; // Update for next iteration
+                    // Don't mark key as dead, just the model is bad
+                    continue;
+                }
+            }
 
             if (isQuota) {
                 console.warn(`[AI] Key ...${currentKey.slice(-4)} QUOTA EXHAUSTED (RPD). Blocking until tomorrow.`);
