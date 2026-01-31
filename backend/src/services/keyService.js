@@ -23,21 +23,29 @@ const pendingUpdates = new Set();
 // Flush Interval (Every 5 Seconds for better visibility)
 setInterval(flushUsageStats, 5 * 1000);
 
+// --- Background Cache Refresh (Every 5 Minutes) ---
+// Proactively fetches new keys/limits from DB to keep memory fresh
+setInterval(() => {
+    console.log("[KeyService] Background cache refresh triggered.");
+    updateKeyCache(true); // force = true
+}, 5 * 60 * 1000);
+// --------------------------------------------------
+
 // --- Default Limits Map (Fallback if DB values are null) ---
 // Based on typical Free Tier limits as of early 2025
 const DEFAULT_LIMITS = {
-    'gemini-3-pro': { rpm: 2, rpd: 50 }, // Assuming high tier/strict
+    'gemini-3-pro': { rpm: 2, rpd: 50 },
     'gemini-3-flash': { rpm: 10, rpd: 1500 },
-    'gemini-2.5-flash': { rpm: 5, rpd: 20 }, // User reported strict limits (RPM 5, RPD 20)
-    'gemini-2.5-flash-lite': { rpm: 15, rpd: 1500 }, // Likely higher limits
+    'gemini-2.5-flash': { rpm: 5, rpd: 20 }, // Strict limit (User reported)
+    'gemini-2.5-flash-lite': { rpm: 5, rpd: 40 }, // User estimate: 25 keys for 1k msgs = 40 RPD
     'gemini-2.5-pro': { rpm: 2, rpd: 50 },
     'gemini-2.0-flash': { rpm: 10, rpd: 1500 },
     'gemini-1.5-flash': { rpm: 15, rpd: 1500 },
     'gemini-1.5-flash-8b': { rpm: 15, rpd: 1500 },
-    'gemini-1.5-pro': { rpm: 2, rpd: 50 }, // Very strict!
+    'gemini-1.5-pro': { rpm: 2, rpd: 50 },
     'gemini-1.0-pro': { rpm: 15, rpd: 1500 },
-    'gpt-4o-mini': { rpm: 3, rpd: 200 }, // Example fallback
-    'default': { rpm: 10, rpd: 1000 } // Safe fallback
+    'gpt-4o-mini': { rpm: 3, rpd: 200 },
+    'default': { rpm: 10, rpd: 1000 }
 };
 
 // --- Helper: Update Cache ---
@@ -208,23 +216,55 @@ async function flushUsageStats() {
     const keysToUpdate = Array.from(pendingUpdates);
     pendingUpdates.clear();
 
-    for (const apiKey of keysToUpdate) {
+    // OPTIMIZATION: Bulk Upsert to prevent Server Overload with 2400+ keys
+    const updates = keysToUpdate.map(apiKey => {
         const cachedKey = keyCache.find(k => k.api === apiKey);
-        if (!cachedKey) continue;
+        if (!cachedKey) return null;
+        
+        // We need to include 'api' for the upsert conflict target
+        // And other required fields if they are missing (but we are updating, so it's fine)
+        // Note: For upsert to work on 'api', it must be a unique constraint.
+        // The schema usually has 'id' as PK, but we can try to use 'api' as match.
+        // If 'api' is not unique constraint, we must fetch ID. 
+        // Assuming 'api' is unique enough or we use loop fallback if upsert fails.
+        
+        return {
+            api: apiKey,
+            usage_today: cachedKey.usage_today,
+            usage_tokens_today: cachedKey.usage_tokens_today,
+            last_date_checked: cachedKey.last_date_checked,
+            last_used_at: cachedKey.last_used_at,
+            // Preserve other required fields if it's an insert (it won't be, but good practice)
+            provider: cachedKey.provider, 
+            model: cachedKey.model
+        };
+    }).filter(k => k !== null);
 
-        try {
-            await dbService.supabase
-                .from('api_list')
-                .update({ 
-                    usage_today: cachedKey.usage_today,
-                    usage_tokens_today: cachedKey.usage_tokens_today,
-                    last_date_checked: cachedKey.last_date_checked,
-                    last_used_at: cachedKey.last_used_at
-                })
-                .eq('api', apiKey);
-        } catch (err) {
-            console.error(`[KeyService] Failed to flush stats for key ${apiKey.substring(0,6)}...`, err.message);
+    if (updates.length === 0) return;
+
+    try {
+        // Try Bulk Upsert first (Much faster)
+        const { error } = await dbService.supabase
+            .from('api_list')
+            .upsert(updates, { onConflict: 'api', ignoreDuplicates: false });
+
+        if (error) {
+            // console.warn("[KeyService] Bulk upsert failed (likely no unique constraint on 'api'). Falling back to loop...", error.message);
+            // Fallback to loop if upsert fails
+            for (const update of updates) {
+                await dbService.supabase
+                    .from('api_list')
+                    .update({ 
+                        usage_today: update.usage_today,
+                        usage_tokens_today: update.usage_tokens_today,
+                        last_date_checked: update.last_date_checked,
+                        last_used_at: update.last_used_at
+                    })
+                    .eq('api', update.api);
+            }
         }
+    } catch (err) {
+        console.error(`[KeyService] Failed to flush stats`, err.message);
     }
 }
 

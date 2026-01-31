@@ -51,93 +51,99 @@ export default function MessengerConversionPage() {
     const storedPageId = localStorage.getItem("active_fb_page_id");
     setActivePageId(storedPageId);
     if (storedPageId) {
-        fetchMessages(storedPageId);
+        fetchStats(storedPageId);
     }
-  }, []); // Fetch only once on mount or manual refresh
+  }, []); // Fetch stats once on mount
 
   useEffect(() => {
-    // Calculate filtered counts when date or messages change
-    if (messages.length > 0 && date?.from && date?.to) {
-        const filtered = messages.filter(msg => {
-            const msgDate = new Date(msg.created_at);
-            return isWithinInterval(msgDate, {
-                start: date.from!,
-                end: date.to!
-            });
-        });
-
-        const botReplies = filtered.filter((msg: any) => msg.reply_by === 'bot').length;
-        setFilteredBotReplyCount(botReplies);
-
-        // Calculate Filtered Tokens
-        const filteredTokens = filtered.reduce((acc: number, msg: any) => acc + (msg.token || 0), 0);
-        setFilteredTokenCount(filteredTokens);
-
-        // Calculate Token Breakdown
-        const breakdown: Record<string, number> = {};
-        filtered.forEach((msg: any) => {
-            if (msg.reply_by === 'bot' && msg.token > 0) {
-                const model = msg.ai_model || 'Unknown';
-                breakdown[model] = (breakdown[model] || 0) + msg.token;
-            }
-        });
-        setTokenBreakdown(breakdown);
-
-    } else if (messages.length > 0 && !date?.from) {
-         // If no date selected, maybe show all? Or 0? 
-         // Usually we default to today, so date is usually set.
-         // If date is undefined, show 0 or all. Let's stick to 0 or maintain last state.
-         // Actually initial state has Today set.
+    // Fetch messages whenever date or pageId changes
+    if (activePageId && date?.from && date?.to) {
+        fetchMessages(activePageId, date.from, date.to);
     }
-  }, [date, messages]);
+  }, [activePageId, date]);
 
-  const handleFilterChange = (value: string) => {
-    setFilterType(value);
-    const today = new Date();
-    
-    switch (value) {
-        case "today":
-            setDate({ from: startOfDay(today), to: endOfDay(today) });
-            break;
-        case "yesterday":
-            const yesterday = subDays(today, 1);
-            setDate({ from: startOfDay(yesterday), to: endOfDay(yesterday) });
-            break;
-        case "last7":
-            setDate({ from: startOfDay(subDays(today, 7)), to: endOfDay(today) });
-            break;
-        case "custom":
-            // Keep current date or reset to default
-            break;
-    }
+  // Separate function for All Time Stats (Optimized)
+  const fetchStats = async (pageId: string) => {
+      try {
+          // Try using the optimized RPC function first
+          const { data: stats, error: rpcError } = await (supabase as any)
+            .rpc('get_page_stats', { p_page_id: pageId });
+
+          if (!rpcError && stats) {
+              // RPC returns JSON, so we access properties directly
+              // Note: stats might be an object like { total_tokens: 123, bot_replies: 456 }
+              // @ts-ignore
+              setAllTimeBotReplies(stats.bot_replies || 0);
+              // @ts-ignore
+              setAllTimeTokenCount(stats.total_tokens || 0);
+              return;
+          }
+          
+          if (rpcError) {
+             console.warn("RPC get_page_stats failed, falling back to client-side calc:", rpcError.message);
+          }
+
+          // FALLBACK: Client-side calculation (Slower for large datasets)
+          // 1. Count Bot Replies (Head only - extremely fast)
+          const { count: replyCount } = await supabase
+              .from('fb_chats')
+              .select('*', { count: 'exact', head: true })
+              .eq('page_id', pageId)
+              .eq('reply_by', 'bot');
+          
+          setAllTimeBotReplies(replyCount || 0);
+
+          // 2. Sum Tokens (Fetch only token column - lighter than full rows)
+          const { data: tokenData } = await supabase
+              .from('fb_chats')
+              .select('token')
+              .eq('page_id', pageId)
+              .gt('token', 0); // Only rows with tokens
+          
+          // @ts-ignore
+          const totalTokens = tokenData?.reduce((acc, curr) => acc + (curr.token || 0), 0) || 0;
+          setAllTimeTokenCount(totalTokens);
+
+      } catch (e) {
+          console.error("Stats fetch error", e);
+      }
   };
 
-  const fetchMessages = async (pageId: string) => {
+  const fetchMessages = async (pageId: string, from: Date, to: Date) => {
     setLoading(true);
     try {
-      // Fetch ALL messages for the page
+      // Fetch messages filtered by DATE RANGE from DB (Server-side filtering)
       let query = supabase
         .from('fb_chats')
-        .select('*', { count: 'exact' })
+        .select('*')
         .eq('page_id', pageId)
+        .gte('created_at', from.toISOString())
+        .lte('created_at', to.toISOString())
         .order('created_at', { ascending: false });
 
-      // @ts-ignore
-      const { data, error, count } = await query;
+      const { data, error } = await query;
 
       if (error) throw error;
 
-      setMessages(data || []);
+      const fetchedMessages = data || [];
+      setMessages(fetchedMessages);
       
-      // Calculate All Time Bot Replies
-      const allBotReplies = data?.filter((msg: any) => msg.reply_by === 'bot').length || 0;
-      setAllTimeBotReplies(allBotReplies);
+      // Calculate filtered stats from the fetched subset
+      const botReplies = fetchedMessages.filter((msg: any) => msg.reply_by === 'bot').length;
+      setFilteredBotReplyCount(botReplies);
 
-      // Calculate All Time Tokens
-      const allTokens = data?.reduce((acc: number, msg: any) => acc + (msg.token || 0), 0) || 0;
-      setAllTimeTokenCount(allTokens);
+      const filteredTokens = fetchedMessages.reduce((acc: number, msg: any) => acc + (msg.token || 0), 0);
+      setFilteredTokenCount(filteredTokens);
 
-      // Initial filter calculation will be handled by the useEffect dependent on 'messages'
+      // Token Breakdown
+      const breakdown: Record<string, number> = {};
+      fetchedMessages.forEach((msg: any) => {
+          if (msg.reply_by === 'bot' && msg.token > 0) {
+              const model = msg.ai_model || 'Unknown';
+              breakdown[model] = (breakdown[model] || 0) + msg.token;
+          }
+      });
+      setTokenBreakdown(breakdown);
 
     } catch (error) {
       console.error("Error fetching messages:", error);
@@ -147,10 +153,31 @@ export default function MessengerConversionPage() {
     }
   };
 
+  const handleFilterChange = (val: string) => {
+    setFilterType(val);
+    const now = new Date();
+    
+    if (val === 'today') {
+        setDate({ from: startOfDay(now), to: endOfDay(now) });
+    } else if (val === 'yesterday') {
+        const y = subDays(now, 1);
+        setDate({ from: startOfDay(y), to: endOfDay(y) });
+    } else if (val === 'last7') {
+        setDate({ from: subDays(now, 7), to: endOfDay(now) });
+    }
+    // custom: date picker handles it
+  };
+
   const handleRefresh = () => {
     const storedPageId = localStorage.getItem("active_fb_page_id");
     if (storedPageId) {
-        fetchMessages(storedPageId);
+        if (date?.from && date?.to) {
+             fetchMessages(storedPageId, date.from, date.to);
+             fetchStats(storedPageId); // Also refresh stats
+        } else {
+             fetchMessages(storedPageId, startOfDay(new Date()), endOfDay(new Date()));
+             fetchStats(storedPageId);
+        }
     } else {
         toast.error("No active page found. Please connect a database.");
     }

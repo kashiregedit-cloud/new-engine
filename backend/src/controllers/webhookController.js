@@ -279,7 +279,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         
         console.log("Fetching context data in parallel...");
         
-        const historyLimit = 50; // Default history limit
+        // Reduced history limit to save tokens (User Feedback: "System token besi kasse")
+        const historyLimit = 20; 
         
         const [pagePrompts, userProfile, fbMessages, history, typingResult] = await Promise.all([
             dbService.getPagePrompts(pageId),

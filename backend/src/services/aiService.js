@@ -1,7 +1,7 @@
 const keyService = require('./keyService');
 const ragService = require('./ragService');
 const axios = require('axios');
-const { OpenAI } = require('openai');
+const OpenAI = require('openai');
 const FormData = require('form-data');
 
 // Step 2: Business Logic / AI Brain
@@ -22,6 +22,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     const MODEL_ALIASES = {
         'gemini-2.0-flash-exp': 'gemini-2.0-flash', // Auto-upgrade old "exp" users to latest 2.0
         'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now
+        'gemini-2.5-flash': 'gemini-2.0-flash', // Map 2.5 Flash to stable 2.0 Flash (API doesn't support 2.5 yet)
+        'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // Map friendly name to official ID
     };
 
     if (MODEL_ALIASES[defaultModel]) {
@@ -246,6 +248,58 @@ IMPORTANT: Do not output markdown code blocks (like \`\`\`json). Just output the
             if (isQuota) {
                 console.warn(`[AI] Key ...${currentKey.slice(-4)} QUOTA EXHAUSTED (RPD). Blocking until tomorrow.`);
                 keyService.markKeyAsQuotaExceeded(currentKey);
+
+                // --- USER STRATEGY: 2.5 Flash -> 2.5 Flash Lite (SAME KEY) ---
+                if (defaultModel === 'gemini-2.5-flash' || currentModel === 'gemini-2.5-flash' || currentModel === 'gemini-2.0-flash') {
+                     const fallbackModel = 'gemini-2.0-flash-lite-preview-02-05';
+                     console.warn(`[AI] 2.5 Flash Quota Hit on key ...${currentKey.slice(-4)}. Trying ${fallbackModel} on SAME KEY...`);
+                     
+                     try {
+                         const liteCompletion = await openai.chat.completions.create({
+                             model: fallbackModel,
+                             messages: messages,
+                             response_format: { type: "json_object" }
+                         });
+                         
+                         if (liteCompletion.choices && liteCompletion.choices.length > 0) {
+                             console.log(`[AI] Fallback to Lite SUCCESS on same key!`);
+                             const rawContent = liteCompletion.choices[0].message.content;
+                             const usage = liteCompletion.usage || {};
+                             const tokenUsage = usage.total_tokens || 0;
+                             
+                             // Record usage (It will count towards the key's stats, which is fine)
+                             keyService.recordKeyUsage(currentKey, tokenUsage);
+                             
+                             try {
+                                 const parsed = JSON.parse(rawContent);
+                                 return { ...parsed, token_usage: tokenUsage, model: fallbackModel };
+                             } catch (e) {
+                                 return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: fallbackModel };
+                             }
+                         }
+                     } catch (liteError) {
+                         console.warn(`[AI] Fallback to Lite FAILED on same key: ${liteError.message}`);
+                         // If Lite also fails, we proceed to next key in main loop
+                     }
+                }
+                // -------------------------------------------------------------
+                
+                // --- GLOBAL STRATEGY: Fallback on Quota Hit ---
+                // Only switch global defaultModel if we haven't already handled it or if we want to persist the switch
+                if (defaultModel === 'gemini-2.5-flash') {
+                     // We tried same key above. If we are here, it means we might need to switch globally for NEXT attempt?
+                     // Actually, the loop continues. Next key will be picked.
+                     // But if ALL keys fail 2.5 Flash, we might want to switch to Lite for future keys?
+                     // User said: "next api pick korba". So we just let the loop continue.
+                     // We DON'T switch defaultModel here to 'lite' permanently for this loop, 
+                     // because we want to try Flash first on the next key too (unless user implies otherwise).
+                     // However, if the user wants "Once Flash is over, use Lite", 
+                     // usually that means "Flash is over for EVERYONE".
+                     // But here we are rotating keys. Maybe next key has Flash quota.
+                     // So we do NOT change defaultModel. We just let the loop pick next key.
+                }
+                // --------------------------------------------
+
             } else if (isRateLimit) {
                 console.warn(`[AI] Key ...${currentKey.slice(-4)} RATE LIMITED (RPM/TPM). Blocking for 1 min.`);
                 keyService.markKeyAsDead(currentKey, 60 * 1000, 'rate_limit');
