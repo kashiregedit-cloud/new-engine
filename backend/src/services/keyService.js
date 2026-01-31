@@ -75,9 +75,21 @@ async function updateKeyCache(force = false) {
     let { data: keys, error } = await dbService.supabase
         .from('api_list')
         .select('*')
-        .is('page_id', null) // Ensure we don't use private/page-specific keys
+        //.is('page_id', null) // TEMPORARILY DISABLED: The 'is' filter fails if column doesn't exist
         .order('id', { ascending: true });
 
+    // Client-side filtering for safety (since we can't trust the column exists in query)
+    if (keys) {
+         // If page_id property exists in the returned objects, filter by it.
+         // If it doesn't exist (undefined), we assume it's an old schema global key.
+         const globalKeys = keys.filter(k => !k.page_id);
+         
+         // Only replace keys if we actually filtered something (meaning column exists)
+         // If column is missing, k.page_id is undefined, so !undefined is true. All keys kept.
+         keys = globalKeys;
+    }
+
+    /*
     // ATTEMPT 2: If 'page_id' column is missing, fetch ALL keys (Backwards Compatibility)
     if (error && error.message && error.message.includes('column "page_id" does not exist')) {
         console.warn("[KeyService] 'page_id' column missing in api_list. Fetching ALL keys (ignoring isolation).");
@@ -89,6 +101,7 @@ async function updateKeyCache(force = false) {
         keys = fallbackResult.data;
         error = fallbackResult.error;
     }
+    */
 
     if (error) {
         console.error("[KeyService] Failed to refresh key cache:", error.message);
