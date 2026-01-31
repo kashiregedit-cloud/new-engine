@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const webhookRoutes = require('./routes/webhookRoutes');
+const whatsappRoutes = require('./routes/whatsappRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 
 const app = express();
@@ -13,6 +14,7 @@ app.use(express.json());
 // We mount the webhook route at /webhook or /api/webhook based on preference
 // The user's n8n.json used /webhook
 app.use('/webhook', webhookRoutes);
+app.use('/whatsapp', whatsappRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Basic health check

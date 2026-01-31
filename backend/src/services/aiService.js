@@ -681,6 +681,22 @@ async function processImageWithVision(imageUrl, pageConfig) {
 
     console.log(`[Vision] Analyzing image with ${effectiveProvider}/${model}...`);
 
+    // --- DOWNLOAD IMAGE TO BASE64 (Fix for Localhost/WAHA) ---
+    // Cloud AI (Gemini/OpenAI) cannot access local URLs (e.g. localhost:3000).
+    // We must download the image on the backend and send it as Base64.
+    let finalImageUrl = imageUrl;
+    try {
+        console.log(`[Vision] Downloading image for Base64 conversion...`);
+        const imgResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const base64 = Buffer.from(imgResponse.data).toString('base64');
+        const mimeType = imgResponse.headers['content-type'] || 'image/jpeg';
+        finalImageUrl = `data:${mimeType};base64,${base64}`;
+        console.log(`[Vision] Converted to Base64 (${base64.length} chars).`);
+    } catch (e) {
+        console.warn(`[Vision] Failed to download image (using original URL): ${e.message}`);
+    }
+    // ---------------------------------------------------------
+
     const response = await openai.chat.completions.create({
       model: model,
       messages: [
@@ -688,7 +704,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
           role: "user",
           content: [
             { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
-            { type: "image_url", image_url: { url: imageUrl } }
+            { type: "image_url", image_url: { url: finalImageUrl } }
           ]
         }
       ],
