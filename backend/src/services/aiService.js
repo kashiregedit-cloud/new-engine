@@ -276,7 +276,8 @@ Ctx: ${basePrompt}
 ${personaInstruction}
 Rules:
 1. Reply in BENGALI.
-2. Output RAW JSON:
+2. PHONE VALIDATION: If user provides a phone number, it MUST be a valid 11-digit number (for Bangladesh) or valid international format. If invalid (e.g. less than 11 digits), ask for the correct number again. DO NOT confirm order or extract 'order_details' until a valid number is provided.
+3. Output RAW JSON:
 {
   "reply": "Bengali text",
   "sentiment": "pos|neu|neg",

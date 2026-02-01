@@ -192,6 +192,7 @@ export default function MessengerOrderTrackingPage() {
                               <TableHead>Price</TableHead>
                               <TableHead>Location</TableHead>
                               <TableHead>Customer</TableHead>
+                              <TableHead className="w-[50px]"></TableHead>
                           </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -219,6 +220,20 @@ export default function MessengerOrderTrackingPage() {
                                     </Popover>
                                   </TableCell>
                                   <TableCell>{order.number}</TableCell>
+                                  <TableCell>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleCopy(order)}
+                                      title="Copy Order Details"
+                                    >
+                                      {copiedId === order.id ? (
+                                        <Check className="h-4 w-4 text-green-500" />
+                                      ) : (
+                                        <Copy className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </TableCell>
                               </TableRow>
                           ))}
                       </TableBody>
