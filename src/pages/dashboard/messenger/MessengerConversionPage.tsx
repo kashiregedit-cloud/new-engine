@@ -389,7 +389,7 @@ export default function MessengerConversionPage() {
                       {msg.token ? (
                           <div className="flex flex-col">
                               <span className="font-bold">{msg.token}</span>
-                              {msg.ai_model && <span className="text-[10px] text-muted-foreground">{msg.ai_model}</span>}
+                              {msg.ai_model && <span className="text-[10px] text-muted-foreground">{msg.ai_model.replace(':free', '')}</span>}
                           </div>
                       ) : (
                           <span className="text-muted-foreground">-</span>
