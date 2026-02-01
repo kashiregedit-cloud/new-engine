@@ -81,10 +81,17 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Estimate: 1 Token ~= 3-4 chars (English), but 1 Token ~= 1-2 chars (Bengali).
     // Safe Limit for Groq: 6,000 - 8,000 tokens.
     // Let's check the raw length of system prompt + user message.
-    const estimatedChars = (pagePrompts?.text_prompt?.length || 0) + userMessage.length + 2000; // +2000 for history/buffer
     
-    if (useCheapEngine && estimatedChars > 15000) {
-        console.log(`[AI] Prompt is huge (~${estimatedChars} chars). Groq might fail (12k TPM). Switching to Gemini 1.5 Flash.`);
+    // ADJUSTMENT FOR ZERO COST: 
+    // If using OpenRouter/Arcee, we don't need to fear 15k chars.
+    // Only apply this check strictly for GROQ.
+    
+    const effectivePromptLen = (pagePrompts?.text_prompt?.length || 0);
+    const estimatedChars = effectivePromptLen + userMessage.length + 2000; 
+    
+    // Only Switch if using Groq AND it's too big. OpenRouter can handle it.
+    if (defaultProvider === 'groq' && estimatedChars > 15000) {
+        console.log(`[AI] Context is huge (~${estimatedChars} chars) for GROQ. Switching to Gemini 1.5 Flash.`);
         defaultProvider = 'gemini';
         defaultModel = 'gemini-1.5-flash';
     }
@@ -178,14 +185,37 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // 2. We ONLY truncate if we successfully retrieved Data from RAG (KB).
     //    If RAG is empty (User didn't ingest data), we MUST keep the full prompt to ensure Output Quality.
     if (useCheapEngine) {
-        const BEHAVIOR_LIMIT = 1000; // ~250 Tokens reserved for Persona/Rules
-        if (basePrompt.length > BEHAVIOR_LIMIT) {
-             if (contextChunk && contextChunk.length > 50) {
-                 console.log(`[AI] Zero Cost Mode: Safe to truncate System Prompt (${basePrompt.length} -> ${BEHAVIOR_LIMIT}). Data found in KB.`);
-                 basePrompt = basePrompt.substring(0, BEHAVIOR_LIMIT) + "\n...[System Prompt Truncated. Use Knowledge Base for Details].";
-             } else {
-                 console.warn(`[AI] Zero Cost Mode Warning: KB is empty! Keeping full System Prompt (${basePrompt.length} chars) to maintain Output Quality.`);
-             }
+        console.log(`[AI DEBUG] Checking Zero Cost Optimization. ContextChunk Length: ${contextChunk ? contextChunk.length : 0}`);
+        
+        // SMART ZERO COST STRATEGY:
+        // 1. If we found relevant data in RAG (`contextChunk`), we don't need the huge System Prompt "Data" section.
+        //    We can safely truncate to keep just the "Behavior" (first ~1000 chars). -> SAVES TOKENS.
+        // 2. If we found NO data in RAG:
+        //    - If Provider is Groq: We MUST truncate if > 6000 (or it crashes).
+        //    - If Provider is OpenRouter: We KEEP the full prompt (to ensure we don't miss data that RAG might have missed).
+        
+        const isGroq = defaultProvider === 'groq';
+        const hasRAGData = contextChunk && contextChunk.length > 50;
+        const BEHAVIOR_LIMIT = 1000; 
+        const GROQ_LIMIT = 6000;
+
+        let shouldTruncate = false;
+
+        if (hasRAGData) {
+            // Best Case: We have specific data, so we cut the noise.
+            shouldTruncate = true; 
+            console.log(`[AI] Smart Optimization: RAG Data found (${contextChunk.length} chars). Truncating System Prompt to save tokens.`);
+        } else if (isGroq && basePrompt.length > GROQ_LIMIT) {
+             // Forced Case: Groq can't handle it.
+             shouldTruncate = true;
+             console.log(`[AI] Smart Optimization: Groq limit exceeded (${basePrompt.length} chars). Forced truncation.`);
+        } else {
+             // OpenRouter + No RAG Data -> Keep Full Prompt for Quality
+             console.log(`[AI] Smart Optimization: No RAG Data & Safe Provider. Keeping Full Prompt (${basePrompt.length} chars) to ensure Quality.`);
+        }
+
+        if (shouldTruncate && basePrompt.length > BEHAVIOR_LIMIT) {
+             basePrompt = basePrompt.substring(0, BEHAVIOR_LIMIT) + "\n...(Rest of prompt removed. Data provided via RAG).";
         }
     }
     
@@ -215,6 +245,13 @@ Rules:
 
     const systemMessage = { role: 'system', content: n8nSystemPrompt };
     
+    // DEBUG LOGGING FOR TOKEN USAGE
+    console.log(`[AI DEBUG] FINAL PAYLOAD STATS:`);
+    console.log(`- Base Prompt Length: ${basePrompt.length} chars`);
+    console.log(`- Context Chunk Length: ${contextChunk ? contextChunk.length : 0} chars`);
+    console.log(`- History Length: ${JSON.stringify(history).length} chars`);
+    console.log(`- Total System Message Length: ${systemMessage.content.length} chars`);
+
     // Construct Messages Array
     const messages = [
         systemMessage,
