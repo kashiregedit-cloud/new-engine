@@ -4,10 +4,40 @@ const commandApiService = require('./commandApiService'); // Command API Table S
 const axios = require('axios');
 const OpenAI = require('openai');
 const FormData = require('form-data');
+const crypto = require('crypto');
+
+// --- IN-MEMORY CACHE FOR ZERO COST ---
+// Map<hash, { reply: string, timestamp: number }>
+const responseCache = new Map();
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 Hour Cache
+const CACHE_SIZE_LIMIT = 500; // Prevent memory leaks
+
+function getCacheKey(pageId, message) {
+    // Normalize message: lowercase, remove special chars
+    const normalized = message.toLowerCase().replace(/[^\w\s\u0980-\u09FF]/g, '').trim();
+    return `${pageId}:${normalized}`;
+}
+// -------------------------------------
 
 // Step 2: Business Logic / AI Brain
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
+    // --- 0. SMART CACHE CHECK (Zero Cost) ---
+    // If the exact same question was asked recently for this page, return cached reply.
+    const cacheKey = getCacheKey(pageConfig.page_id, userMessage);
+    const cachedItem = responseCache.get(cacheKey);
+    
+    if (cachedItem) {
+        const isFresh = (Date.now() - cachedItem.timestamp) < CACHE_TTL_MS;
+        if (isFresh) {
+            console.log(`[AI CACHE] Hit! Returning cached reply for: "${userMessage}"`);
+            return cachedItem.reply;
+        } else {
+            responseCache.delete(cacheKey); // Expired
+        }
+    }
+    // ----------------------------------------
+
     // --- MULTI-TENANCY SAFETY CHECK ---
     const pageId = pageConfig.page_id;
     
@@ -170,8 +200,29 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // STRICTER LIMIT for Zero Cost: 1200 chars (~300 tokens)
         const MAX_RAG_CHARS = 1200;
         if (contextChunk && contextChunk.length > MAX_RAG_CHARS) {
-             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to ${MAX_RAG_CHARS} chars.`);
-             contextChunk = contextChunk.substring(0, MAX_RAG_CHARS) + "...(truncated)";
+             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to ${MAX_RAG_CHARS} chars (Smart Chunking).`);
+             
+             // Split back into chunks (assuming \n\n separator)
+             const chunks = contextChunk.split('\n\n');
+             let optimizedContext = "";
+             let currentLen = 0;
+             
+             for (const chunk of chunks) {
+                 if (currentLen + chunk.length < MAX_RAG_CHARS) {
+                     optimizedContext += chunk + "\n\n";
+                     currentLen += chunk.length + 2;
+                 } else {
+                      // If adding the next chunk exceeds limit, stop here. 
+                      // Exception: If we have NO chunks yet (first one is huge), take a substring of it.
+                      if (currentLen === 0) {
+                           optimizedContext = chunk.substring(0, MAX_RAG_CHARS) + "...(truncated)";
+                      }
+                      // Don't cut mid-sentence for subsequent chunks.
+                      break; 
+                  }
+             }
+             contextChunk = optimizedContext.trim();
+             console.log(`[AI] Optimized RAG Context Length: ${contextChunk.length} chars.`);
         }
     }
 
@@ -189,7 +240,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // This meets User's requirement: "system prompt jotoi long hok... token kabe 1500-2K".
     const SAFE_TOKEN_CHAR_LIMIT = 8000; 
 
-    if (useCheapEngine || basePrompt.length > SAFE_TOKEN_CHAR_LIMIT) {
+    // REVERTED BY USER REQUEST: "token besi kaileo output amr valo dorakar"
+    // We are disabling the Smart/Mini-RAG filtering to restore full context quality.
+    // if (useCheapEngine || basePrompt.length > SAFE_TOKEN_CHAR_LIMIT) {
+    if (false) { // DISABLED: Always send full prompt for now
         console.log(`[AI DEBUG] Checking Smart Optimization. ContextChunk Length: ${contextChunk ? contextChunk.length : 0}`);
         
         // DYNAMIC PROMPT FILTERING (MINI-RAG)
@@ -477,13 +531,15 @@ Rules:
                 const tokenUsage = usage.total_tokens || usage.totalTokens || 0;
                 keyService.recordKeyUsage(currentKey, tokenUsage);
                 
+                let finalResponse = null;
+
                 try {
                     const parsed = JSON.parse(rawContent);
                     // Normalize keys (Robustness for Missing 'reply')
                     if (!parsed.reply) {
                         parsed.reply = parsed.response || parsed.message || parsed.answer || parsed.text || parsed.content || parsed.bot_reply;
                     }
-                    return { ...parsed, token_usage: tokenUsage, model: currentModel };
+                    finalResponse = { ...parsed, token_usage: tokenUsage, model: currentModel };
                 } catch (e) {
                     // CLEANUP: If model returns "Thinking" tags (DeepSeek R1), strip them
                     let cleanContent = rawContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -494,12 +550,28 @@ Rules:
                         if (!parsed.reply) {
                             parsed.reply = parsed.response || parsed.message || parsed.answer || parsed.text || parsed.content || parsed.bot_reply;
                         }
-                        return { ...parsed, token_usage: tokenUsage, model: currentModel };
+                        finalResponse = { ...parsed, token_usage: tokenUsage, model: currentModel };
                     } catch (e2) {
                         console.warn("AI returned invalid JSON, falling back to raw text:", cleanContent.substring(0, 100) + "...");
-                        return { reply: cleanContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: currentModel };
+                        finalResponse = { reply: cleanContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: currentModel };
                     }
                 }
+
+                // --- CACHE SUCCESSFUL RESPONSE ---
+                if (finalResponse && finalResponse.reply) {
+                    if (responseCache.size > CACHE_SIZE_LIMIT) {
+                         const firstKey = responseCache.keys().next().value;
+                         responseCache.delete(firstKey);
+                    }
+                    responseCache.set(cacheKey, { 
+                        reply: finalResponse, 
+                        timestamp: Date.now() 
+                    });
+                    console.log(`[AI CACHE] Saved reply for: "${userMessage.substring(0, 20)}..."`);
+                }
+                // ---------------------------------
+
+                return finalResponse;
             }
         } catch (error) {
             console.warn(`[AI] Phase 2 Error with ...${currentKey.slice(-4)}: ${error.message}`);
