@@ -66,19 +66,19 @@ async function fetchOgImage(url) {
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
     // --- 0. SMART CACHE CHECK (Zero Cost) ---
-    // If the exact same question was asked recently for this page, return cached reply.
-    const cacheKey = getCacheKey(pageConfig.page_id, userMessage);
-    const cachedItem = responseCache.get(cacheKey);
+    // DISABLED TEMPORARILY TO FIX CROSS-PAGE LEAK
+    // const cacheKey = getCacheKey(pageConfig.page_id, userMessage, senderName);
+    // const cachedItem = responseCache.get(cacheKey);
     
-    if (cachedItem) {
-        const isFresh = (Date.now() - cachedItem.timestamp) < CACHE_TTL_MS;
-        if (isFresh) {
-            console.log(`[AI CACHE] Hit! Returning cached reply for: "${userMessage}"`);
-            return cachedItem.reply;
-        } else {
-            responseCache.delete(cacheKey); // Expired
-        }
-    }
+    // if (cachedItem) {
+    //     const isFresh = (Date.now() - cachedItem.timestamp) < CACHE_TTL_MS;
+    //     if (isFresh) {
+    //         console.log(`[AI CACHE] Hit! Returning cached reply for: "${userMessage}"`);
+    //         return cachedItem.reply;
+    //     } else {
+    //         responseCache.delete(cacheKey); // Expired
+    //     }
+    // }
     // ----------------------------------------
 
     // --- MULTI-TENANCY SAFETY CHECK ---
@@ -240,9 +240,9 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // This meets User's requirement: "system prompt jotoi long hok... token kabe 1500-2K".
     const SAFE_TOKEN_CHAR_LIMIT = 8000; 
 
-    // REVERTED BY USER REQUEST: "token besi kaileo output amr valo dorakar"
-    // We are disabling the Smart/Mini-RAG filtering to restore full context quality.
-    // if (useCheapEngine || basePrompt.length > SAFE_TOKEN_CHAR_LIMIT) {
+    // REVERTED BY USER REQUEST: "rag er ager version ta ano"
+    // We are RE-ENABLING the Smart/Mini-RAG filtering to fix context leaks/hallucinations caused by huge prompts.
+    // if (basePrompt.length > SAFE_TOKEN_CHAR_LIMIT) {
     if (false) { // DISABLED: Always send full prompt for now
         console.log(`[AI DEBUG] Checking Smart Optimization. ContextChunk Length: ${contextChunk ? contextChunk.length : 0}`);
         
@@ -621,17 +621,18 @@ Rules:
                 }
 
                 // --- CACHE SUCCESSFUL RESPONSE ---
-                if (finalResponse && finalResponse.reply) {
-                    if (responseCache.size > CACHE_SIZE_LIMIT) {
-                         const firstKey = responseCache.keys().next().value;
-                         responseCache.delete(firstKey);
-                    }
-                    responseCache.set(cacheKey, { 
-                        reply: finalResponse, 
-                        timestamp: Date.now() 
-                    });
-                    console.log(`[AI CACHE] Saved reply for: "${userMessage.substring(0, 20)}..."`);
-                }
+                // DISABLED TEMPORARILY
+                // if (finalResponse && finalResponse.reply) {
+                //     if (responseCache.size > CACHE_SIZE_LIMIT) {
+                //          const firstKey = responseCache.keys().next().value;
+                //          responseCache.delete(firstKey);
+                //     }
+                //     responseCache.set(cacheKey, { 
+                //         reply: finalResponse, 
+                //         timestamp: Date.now() 
+                //     });
+                //     console.log(`[AI CACHE] Saved reply for: "${userMessage.substring(0, 20)}..."`);
+                // }
                 // ---------------------------------
 
                 return finalResponse;
