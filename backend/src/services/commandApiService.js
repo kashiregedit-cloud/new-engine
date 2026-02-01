@@ -12,8 +12,8 @@ let lastFreeModelUpdate = 0;
 
 async function getFreeOpenRouterModels() {
     const now = Date.now();
-    // Cache for 1 Hour to avoid spamming OpenRouter API
-    if (freeModelCache.length > 0 && now - lastFreeModelUpdate < 60 * 60 * 1000) {
+    // Cache for 2 Hours (User Requirement) to avoid spamming OpenRouter API
+    if (freeModelCache.length > 0 && now - lastFreeModelUpdate < 2 * 60 * 60 * 1000) {
         return freeModelCache;
     }
 

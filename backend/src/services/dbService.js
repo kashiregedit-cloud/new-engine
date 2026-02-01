@@ -254,55 +254,69 @@ async function saveOrderTracking(orderData) {
     
     console.log(`[Order] Attempting to save order for ${sender_id}...`);
 
-    // --- DUPLICATE CHECK LOGIC (Updated for Robustness) ---
-    // User Strategy: "time set na kore customer er privious 20-30 ta conversion check korba"
-    // We check the LAST order from this user. If it's the SAME product/qty/price, we treat it as the same order session.
-    // We only Insert if it's a DIFFERENT order or adds new critical info (like address/phone) that wasn't there?
-    // Actually, simply checking if the last order matches the current one is safest to prevent "bar bar save".
+    // --- DUPLICATE CHECK LOGIC (Production Level) ---
+    // User Strategy: "Check 24 hours window for same pending order"
+    // Goal: Prevent duplicate orders for same item if already pending.
     
-    const { data: lastOrder, error: checkError } = await supabase
+    // 1. Find ANY recent order for this user (last 24 hours)
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    
+    const { data: recentOrders, error: checkError } = await supabase
         .from('fb_order_tracking')
         .select('*')
-        .eq('number', number) // Filter by user phone/id
-        .order('id', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-        
-    if (checkError) {
-        console.error("[Order] Error checking duplicates:", checkError.message);
-    }
+        .eq('number', number) // Identify by User (Phone/ID)
+        .gte('created_at', twentyFourHoursAgo)
+        .order('id', { ascending: false });
+
+    if (checkError) console.error("[Order] Error checking duplicates:", checkError.message);
     
-    if (lastOrder) {
-        // Compare Logic
-        const isSameProduct = lastOrder.product_name === product_name;
-        // const isSameQty = lastOrder.product_quantity === product_quantity; // Qty might change, that's an update
+    let existingOrder = null;
+
+    if (recentOrders && recentOrders.length > 0) {
+        // 2. Fuzzy Match Product Name
+        // Simple normalization: lowercase, remove spaces/special chars
+        const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const currentProd = normalize(product_name);
         
-        // If it's the same product and saved recently (e.g. within 12 hours), we assume it's the same conversation
-        const timeDiff = Date.now() - new Date(lastOrder.created_at).getTime();
-        const twelveHours = 12 * 60 * 60 * 1000;
+        // Find if any recent order matches this product
+        existingOrder = recentOrders.find(o => {
+            // Check Product Name Match
+            const existingProd = normalize(o.product_name);
+            // Check Similarity (Exact contains)
+            const isMatch = existingProd.includes(currentProd) || currentProd.includes(existingProd);
+            // Check Status (Only update if PENDING)
+            // Assuming default status is 'pending' or null. If 'shipped'/'completed', allow new order.
+            const isPending = !o.status || o.status === 'pending' || o.status === 'new';
+            
+            return isMatch && isPending;
+        });
+    }
+
+    if (existingOrder) {
+        console.log(`[Order] Found existing PENDING order (ID: ${existingOrder.id}) for "${product_name}". Updating...`);
         
-        if (isSameProduct && timeDiff < twelveHours) {
-             // Check if we are gaining new info?
-             // If old location was null and new one is present, maybe we should UPDATE or INSERT?
-             // User provided INSERT only. Let's skip to avoid "bar bar save" unless it's clearly different.
-             // If location is same or new is null, definitely skip.
-             
-             if (lastOrder.location === location || !location) {
-                 console.log(`[Order] Duplicate/Redundant order detected (ID: ${lastOrder.id}). Skipping.`);
-                 return null;
-             }
-             
-             // If location is new, we might want to save the improved version.
-             // Let's allow insert if location was missing before but present now.
-             if (lastOrder.location && location && lastOrder.location !== location) {
-                 // Location CHANGED? Might be a correction. Allow save.
-             } else if (!lastOrder.location && location) {
-                 // New Location added. Allow save.
-             } else {
-                 console.log(`[Order] Duplicate order detected (ID: ${lastOrder.id}). Skipping.`);
-                 return null;
-             }
+        // UPSERT LOGIC: Update the existing order with new details
+        // Only update fields if they are provided (not null) and different
+        const updatePayload = {};
+        
+        if (location && location !== existingOrder.location) updatePayload.location = location;
+        if (product_quantity && product_quantity !== existingOrder.product_quantity) updatePayload.product_quantity = product_quantity;
+        if (price && price !== existingOrder.price) updatePayload.price = price;
+        // if (product_name) updatePayload.product_name = product_name; // Keep original name or update? Maybe keep original to avoid confusion.
+        
+        if (Object.keys(updatePayload).length > 0) {
+            const { error: updateError } = await supabase
+                .from('fb_order_tracking')
+                .update(updatePayload)
+                .eq('id', existingOrder.id);
+                
+            if (updateError) console.error(`[Order] Failed to update order ${existingOrder.id}:`, updateError.message);
+            else console.log(`[Order] Successfully updated order ${existingOrder.id} with new info.`);
+        } else {
+            console.log(`[Order] No new info to update for order ${existingOrder.id}. Skipping.`);
         }
+        
+        return null; // Stop here, don't create new order
     }
     // -----------------------------
 

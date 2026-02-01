@@ -167,22 +167,9 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     ];
     // ----------------------------------------
 
-    // --- RAG: HYBRID CONTEXT INJECTION (The Brain + The Book) ---
+    // --- RAG REMOVED BY USER REQUEST ---
     let contextChunk = "";
-    try {
-        // Only fetch context if we have a valid pageId
-        if (pageId) {
-            const knowledge = await ragService.searchKnowledge(cleanUserMessage, pageId);
-            if (knowledge && knowledge.length > 0) {
-                contextChunk = knowledge.map(k => k.content).join("\n\n");
-                console.log(`[RAG] Injected ${knowledge.length} knowledge chunks for Page ${pageId}`);
-            }
-        }
-    } catch (err) {
-        console.error(`[RAG] Failed to retrieve context: ${err.message}`);
-        // Proceed without RAG, do not fail the request
-    }
-    // ------------------------------------------------------------
+    // -----------------------------------
 
     // --- OPTIMIZATION: Truncate Context for Cheap/Groq Engine ---
     // Groq has strict TPM limits. We must limit context size.
@@ -192,37 +179,6 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         if (history.length > MAX_HISTORY) {
             console.log(`[AI] Truncating history from ${history.length} to ${MAX_HISTORY} for Cheap Engine.`);
             history = history.slice(-MAX_HISTORY);
-        }
-
-        // 2. Limit RAG Context (if any)
-        // Groq Limit: ~6000-15000 TPM (Tokens Per Minute) depending on model.
-        // 3500 chars ~= 800-900 tokens. Safe enough for 10-15 RPM.
-        // STRICTER LIMIT for Zero Cost: 1200 chars (~300 tokens)
-        const MAX_RAG_CHARS = 1200;
-        if (contextChunk && contextChunk.length > MAX_RAG_CHARS) {
-             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to ${MAX_RAG_CHARS} chars (Smart Chunking).`);
-             
-             // Split back into chunks (assuming \n\n separator)
-             const chunks = contextChunk.split('\n\n');
-             let optimizedContext = "";
-             let currentLen = 0;
-             
-             for (const chunk of chunks) {
-                 if (currentLen + chunk.length < MAX_RAG_CHARS) {
-                     optimizedContext += chunk + "\n\n";
-                     currentLen += chunk.length + 2;
-                 } else {
-                      // If adding the next chunk exceeds limit, stop here. 
-                      // Exception: If we have NO chunks yet (first one is huge), take a substring of it.
-                      if (currentLen === 0) {
-                           optimizedContext = chunk.substring(0, MAX_RAG_CHARS) + "...(truncated)";
-                      }
-                      // Don't cut mid-sentence for subsequent chunks.
-                      break; 
-                  }
-             }
-             contextChunk = optimizedContext.trim();
-             console.log(`[AI] Optimized RAG Context Length: ${contextChunk.length} chars.`);
         }
     }
 
@@ -347,7 +303,6 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
     const n8nSystemPrompt = `Role: Bot ${pageConfig.bot_name || 'Assistant'} for ${senderName}.
 Ctx: ${basePrompt}
-KB: ${contextChunk ? contextChunk : "N/A"}
 ${personaInstruction}
 Rules:
 1. Reply in BENGALI.
@@ -467,19 +422,49 @@ Rules:
 
     // ROBUST FALLBACK CHAIN: If the primary model fails (404/400), we try these in order.
     // 1. Configured Fallback (from DB)
-    // 2. Hardcoded Free Models (OpenRouter/Google)
-    let fallbackList = [
-        'liquid/lfm-2.5-1.2b-thinking:free',
-        'google/gemini-2.0-flash-lite-preview-02-05:free',
-        'google/gemini-2.0-flash-exp:free',
-        'mistralai/mistral-7b-instruct:free',
-        'qwen/qwen-2-7b-instruct:free'
-    ];
+    // 2. Gemini Chain (2.5 Flash -> 2.5 Flash Lite -> 2.0 Flash)
+    // 3. Dynamic Free Models (OpenRouter - Best available)
+    
+    let fallbackList = [];
 
-    // Inject DB Fallback at the top
-    if (fallbackModel) {
-        fallbackList.unshift(fallbackModel);
+    // A. Explicit Gemini Chain (User Preference)
+    const GEMINI_CHAIN = [
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-2.0-flash'
+    ];
+    
+    // Add Gemini chain, excluding the one we just tried (defaultModel)
+    GEMINI_CHAIN.forEach(m => {
+        if (m !== defaultModel && MODEL_ALIASES[m] !== defaultModel) {
+            fallbackList.push(m);
+        }
+    });
+
+    // B. Inject DB Fallback (if any)
+    if (fallbackModel && !fallbackList.includes(fallbackModel)) {
+        fallbackList.unshift(fallbackModel); // Prioritize DB config if set
     }
+
+    // C. Dynamic OpenRouter Free Models (The "Safety Net")
+    try {
+        const freeModels = await commandApiService.getFreeOpenRouterModels();
+        // Take top 3 best free models
+        if (freeModels && freeModels.length > 0) {
+            const topFree = freeModels.slice(0, 3);
+            console.log(`[AI] Added Dynamic Free Models to Fallback: ${topFree.join(', ')}`);
+            fallbackList.push(...topFree);
+        }
+    } catch (err) {
+        console.warn("[AI] Failed to fetch dynamic free models:", err.message);
+        // Fallback to hardcoded list if API fails
+        fallbackList.push(
+            'liquid/lfm-2.5-1.2b-thinking:free',
+            'google/gemini-2.0-flash-lite-preview-02-05:free',
+            'mistralai/mistral-7b-instruct:free'
+        );
+    }
+
     // Remove duplicates
     fallbackList = [...new Set(fallbackList)];
 
@@ -488,18 +473,45 @@ Rules:
     while (attempts < MAX_ATTEMPTS) {
         attempts++;
         
+        // Determine Provider for the current model
+        // If it's a Gemini model (no slash), provider is 'gemini'
+        // If it's OpenRouter (has slash), provider is 'openrouter'
+        let targetModel = defaultModel;
+        let targetProvider = defaultProvider;
+
+        // If this is a RETRY (attempts > 1), pick from fallbackList
+        if (attempts > 1) {
+            if (fallbackIndex < fallbackList.length) {
+                targetModel = fallbackList[fallbackIndex];
+                fallbackIndex++;
+                
+                // Smart Provider Detection for Fallback
+                if (targetModel.includes('/') || targetModel.endsWith(':free')) {
+                    targetProvider = 'openrouter';
+                } else if (targetModel.includes('gemini')) {
+                    targetProvider = 'gemini';
+                } else if (targetModel.includes('llama') || targetModel.includes('grok')) {
+                    targetProvider = 'groq'; // Assumption for raw IDs, but usually OR IDs have slashes
+                }
+                
+                console.log(`[AI] Switching to Fallback Strategy: ${targetProvider}/${targetModel}`);
+            } else {
+                 console.error(`[AI] Exhausted all fallback models. Stopping.`);
+                 break;
+            }
+        }
+
         // Fetch ONE best candidate from DB
-        // NOTE: keyService is now relaxed to return ANY provider key if model-specific key is missing.
-        const keyObj = await keyService.getSmartKey(defaultProvider, defaultModel);
+        const keyObj = await keyService.getSmartKey(targetProvider, targetModel);
         
         if (!keyObj) {
-            console.error(`[AI] Phase 2: No healthy keys found for ${defaultProvider}/${defaultModel}. Stopping.`);
-            break; 
+            console.error(`[AI] Phase 2: No healthy keys found for ${targetProvider}/${targetModel}. Skipping...`);
+            continue; // Try next fallback
         }
 
         const currentKey = keyObj.key;
-        let currentProvider = keyObj.provider || defaultProvider;
-        let currentModel = keyObj.model || defaultModel;
+        let currentProvider = keyObj.provider || targetProvider;
+        let currentModel = keyObj.model || targetModel;
 
         // Auto-Detect Provider
         if (currentKey.startsWith('sk-or-v1')) currentProvider = 'openrouter';
