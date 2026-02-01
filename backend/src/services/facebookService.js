@@ -86,7 +86,7 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
             return response.data;
         }
     } catch (error) {
-        console.error(`Error sending FB message for page ${pageId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error sending FB message for page ${pageId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         throw error;
     }
 }
@@ -168,7 +168,7 @@ async function sendImageUpload(pageId, recipientId, imageUrl, accessToken) {
         
         return response.data;
     } catch (error) {
-        console.error(`Error uploading image for page ${pageId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error uploading image for page ${pageId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         // Fallback to URL method if upload fails (e.g. file too big)
         console.log('Falling back to URL send method...');
         return sendImageMessage(pageId, recipientId, imageUrl, accessToken);
@@ -196,7 +196,7 @@ async function sendImageMessage(pageId, recipientId, imageUrl, accessToken) {
         const response = await axios.post(url, payload);
         return response.data;
     } catch (error) {
-        console.error(`Error sending image for page ${pageId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error sending image for page ${pageId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         throw error;
     }
 }
@@ -223,7 +223,7 @@ async function sendCarouselMessage(pageId, recipientId, elements, accessToken) {
         const response = await axios.post(url, payload);
         return response.data;
     } catch (error) {
-        console.error(`Error sending carousel for page ${pageId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error sending carousel for page ${pageId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         throw error;
     }
 }
@@ -238,7 +238,7 @@ async function replyToComment(commentId, message, accessToken) {
         const response = await axios.post(url, { message: message });
         return response.data;
     } catch (error) {
-        console.error(`Error replying to comment ${commentId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error replying to comment ${commentId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         throw error;
     }
 }
@@ -250,7 +250,7 @@ async function getCommentReplies(commentId, accessToken) {
         const response = await axios.get(url);
         return response.data.data || [];
     } catch (error) {
-        console.error(`Error getting comment replies ${commentId}:`, error.response ? error.response.data : error.message);
+        console.error(`Error getting comment replies ${commentId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
         return [];
     }
 }

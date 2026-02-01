@@ -11,10 +11,11 @@ const responseCache = new Map();
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 Hour Cache
 const CACHE_SIZE_LIMIT = 500; // Prevent memory leaks
 
-function getCacheKey(pageId, message) {
+function getCacheKey(pageId, message, senderName) {
     // Normalize message: lowercase, remove special chars
     const normalized = message.toLowerCase().replace(/[^\w\s\u0980-\u09FF]/g, '').trim();
-    return `${pageId}:${normalized}`;
+    // LEAK FIX: Include senderName in cache key to prevent cross-user data leaks
+    return `${pageId}:${senderName}:${normalized}`;
 }
 // -------------------------------------
 
