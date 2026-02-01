@@ -20,7 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Calendar as CalendarIcon, Download, ShoppingBag } from "lucide-react";
+import { Calendar as CalendarIcon, Download, ShoppingBag, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 
 export default function OrderTrackingPage() {
@@ -28,6 +28,21 @@ export default function OrderTrackingPage() {
   const [orderLoading, setOrderLoading] = useState(false);
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom'>('today');
   const [date, setDate] = useState<Date | undefined>(new Date());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = (order: any) => {
+    const textToCopy = `Product: ${order.product_name || 'N/A'}
+Qty: ${order.product_quantity || '1'}
+Price: ${order.price || 'N/A'}
+Location: ${order.location || 'N/A'}
+Phone: ${order.number || 'N/A'}`;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopiedId(order.id);
+      toast.success("Order details copied to clipboard");
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   useEffect(() => {
     const fetchOrders = async () => {
