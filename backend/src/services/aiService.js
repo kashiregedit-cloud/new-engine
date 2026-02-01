@@ -172,14 +172,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
 
-    // ZERO COST OPTIMIZATION: If we have RAG Context (KB), we assume the 'Data' is in the KB.
-    // However, we MUST preserve the 'Behavior/Persona' (usually at the start of the prompt).
-    // Strategy: Truncate the System Prompt to keep the first ~1000 chars (Behavior) and cut the rest (Data).
-    if (useCheapEngine && contextChunk && contextChunk.length > 50) {
+    // ZERO COST OPTIMIZATION: SAFE TOKEN CONTROL
+    // Strategy: 
+    // 1. "Behavior" (System Prompt) is capped at ~1000 chars. 
+    // 2. We ONLY truncate if we successfully retrieved Data from RAG (KB).
+    //    If RAG is empty (User didn't ingest data), we MUST keep the full prompt to ensure Output Quality.
+    if (useCheapEngine) {
         const BEHAVIOR_LIMIT = 1000; // ~250 Tokens reserved for Persona/Rules
         if (basePrompt.length > BEHAVIOR_LIMIT) {
-            console.log(`[AI] Zero Cost Optimization: Truncated System Prompt from ${basePrompt.length} to ${BEHAVIOR_LIMIT} chars to save tokens.`);
-            basePrompt = basePrompt.substring(0, BEHAVIOR_LIMIT) + "\n...(Rest of prompt removed to save tokens. Use KB for data).";
+             if (contextChunk && contextChunk.length > 50) {
+                 console.log(`[AI] Zero Cost Mode: Safe to truncate System Prompt (${basePrompt.length} -> ${BEHAVIOR_LIMIT}). Data found in KB.`);
+                 basePrompt = basePrompt.substring(0, BEHAVIOR_LIMIT) + "\n...[System Prompt Truncated. Use Knowledge Base for Details].";
+             } else {
+                 console.warn(`[AI] Zero Cost Mode Warning: KB is empty! Keeping full System Prompt (${basePrompt.length} chars) to maintain Output Quality.`);
+             }
         }
     }
     
