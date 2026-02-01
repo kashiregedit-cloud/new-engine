@@ -1,5 +1,4 @@
 const aiService = require('../services/aiService');
-// const ragService = require('../services/ragService');
 
 async function optimizePrompt(req, res) {
     try {
@@ -35,10 +34,7 @@ async function ingestKnowledge(req, res) {
 
         // Run ingestion in background (don't block response)
         // RAG REMOVED BY USER REQUEST
-        // ragService.ingestPrompt(pageId, promptText).catch(err => {
-        //    console.error("Background Ingestion Error:", err);
-        // });
-
+        
         return res.json({ success: true, message: "Ingestion skipped (RAG Disabled)" });
 
     } catch (error) {
