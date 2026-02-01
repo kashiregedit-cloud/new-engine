@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BACKEND_URL } from "@/config";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -140,7 +141,7 @@ export default function MessengerControlPage() {
         
         // Auto-Trigger RAG Ingestion in Background
         if (pageId) {
-            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/ingest`, {
+            fetch(`${BACKEND_URL}/api/ai/ingest`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pageId: pageId, promptText: tempPrompt })
@@ -161,11 +162,11 @@ export default function MessengerControlPage() {
     if (!tempPrompt) return;
     setOptimizing(true);
     try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/optimize-prompt`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ promptText: tempPrompt })
-        });
+      const response = await fetch(`${BACKEND_URL}/api/ai/optimize-prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptText: tempPrompt })
+      });
         
         const data = await response.json();
         if (data.success && data.optimizedPrompt) {

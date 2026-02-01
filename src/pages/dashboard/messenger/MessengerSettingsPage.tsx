@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BACKEND_URL } from "@/config";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -207,7 +208,7 @@ export default function MessengerSettingsPage() {
         
         // Auto-Trigger RAG Ingestion in Background
         if (pageId) {
-            fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/ingest`, {
+            fetch(`${BACKEND_URL}/api/ai/ingest`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pageId: pageId, promptText: tempPrompt })
@@ -250,11 +251,11 @@ export default function MessengerSettingsPage() {
     }
 
     setOptimizing(true);
-    try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/ai/optimize-prompt`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ promptText: tempPrompt })
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/ai/optimize-prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ promptText: tempPrompt })
         });
 
         const data = await response.json();

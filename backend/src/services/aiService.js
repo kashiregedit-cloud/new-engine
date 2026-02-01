@@ -215,7 +215,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     // --- OPTIMIZATION: Truncate Context for Cheap/Groq Engine ---
     // Groq has strict TPM limits. We must limit context size.
-    if (useCheapEngine || defaultProvider === 'groq') {
+    // REVERTED BY USER REQUEST: "token besi kaileo output amr valo dorakar" - Disable history truncation
+    if (false) { // was: if (useCheapEngine || defaultProvider === 'groq')
         // 1. Limit History
         const MAX_HISTORY = 4; // Keep last 4 messages (2 turns) for safety
         if (history.length > MAX_HISTORY) {

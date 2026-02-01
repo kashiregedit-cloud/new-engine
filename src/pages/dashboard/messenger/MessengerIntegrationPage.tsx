@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BACKEND_URL } from "@/config";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -248,7 +249,7 @@ export default function MessengerIntegrationPage() {
 
         // Exchange for Long-Lived Token via Backend
         try {
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+            const backendUrl = BACKEND_URL;
             const exchangeResponse = await fetch(`${backendUrl}/api/auth/facebook/exchange-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
