@@ -99,7 +99,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // FETCH DYNAMIC CONFIG from DB (Zero Cost Engine)
     // NOTE: Gemini models on OpenRouter are NOT free. We default to a truly free OpenRouter model.
     let dynamicProvider = 'openrouter'; 
-    let dynamicModel = 'arcee-ai/trinity-large-preview:free'; // Verified Free Model (High Performance)
+    let dynamicModel = 'arcee-ai/trinity-large-preview'; // Verified Free Model (High Performance) - Display name (clean)
     let fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Try this as backup
 
     if (useCheapEngine) {
@@ -130,7 +130,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         if (defaultProvider === 'gemini') {
             defaultModel = 'gemini-1.5-flash'; // Safe default for Gemini Provider
         } else if (defaultProvider === 'openrouter') {
-            defaultModel = useCheapEngine ? dynamicModel : 'arcee-ai/trinity-large-preview:free';
+            defaultModel = useCheapEngine ? dynamicModel : 'arcee-ai/trinity-large-preview';
         } else if (defaultProvider === 'groq') {
             defaultModel = 'llama-3.3-70b-versatile';
         } else {
@@ -144,7 +144,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // BUT if user explicitly chose it (userModel is set), we respect it.
     if (!userModel && defaultProvider === 'openrouter' && defaultModel.includes('gemini') && !defaultModel.includes(':free')) {
         console.warn(`[AI] Warning: ${defaultModel} on OpenRouter might not be free. Switching to free fallback.`);
-        defaultModel = 'arcee-ai/trinity-large-preview:free';
+        defaultModel = 'arcee-ai/trinity-large-preview';
     }
 
     console.log(`[AI] Final Engine Config: ${defaultProvider} / ${defaultModel} (Fallback: ${fallbackModel || 'None'})`);
@@ -574,8 +574,15 @@ Rules:
             const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
             console.log(`[AI] Phase 2 (Attempt ${attempts}): Calling ${currentProvider}/${currentModel}...`);
             
+            // LOGIC: If using OpenRouter and model is 'arcee-ai/trinity-large-preview', append ':free' for the API call
+            // But keep currentModel clean for logging and response.
+            let apiModel = currentModel;
+            if (currentProvider === 'openrouter' && currentModel === 'arcee-ai/trinity-large-preview') {
+                apiModel = 'arcee-ai/trinity-large-preview:free';
+            }
+
             const completion = await openai.chat.completions.create({
-                model: currentModel,
+                model: apiModel,
                 messages: messages,
                 response_format: { type: "json_object" }
             });
@@ -707,7 +714,7 @@ Rules:
 
                     // Default hardcoded fallback if no specific fallback set
                     defaultProvider = 'openrouter';
-                    defaultModel = 'arcee-ai/trinity-large-preview:free';
+                    defaultModel = 'arcee-ai/trinity-large-preview';
                     continue; 
                 }
                 // -------------------------------

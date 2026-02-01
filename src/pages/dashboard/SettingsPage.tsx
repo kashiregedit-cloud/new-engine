@@ -206,7 +206,7 @@ export default function SettingsPage() {
                             if (val === 'openai') form.setValue('chatmodel', 'openai/gpt-4o');
                             if (val === 'google') form.setValue('chatmodel', 'google/gemini-2.0-flash-lite-preview-02-05:free');
                             if (val === 'groq') form.setValue('chatmodel', 'groq/llama-3.3-70b-versatile');
-                            if (val === 'openrouter') form.setValue('chatmodel', 'xiaomi/mimo-v2-flash:free');
+                            if (val === 'openrouter') form.setValue('chatmodel', 'arcee-ai/trinity-large-preview');
                             if (val === 'xai') form.setValue('chatmodel', 'xai/grok-beta');
                         }} 
                         defaultValue={field.value} 

@@ -169,10 +169,14 @@ export default function MessengerSettingsPage() {
         const isManaged = apiKey === MANAGED_SECRET_KEY || isActive;
         setMode(isManaged ? "managed" : "own");
 
+        // Clean model name (remove :free suffix for display)
+        const rawModel = pageRow.chat_model || "arcee-ai/trinity-large-preview";
+        const displayModel = rawModel.replace(':free', '');
+
         form.reset({
           provider: pageRow.ai || "openrouter",
           api_key: isManaged ? "" : apiKey, // Hide secret key
-          chatmodel: pageRow.chat_model || "xiaomi/mimo-v2-flash:free",
+          chatmodel: displayModel,
           text_prompt: dbRow.text_prompt || "",
         });
         
