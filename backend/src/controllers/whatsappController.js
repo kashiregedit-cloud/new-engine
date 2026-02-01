@@ -176,9 +176,12 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // --- FETCH CONTEXT ---
         const historyLimit = 20;
+        
+        // Parallel: Get Data + Mark Seen + Typing
         const [pagePrompts, history] = await Promise.all([
             dbService.getPagePrompts(pageId),
             dbService.getChatHistory(sessionId, historyLimit),
+            whatsappService.sendSeen(pageId, senderId),  // Mark as Seen
             whatsappService.sendTyping(pageId, senderId) // Typing indicator
         ]);
 
@@ -283,7 +286,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // --- SEND REPLY ---
-        let replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
+        let replyText = aiResponse.reply;
+
+        // User Instruction: If AI fails (reply is null/empty), DO NOT send anything.
+        if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
+             console.log(`[WA] No response generated. Skipping reply.`);
+             return;
+        }
         
         // Extract Images
         if (!aiResponse.images) aiResponse.images = [];

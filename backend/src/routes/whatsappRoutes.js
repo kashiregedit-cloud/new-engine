@@ -6,4 +6,11 @@ const whatsappController = require('../controllers/whatsappController');
 // Endpoint: /whatsapp/webhook
 router.post('/webhook', whatsappController.handleWebhook);
 
+// Get Sessions
+router.get('/sessions', async (req, res) => {
+    const whatsappService = require('../services/whatsappService');
+    const sessions = await whatsappService.getSessions(true);
+    res.json(sessions);
+});
+
 module.exports = router;

@@ -27,7 +27,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // FETCH DYNAMIC CONFIG from DB (Zero Cost Engine)
     // NOTE: Gemini models on OpenRouter are NOT free. We default to a truly free OpenRouter model.
     let dynamicProvider = 'openrouter'; 
-    let dynamicModel = 'liquid/lfm-2.5-1.2b-thinking:free'; // Verified Free Model
+    let dynamicModel = 'arcee-ai/trinity-large-preview:free'; // Verified Free Model (High Performance)
     let fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Try this as backup
 
     if (useCheapEngine) {
@@ -46,19 +46,33 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // PRIORITIZE PAGE CONFIG (User's specific choice overrides everything)
     // Treat 'default' or 'auto' as null to trigger fallback
     const userModel = (pageConfig.chat_model && pageConfig.chat_model !== 'default') ? pageConfig.chat_model.trim() : null;
-    const userProvider = pageConfig.ai || pageConfig.operator;
+    const userProvider = pageConfig.ai || pageConfig.operator; // 'ai' column in DB usually holds 'gemini', 'openrouter', etc.
 
     // IF user explicitly wants Gemini (via AIzaSy key), we switch provider to 'google' (Direct API is free)
     // BUT if they rely on OpenRouter (sk-or-v1), we must respect the free model default.
     let defaultProvider = userProvider || (useCheapEngine ? dynamicProvider : 'gemini');
-    let defaultModel = userModel || (useCheapEngine ? dynamicModel : 'gemini-1.5-flash');
+    let defaultModel = userModel;
+
+    // IF User did NOT specify a model (null), pick a smart default based on the Provider
+    if (!defaultModel) {
+        if (defaultProvider === 'gemini') {
+            defaultModel = 'gemini-1.5-flash'; // Safe default for Gemini Provider
+        } else if (defaultProvider === 'openrouter') {
+            defaultModel = useCheapEngine ? dynamicModel : 'arcee-ai/trinity-large-preview:free';
+        } else if (defaultProvider === 'groq') {
+            defaultModel = 'llama-3.3-70b-versatile';
+        } else {
+            defaultModel = useCheapEngine ? dynamicModel : 'gemini-1.5-flash'; // Catch-all
+        }
+    }
 
     // CORRECTION: If provider is OpenRouter but model is Gemini (and not marked free), warn or switch?
     // User says: "Gemini is not free on OpenRouter".
     // So if we are using OpenRouter default, we ensure it's NOT Gemini unless configured.
-    if (defaultProvider === 'openrouter' && defaultModel.includes('gemini') && !defaultModel.includes(':free')) {
+    // BUT if user explicitly chose it (userModel is set), we respect it.
+    if (!userModel && defaultProvider === 'openrouter' && defaultModel.includes('gemini') && !defaultModel.includes(':free')) {
         console.warn(`[AI] Warning: ${defaultModel} on OpenRouter might not be free. Switching to free fallback.`);
-        defaultModel = 'liquid/lfm-2.5-1.2b-thinking:free';
+        defaultModel = 'arcee-ai/trinity-large-preview:free';
     }
 
     console.log(`[AI] Final Engine Config: ${defaultProvider} / ${defaultModel} (Fallback: ${fallbackModel || 'None'})`);
@@ -146,42 +160,52 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // 2. Limit RAG Context (if any)
         // Groq Limit: ~6000-15000 TPM (Tokens Per Minute) depending on model.
         // 3500 chars ~= 800-900 tokens. Safe enough for 10-15 RPM.
-        if (contextChunk && contextChunk.length > 3500) {
-             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to 3500 chars.`);
-             contextChunk = contextChunk.substring(0, 3500) + "...(truncated)";
+        // STRICTER LIMIT for Zero Cost: 1200 chars (~300 tokens)
+        const MAX_RAG_CHARS = 1200;
+        if (contextChunk && contextChunk.length > MAX_RAG_CHARS) {
+             console.log(`[AI] Truncating RAG context from ${contextChunk.length} to ${MAX_RAG_CHARS} chars.`);
+             contextChunk = contextChunk.substring(0, MAX_RAG_CHARS) + "...(truncated)";
         }
     }
 
     // --- PROMPT & MESSAGE CONSTRUCTION ---
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
+
+    // ZERO COST OPTIMIZATION: If we have RAG Context (KB), we assume the 'Data' is in the KB.
+    // However, we MUST preserve the 'Behavior/Persona' (usually at the start of the prompt).
+    // Strategy: Truncate the System Prompt to keep the first ~1000 chars (Behavior) and cut the rest (Data).
+    if (useCheapEngine && contextChunk && contextChunk.length > 50) {
+        const BEHAVIOR_LIMIT = 1000; // ~250 Tokens reserved for Persona/Rules
+        if (basePrompt.length > BEHAVIOR_LIMIT) {
+            console.log(`[AI] Zero Cost Optimization: Truncated System Prompt from ${basePrompt.length} to ${BEHAVIOR_LIMIT} chars to save tokens.`);
+            basePrompt = basePrompt.substring(0, BEHAVIOR_LIMIT) + "\n...(Rest of prompt removed to save tokens. Use KB for data).";
+        }
+    }
     
     // Inject "Gemini Persona" for Cheap/OpenRouter models
     // User Requirement: "make it work like Gemini 2.5 Flash"
     let personaInstruction = "";
     if (useCheapEngine) {
-        personaInstruction = `
-IMPORTANT PERSONA: You are "Gemini 2.5 Flash", a highly advanced, fast, and efficient AI assistant by Google.
-- You MUST simulate the high speed, accuracy, and Bengali language proficiency of Gemini 2.5 Flash.
-- Be concise, professional, and strictly follow the JSON format.
-- Do not mention you are Llama, Qwen, or any other model. You are Gemini.
-`;
+        // Optimized for Token Efficiency (Zero Cost Mode)
+        personaInstruction = `Persona: Gemini 2.5 Flash. Fast, accurate, Bengali expert. Strict JSON. No fluff.`;
     }
 
     // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
-    const n8nSystemPrompt = `Role: Assistant ${pageConfig.bot_name || 'Assistant'} for business page. User: ${senderName}.
-Context: ${basePrompt}
-DB Knowledge: ${contextChunk ? contextChunk : "N/A"}
+    const n8nSystemPrompt = `Role: Bot ${pageConfig.bot_name || 'Assistant'} for ${senderName}.
+Ctx: ${basePrompt}
+KB: ${contextChunk ? contextChunk : "N/A"}
 ${personaInstruction}
-Instructions:
-1. Reply in BENGALI (Bangla).
-2. Encourage orders politely.
-3. Output strictly RAW JSON (no markdown) with fields:
-   - "reply": Text reply (Bengali).
-   - "sentiment": "positive"|"neutral"|"negative".
-   - "dm_message": Private message or null.
-   - "bad_words": Detected bad words or null.
-   - "order_details": If order info present (Name, Address, Phone), return { "product_name", "quantity", "address", "phone", "price" }, else null.`;
+Rules:
+1. Reply in BENGALI.
+2. Output RAW JSON:
+{
+  "reply": "Bengali text",
+  "sentiment": "pos|neu|neg",
+  "dm_message": "msg"|null,
+  "bad_words": "words"|null,
+  "order_details": { "product_name", "quantity", "address", "phone", "price" }|null
+}`;
 
     const systemMessage = { role: 'system', content: n8nSystemPrompt };
     
@@ -248,6 +272,10 @@ Instructions:
                         
                         try {
                             const parsed = JSON.parse(rawContent);
+                            // Normalize keys (Robustness for Missing 'reply')
+                            if (!parsed.reply) {
+                                parsed.reply = parsed.response || parsed.message || parsed.answer || parsed.text || parsed.content || parsed.bot_reply;
+                            }
                             return { ...parsed, token_usage: tokenUsage, model: defaultModel };
                         } catch (e) {
                             return { reply: rawContent, sentiment: 'neutral', dm_message: null, bad_words: null, token_usage: tokenUsage, model: defaultModel };
@@ -345,6 +373,10 @@ Instructions:
                 
                 try {
                     const parsed = JSON.parse(rawContent);
+                    // Normalize keys (Robustness for Missing 'reply')
+                    if (!parsed.reply) {
+                        parsed.reply = parsed.response || parsed.message || parsed.answer || parsed.text || parsed.content || parsed.bot_reply;
+                    }
                     return { ...parsed, token_usage: tokenUsage, model: currentModel };
                 } catch (e) {
                     // CLEANUP: If model returns "Thinking" tags (DeepSeek R1), strip them
@@ -352,6 +384,10 @@ Instructions:
                     
                     try {
                         const parsed = JSON.parse(cleanContent);
+                        // Normalize keys (Robustness for Missing 'reply')
+                        if (!parsed.reply) {
+                            parsed.reply = parsed.response || parsed.message || parsed.answer || parsed.text || parsed.content || parsed.bot_reply;
+                        }
                         return { ...parsed, token_usage: tokenUsage, model: currentModel };
                     } catch (e2) {
                         console.warn("AI returned invalid JSON, falling back to raw text:", cleanContent.substring(0, 100) + "...");
@@ -511,7 +547,7 @@ Instructions:
     // Final Failure
     console.error("All AI attempts failed (User + Managed).");
     return { 
-       reply: "Sorry, I am currently experiencing high traffic. Please try again later.",
+       reply: null, // User requested NO reply on failure (Silent Fail)
        sentiment: "neutral",
        dm_message: null,
        bad_words: null,

@@ -84,14 +84,14 @@ async function generateEmbedding(text) {
 }
 
 // --- 2. SEARCH KNOWLEDGE ---
-async function searchKnowledge(query, pageId) {
+async function searchKnowledge(query, pageId, matchCount = 3) {
     const embedding = await generateEmbedding(query);
     if (!embedding) return [];
 
     const { data, error } = await supabase.rpc('match_knowledge', {
         query_embedding: embedding,
         match_threshold: 0.6, // Similarity Threshold (0.0 to 1.0)
-        match_count: 3,       // Top 3 chunks
+        match_count: matchCount,       // Dynamic limit
         p_page_id: pageId
     });
 

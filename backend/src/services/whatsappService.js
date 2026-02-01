@@ -101,6 +101,22 @@ async function stopTyping(session, chatId) {
 }
 
 /**
+ * Send Seen Status (Mark as Read)
+ * @param {string} session 
+ * @param {string} chatId 
+ */
+async function sendSeen(session, chatId) {
+    try {
+        await apiClient.post('/api/sendSeen', {
+            session: session,
+            chatId: chatId
+        });
+    } catch (error) {
+        // Ignore errors
+    }
+}
+
+/**
  * Get Chat History (if supported by WAHA instance)
  * @param {string} session 
  * @param {string} chatId 
@@ -122,10 +138,25 @@ async function getMessages(session, chatId, limit = 10) {
     }
 }
 
+/**
+ * Get All Sessions (WAHA)
+ */
+async function getSessions(all = false) {
+    try {
+        const response = await apiClient.get(`/api/sessions?all=${all}`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Get Sessions Error:`, error.message);
+        return [];
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImage,
     sendTyping,
     stopTyping,
-    getMessages
+    sendSeen,
+    getMessages,
+    getSessions
 };

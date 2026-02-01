@@ -282,12 +282,13 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Reduced history limit to save tokens (User Feedback: "System token besi kasse")
         const historyLimit = 20; 
         
-        const [pagePrompts, userProfile, fbMessages, history, typingResult] = await Promise.all([
+        const [pagePrompts, userProfile, fbMessages, history, typingResult, seenResult] = await Promise.all([
             dbService.getPagePrompts(pageId),
             facebookService.getUserProfile(senderId, pageConfig.page_access_token),
             facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10), // For Handover Check
             dbService.getChatHistory(sessionId, historyLimit),
-            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on') // Fire and forget (awaited in parallel)
+            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on'), // Fire and forget (awaited in parallel)
+            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'mark_seen') // Mark as Seen
         ]);
 
         const senderName = userProfile.name || 'Customer';
@@ -507,8 +508,14 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // -------------------------------------------------------
 
         // 6. Send Reply (Text + Images)
-        let replyText = aiResponse.reply || "Sorry, I couldn't generate a response.";
-        
+        let replyText = aiResponse.reply;
+
+        // User Instruction: If AI fails (reply is null/empty), DO NOT send anything.
+        if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
+             console.log(`[AI] No response generated. Skipping reply.`);
+             return;
+        }
+
         // --- SMART IMAGE EXTRACTION & CLEANING ---
         if (!aiResponse.images) aiResponse.images = [];
         

@@ -31,9 +31,9 @@ async function getFreeOpenRouterModels() {
 
         if (freeModels.length > 0) {
             // Sort by context_length if available to prioritize larger context models
-            // Or just keep them as is. Let's prioritize 'liquid' and 'google' if present.
+            // Or just keep them as is. Let's prioritize 'arcee', 'liquid' and 'google' if present.
             freeModels.sort((a, b) => {
-                const prioritize = ['liquid', 'google', 'mistral', 'meta'];
+                const prioritize = ['arcee', 'liquid', 'google', 'mistral', 'meta'];
                 const aP = prioritize.findIndex(p => a.includes(p));
                 const bP = prioritize.findIndex(p => b.includes(p));
                 return (bP === -1 ? -99 : bP) - (aP === -1 ? -99 : aP); // Higher priority first
