@@ -19,6 +19,49 @@ function getCacheKey(pageId, message) {
 }
 // -------------------------------------
 
+// --- HELPER: Fetch OG Image from Link ---
+async function fetchOgImage(url) {
+    try {
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                // Add Security Headers to mimic browser
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1'
+            },
+            timeout: 3000 // 3s Timeout to avoid blocking response
+        });
+
+        const html = response.data;
+        if (typeof html !== 'string') return null;
+
+        // Priority 1: og:image
+        let match = html.match(/<meta property=["']og:image["'] content=["']([^"']+)["']/i);
+        if (match) return match[1];
+
+        // Priority 2: twitter:image
+        match = html.match(/<meta name=["']twitter:image["'] content=["']([^"']+)["']/i);
+        if (match) return match[1];
+        
+        // Priority 3: link rel="image_src"
+        match = html.match(/<link rel=["']image_src["'] href=["']([^"']+)["']/i);
+        if (match) return match[1];
+
+        return null;
+    } catch (error) {
+        // Silent fail is fine, we just won't have an image
+        return null;
+    }
+}
+
 // Step 2: Business Logic / AI Brain
 async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
     
