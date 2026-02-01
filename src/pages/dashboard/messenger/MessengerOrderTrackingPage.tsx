@@ -203,7 +203,21 @@ export default function MessengerOrderTrackingPage() {
                                   <TableCell className="font-medium">{order.product_name}</TableCell>
                                   <TableCell>{order.product_quantity}</TableCell>
                                   <TableCell>{order.price}</TableCell>
-                                  <TableCell className="max-w-[200px] truncate" title={order.location}>{order.location}</TableCell>
+                                  <TableCell className="max-w-[200px]">
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <span className="truncate block cursor-pointer hover:underline text-primary" title="Click to view full address">
+                                          {order.location}
+                                        </span>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-80">
+                                        <div className="space-y-2">
+                                          <h4 className="font-medium leading-none">Full Address</h4>
+                                          <p className="text-sm text-muted-foreground break-words">{order.location}</p>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  </TableCell>
                                   <TableCell>{order.number}</TableCell>
                               </TableRow>
                           ))}
