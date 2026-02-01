@@ -76,6 +76,7 @@ const verifyWebhook = (req, res) => {
 async function queueMessage(event) {
     const senderId = event.sender.id;
     const pageId = event.recipient.id;
+    console.log(`[Webhook DEBUG] Event for Page: ${pageId} | Sender: ${senderId}`);
     let messageText = event.message?.text || '';
     const messageId = event.message?.mid || `evt_${Date.now()}`;
 
@@ -519,17 +520,21 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // --- SMART IMAGE EXTRACTION & CLEANING ---
         if (!aiResponse.images) aiResponse.images = [];
         
-        const extractedImages = []; // Array<{ url: string, title: string }>
+        // Start with existing images from AI Service (e.g. JSON response)
+        const extractedImages = [...aiResponse.images]; 
 
         // 1. STRICT FORMAT: IMAGE: Title | URL
         // Matches: IMAGE: Basic Plan | https://...
-        const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s]+)/gi;
+        const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s,]+)/gi;
         let strictMatch;
         while ((strictMatch = strictImageRegex.exec(replyText)) !== null) {
             const fullMatch = strictMatch[0];
             const title = strictMatch[1].trim();
             let url = strictMatch[2].trim();
             
+            // Remove trailing punctuation (comma, dot) if accidentally matched
+            url = url.replace(/[,.]$/, '');
+
             // Fix Google Drive Links (Convert View to Direct)
             const driveIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
             if (driveIdMatch && driveIdMatch[1]) {
@@ -543,7 +548,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // 2. Google Drive Viewer Links (Standalone)
-        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s]*)/gi;
+        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s,]*)/gi;
         let driveMatch;
         while ((driveMatch = driveRegex.exec(replyText)) !== null) {
             const fullMatch = driveMatch[0];
@@ -557,11 +562,16 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // 3. Direct Image URLs (Fallback)
-        const imgRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp))/gi;
+        // Improved Regex: Handles comma-separated URLs and ignores trailing punctuation
+        const imgRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https?:\/\/[^\s,]+\.(?:jpg|jpeg|png|gif|webp))/gi;
         let imgMatch;
         while ((imgMatch = imgRegex.exec(replyText)) !== null) {
             const fullMatch = imgMatch[0];
-            const url = imgMatch[1];
+            let url = imgMatch[1];
+            
+            // Remove trailing punctuation
+            url = url.replace(/[,.]$/, '');
+
             if (!extractedImages.some(img => img.url === url)) {
                 extractedImages.push({ url: url, title: 'View Image' });
             }
@@ -569,11 +579,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // 4. Generic Labeled Links (Fallback)
-        const labeledLinkRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)(https?:\/\/[^\s]+)/gi;
+        const labeledLinkRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)(https?:\/\/[^\s,]+)/gi;
         let labeledMatch;
         while ((labeledMatch = labeledLinkRegex.exec(replyText)) !== null) {
              const fullMatch = labeledMatch[0];
-             const url = labeledMatch[1];
+             let url = labeledMatch[1];
+             
+             // Remove trailing punctuation
+             url = url.replace(/[,.]$/, '');
+
              if (!extractedImages.some(img => img.url === url)) {
                 extractedImages.push({ url: url, title: 'View Link' });
             }

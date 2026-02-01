@@ -229,16 +229,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // --- PROMPT & MESSAGE CONSTRUCTION ---
     // Define base system prompt
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
+    
+    // DEBUG LOG: Check for cross-page contamination
+    if (pagePrompts?.text_prompt) {
+         console.log(`[AI DEBUG] Page ID: ${pageConfig.page_id} | Prompt Preview: "${basePrompt.substring(0, 100).replace(/\n/g, ' ')}..."`);
+    } else {
+         console.log(`[AI DEBUG] Page ID: ${pageConfig.page_id} | No Custom Prompt Found.`);
+    }
 
     // ZERO COST OPTIMIZATION: SAFE TOKEN CONTROL
-    // Strategy: 
-    // 1. "Behavior" (System Prompt) is capped at ~1000 chars. 
-    // 2. We ONLY truncate if we successfully retrieved Data from RAG (KB).
-    //    If RAG is empty (User didn't ingest data), we MUST keep the full prompt to ensure Output Quality.
+    // REVERTED BY USER REQUEST: "token besi kaileo output amr valo dorakar"
+    // We are DISABLING all token reduction/prompt shortening logic.
+    // The user prefers quality over token savings.
     
-    // FORCE OPTIMIZATION if Prompt is HUGE (> 8000 chars ~= 2000 tokens), even if CheapEngine is false.
-    // This meets User's requirement: "system prompt jotoi long hok... token kabe 1500-2K".
-    const SAFE_TOKEN_CHAR_LIMIT = 8000; 
+    // const SAFE_TOKEN_CHAR_LIMIT = 8000; 
 
     // REVERTED BY USER REQUEST: "rag er ager version ta ano"
     // We are RE-ENABLING the Smart/Mini-RAG filtering to fix context leaks/hallucinations caused by huge prompts.
@@ -255,85 +259,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // 4. If no keywords match, keep a minimal fallback.
 
         const BEHAVIOR_LIMIT = 1000;
-
-        if (basePrompt.length > SAFE_TOKEN_CHAR_LIMIT) {
-            console.log(`[AI] System Prompt is HUGE (${basePrompt.length} chars). Applying Smart Dynamic Filtering...`);
-            
-            // 1. Extract Persona (First ~1000 chars)
-            const personaSection = basePrompt.substring(0, BEHAVIOR_LIMIT);
-            const dataSection = basePrompt.substring(BEHAVIOR_LIMIT);
-
-            // 2. Extract Keywords from User Message (Simple Tokenization)
-            // Remove common stop words (Bengali/English) for better matching
-            const stopWords = ['ami', 'tumi', 'ki', 'eta', 'koto', 'kobe', 'hello', 'hi', 'price', 'dam', 'is', 'the', 'a', 'an', 'in', 'on', 'please', 'help', 'product', 'products'];
-            let searchTerms = cleanUserMessage.toLowerCase()
-                .replace(/[^\w\s\u0980-\u09FF]/g, '') // Keep Bengali & English chars
-                .split(/\s+/)
-                .filter(w => w.length > 2 && !stopWords.includes(w));
-            
-            // 2b. SYNONYM EXPANSION (Fuzzy Match Support)
-            const SYNONYMS = {
-                'price': ['dam', 'mullo', 'taka', 'cost', 'rate', 'pricing'],
-                'dam': ['price', 'mullo', 'taka', 'cost', 'rate'],
-                'delivery': ['shipping', 'pathano', 'charge', 'courier'],
-                'size': ['map', 'measurement', 'fitting', 'bor', 'choto'],
-                'location': ['thikana', 'address', 'office', 'shop', 'kothay'],
-                'thikana': ['location', 'address', 'office', 'shop', 'kothay'],
-                'order': ['buy', 'kinbo', 'nib', 'nibo', 'booking'],
-                'kinbo': ['order', 'buy', 'nib', 'nibo', 'booking']
-            };
-
-            const expandedTerms = new Set(searchTerms);
-            searchTerms.forEach(term => {
-                if (SYNONYMS[term]) {
-                    SYNONYMS[term].forEach(syn => expandedTerms.add(syn));
-                }
-                // Reverse lookup check (if term is a value in map)
-                Object.keys(SYNONYMS).forEach(key => {
-                    if (SYNONYMS[key].includes(term)) expandedTerms.add(key);
-                });
-            });
-            searchTerms = Array.from(expandedTerms);
-
-            console.log(`[AI] Filtering Data Section using expanded terms: ${searchTerms.join(', ')}`);
-
-            if (searchTerms.length > 0) {
-                // 3. Filter Paragraphs with Context Window
-                const paragraphs = dataSection.split(/\n\s*\n/); // Split by double newline (paragraphs)
-                const relevantIndices = new Set();
-
-                paragraphs.forEach((para, index) => {
-                    const lowerPara = para.toLowerCase();
-                    if (searchTerms.some(term => lowerPara.includes(term))) {
-                        // Add current, previous, and next paragraph for context
-                        relevantIndices.add(index);
-                        if (index > 0) relevantIndices.add(index - 1);
-                        if (index < paragraphs.length - 1) relevantIndices.add(index + 1);
-                    }
-                });
-
-                const sortedIndices = Array.from(relevantIndices).sort((a, b) => a - b);
-                
-                if (sortedIndices.length > 0) {
-                    const filteredData = sortedIndices.map(i => paragraphs[i]).join("\n\n");
-                    console.log(`[AI] Found ${sortedIndices.length} relevant paragraphs (${filteredData.length} chars).`);
-                    
-                    // Reassemble: Persona + Relevant Data
-                    basePrompt = personaSection + "\n\n[RELEVANT DATA EXTRACTED]:\n" + filteredData;
-                } else {
-                    console.log(`[AI] No relevant data found in prompt for terms. Keeping only Persona.`);
-                    basePrompt = personaSection + "\n\n(No specific data found in prompt for this query. Use general knowledge).";
-                }
-            } else {
-                 // No valid search terms (e.g. "Hi"), just keep Persona
-                 console.log(`[AI] No search terms (General Chat). Keeping only Persona.`);
-                 basePrompt = personaSection;
-            }
-            
-            console.log(`[AI] Optimized Prompt Length: ${basePrompt.length} chars (Original: ${personaSection.length + dataSection.length})`);
-        } else {
-             console.log(`[AI] System Prompt is small (${basePrompt.length} chars). No filtering needed.`);
-        }
+        // ... (rest of the logic is disabled)
     }
     
     // Inject "Gemini Persona" for Cheap/OpenRouter models
