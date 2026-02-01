@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Settings, Database, Plus, Facebook, Trash2, CreditCard, Sparkles, Gift, Check, Search } from "lucide-react";
+import { Loader2, Settings, Database, Plus, Facebook, Trash2, CreditCard, Sparkles, Gift, Check, Search, Key } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Dialog,
@@ -41,6 +41,13 @@ export default function MessengerIntegrationPage() {
   const [selectedPlan, setSelectedPlan] = useState("3_months");
   const [couponCode, setCouponCode] = useState("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Direct Token Connect State
+  const [directDialogOpen, setDirectDialogOpen] = useState(false);
+  const [directPageName, setDirectPageName] = useState("");
+  const [directPageId, setDirectPageId] = useState("");
+  const [directAccessToken, setDirectAccessToken] = useState("");
+  const [directLoading, setDirectLoading] = useState(false);
 
   const PLANS = {
     "3_months": { label: "3 Months", price: 500, duration_days: 90 },
@@ -98,28 +105,70 @@ export default function MessengerIntegrationPage() {
       // Add timeout to prevent hanging
       const timeoutId = setTimeout(() => {
         console.error(`Timeout subscribing app to page ${pageId}`);
-        reject(new Error("Timeout subscribing to page"));
+        // resolve anyway to not block UI
+        resolve({ success: false, error: 'timeout' });
       }, 10000); // 10 seconds timeout
 
-      window.FB.api(
-        `/${pageId}/subscribed_apps`,
-        'post',
-        {
-          access_token: accessToken,
-          subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
-        },
-        function(response: any) {
+      // Try using direct fetch first to avoid SDK dependency issues
+      fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=messages,messaging_postbacks,feed,changes`, {
+          method: 'POST'
+      })
+      .then(res => res.json())
+      .then(data => {
           clearTimeout(timeoutId);
-          if (!response || response.error) {
-            console.error('Error subscribing app to page:', response?.error);
-            // Don't reject, just resolve with error so we don't break the loop
-            resolve({ error: response?.error }); 
+          if (data.error) {
+              console.warn('Direct fetch subscription failed, falling back to SDK:', data.error);
+              // Fallback to SDK if available
+              if (window.FB) {
+                  window.FB.api(
+                    `/${pageId}/subscribed_apps`,
+                    'post',
+                    {
+                      access_token: accessToken,
+                      subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
+                    },
+                    function(response: any) {
+                      if (!response || response.error) {
+                        console.error('SDK Error subscribing app to page:', response?.error);
+                        resolve({ error: response?.error }); 
+                      } else {
+                        console.log('SDK Successfully subscribed app to page:', response);
+                        resolve(response);
+                      }
+                    }
+                  );
+              } else {
+                  resolve({ error: data.error });
+              }
           } else {
-            console.log('Successfully subscribed app to page:', response);
-            resolve(response);
+              console.log('Direct fetch successfully subscribed app to page:', data);
+              resolve({ success: true });
           }
-        }
-      );
+      })
+      .catch(err => {
+          clearTimeout(timeoutId);
+          console.error('Direct fetch error:', err);
+          // Fallback to SDK
+           if (window.FB) {
+              window.FB.api(
+                `/${pageId}/subscribed_apps`,
+                'post',
+                {
+                  access_token: accessToken,
+                  subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
+                },
+                function(response: any) {
+                  if (!response || response.error) {
+                    resolve({ error: response?.error }); 
+                  } else {
+                    resolve(response);
+                  }
+                }
+              );
+          } else {
+              resolve({ error: err.message });
+          }
+      });
     });
   };
 
@@ -151,7 +200,7 @@ export default function MessengerIntegrationPage() {
 
       try {
           // 1. Try to unsubscribe from Facebook (best effort)
-          if (page.page_access_token && window.FB) {
+          if (page.page_access_token) {
               await unsubscribeAppFromPage(page.page_id, page.page_access_token);
           }
 
@@ -293,6 +342,50 @@ export default function MessengerIntegrationPage() {
         toast.error(error.message || "Failed to connect Facebook");
     } finally {
         setConnecting(false);
+    }
+  };
+
+  const handleDirectConnect = async () => {
+    if (!directPageId || !directAccessToken || !directPageName) {
+        toast.error("Please fill all fields");
+        return;
+    }
+    
+    setDirectLoading(true);
+    try {
+        // Verify token validity by calling FB Graph API manually
+        const verifyRes = await fetch(`https://graph.facebook.com/v19.0/${directPageId}?fields=name&access_token=${directAccessToken}`);
+        const verifyData = await verifyRes.json();
+        
+        if (verifyData.error) {
+            throw new Error(`Invalid Token or Page ID: ${verifyData.error.message}`);
+        }
+        
+        if (verifyData.id !== directPageId) {
+           throw new Error("Page ID mismatch");
+        }
+
+        // Use the verified name if provided name is generic
+        const finalName = verifyData.name || directPageName;
+
+        const pageObj = {
+            id: directPageId,
+            name: finalName,
+            access_token: directAccessToken
+        };
+
+        await savePagesToSupabase([pageObj]);
+        
+        setDirectDialogOpen(false);
+        setDirectPageName("");
+        setDirectPageId("");
+        setDirectAccessToken("");
+        
+    } catch (error: any) {
+        console.error("Direct Connect Error:", error);
+        toast.error(error.message || "Failed to connect page");
+    } finally {
+        setDirectLoading(false);
     }
   };
 
@@ -565,10 +658,16 @@ export default function MessengerIntegrationPage() {
             Manage your connected Facebook pages and their automation settings.
           </p>
         </div>
-        <Button onClick={handleConnectFacebook} disabled={connecting}>
-            {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
-            {connecting ? "Connecting..." : "Connect with Facebook"}
-        </Button>
+        <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setDirectDialogOpen(true)}>
+                <Key className="mr-2 h-4 w-4" />
+                Direct Token
+            </Button>
+            <Button onClick={handleConnectFacebook} disabled={connecting}>
+                {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
+                {connecting ? "Connecting..." : "Connect with Facebook"}
+            </Button>
+        </div>
       </div>
 
       {/* Manual Connection Card */}
@@ -648,6 +747,7 @@ export default function MessengerIntegrationPage() {
         </CardContent>
       </Card>
 
+      {/* Subscription Modal */}
       <Dialog open={isSubscriptionOpen} onOpenChange={setIsSubscriptionOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
@@ -718,13 +818,67 @@ export default function MessengerIntegrationPage() {
                     ) : (
                         <>
                             <CreditCard className="mr-2 h-4 w-4" />
-                            Pay & Subscribe
+                            Pay Now
                         </>
                     )}
                   </>
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Direct Token Connect Modal */}
+      <Dialog open={directDialogOpen} onOpenChange={setDirectDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+                <DialogTitle>Direct Token Connection (Advanced)</DialogTitle>
+                <DialogDescription>
+                    Connect a page manually by providing its Page ID and Access Token.
+                    This bypasses the Facebook Login button.
+                </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                    <Label htmlFor="pageName">Page Name (Reference)</Label>
+                    <Input 
+                        id="pageName" 
+                        placeholder="e.g. My Business Page" 
+                        value={directPageName}
+                        onChange={(e) => setDirectPageName(e.target.value)}
+                    />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="directPageId">Page ID</Label>
+                    <Input 
+                        id="directPageId" 
+                        placeholder="e.g. 10001234567890" 
+                        value={directPageId}
+                        onChange={(e) => setDirectPageId(e.target.value)}
+                    />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="accessToken">Page Access Token</Label>
+                    <Input 
+                        id="accessToken" 
+                        type="password"
+                        placeholder="EAA..." 
+                        value={directAccessToken}
+                        onChange={(e) => setDirectAccessToken(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Ensure this token has <code>pages_messaging</code> permission.
+                    </p>
+                </div>
+            </div>
+
+            <DialogFooter>
+                <Button onClick={handleDirectConnect} disabled={directLoading}>
+                    {directLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    Connect Page
+                </Button>
+            </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
