@@ -585,6 +585,10 @@ Rules:
             const completion = await openai.chat.completions.create({
                 model: apiModel,
                 messages: messages,
+                temperature: pageConfig.temperature ? Number(pageConfig.temperature) : 0.3, // 0.3 is best for accuracy/JSON
+                top_p: pageConfig.top_p ? Number(pageConfig.top_p) : 0.9, // 0.9 is best for natural but focused
+                // frequency_penalty: 0, // Default 0
+                // presence_penalty: 0, // Default 0
                 response_format: { type: "json_object" }
             });
 
