@@ -73,8 +73,20 @@ async function checkDuplicate(messageId) {
     return false;
 }
 
-// 5. Credit Deduction (Crucial for Business Model)
+// 5. Credit Deduction (Centralized User Balance)
 async function deductCredit(pageId, currentCredit) {
+    // 1. Try Centralized Deduction (RPC) - Supports Multi-Page per User
+    const { data: success, error: rpcError } = await supabase
+        .rpc('deduct_credits_via_page', { p_page_id: pageId });
+
+    if (!rpcError) {
+        // If RPC executed successfully, it returns true (deducted) or false (insufficient funds)
+        return success; 
+    }
+
+    // console.warn(`[dbService] RPC deduct_credits_via_page failed (${rpcError.message}). Falling back to legacy logic.`);
+
+    // 2. Fallback to Legacy Page-Specific Credit (If RPC not setup)
     if (currentCredit <= 0) return false;
     
     const newCredit = Number(currentCredit) - 1;
