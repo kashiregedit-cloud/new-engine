@@ -554,19 +554,19 @@ export default function MessengerIntegrationPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Facebook Pages</h2>
                     <p className="text-muted-foreground">
                         Manage your connected Facebook pages and their automation settings.
                     </p>
                 </div>
-                <div className="flex gap-2 items-center">
-                    <Button variant="outline" onClick={() => setIsManualSetupOpen(true)}>
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                    <Button variant="outline" onClick={() => setIsManualSetupOpen(true)} className="w-full sm:w-auto">
                         <Settings className="mr-2 h-4 w-4" />
                         Open Manual Setup
                     </Button>
-                    <Button onClick={handleConnectFacebook} disabled={connecting}>
+                    <Button onClick={handleConnectFacebook} disabled={connecting} className="w-full sm:w-auto">
                         {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
                         {connecting ? "Connecting..." : "Connect with Facebook"}
                     </Button>

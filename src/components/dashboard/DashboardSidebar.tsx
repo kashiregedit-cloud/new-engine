@@ -147,7 +147,7 @@ export function DashboardSidebar({ isMobile, onLinkClick }: { isMobile?: boolean
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2">
         {platform && !isCollapsed && (
-          <div className="mb-4">
+          <div className="mb-4 relative z-10">
              {platform === 'whatsapp' && (
                 <>
                   <WorkspaceSwitcher platform="whatsapp" />

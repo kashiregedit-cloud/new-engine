@@ -58,8 +58,8 @@ function SwitcherUI({ context }: { context: any }) {
     : { label: `Team (${teamOwnerEmail?.split('@')[0]})`, value: "team", icon: Building };
 
   return (
-    <div className="px-2 mb-2">
-        <Popover open={open} onOpenChange={setOpen}>
+    <div className="px-2 mb-2 relative z-50">
+        <Popover open={open} onOpenChange={setOpen} modal={true}>
         <PopoverTrigger asChild>
             <Button
             variant="outline"
