@@ -562,26 +562,6 @@ export default function MessengerIntegrationPage() {
                     </p>
                 </div>
                 <div className="flex gap-2 items-center">
-                    {isTeamMember && (
-                        <div className="flex items-center gap-2 bg-muted p-2 rounded-lg border mr-2">
-                            <Users className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Workspace:</span>
-                            <Select 
-                                value={viewMode} 
-                                onValueChange={(val: 'personal' | 'team') => switchViewMode(val)}
-                            >
-                                <SelectTrigger className="w-[180px] h-8 bg-background">
-                                    <SelectValue placeholder="Select Workspace" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="personal">My Workspace</SelectItem>
-                                    <SelectItem value="team">
-                                        Team ({teamOwnerEmail?.split('@')[0]})
-                                    </SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
                     <Button variant="outline" onClick={() => setIsManualSetupOpen(true)}>
                         <Settings className="mr-2 h-4 w-4" />
                         Open Manual Setup

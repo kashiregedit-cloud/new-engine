@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 import { SessionSelector } from "./SessionSelector";
 import { PageSelector } from "./PageSelector";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 export function DashboardSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -138,7 +139,12 @@ export function DashboardSidebar() {
         {platform && !collapsed && (
           <div className="mb-4">
              {platform === 'whatsapp' && <SessionSelector />}
-             {platform === 'messenger' && <PageSelector />}
+             {platform === 'messenger' && (
+                <>
+                  <WorkspaceSwitcher />
+                  <PageSelector />
+                </>
+             )}
           </div>
         )}
 
