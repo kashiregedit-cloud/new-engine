@@ -126,6 +126,26 @@ async function queueMessage(event) {
     let messageText = event.message?.text || '';
     const messageId = event.message?.mid || `evt_${Date.now()}`;
 
+    // --- EXTRACT AD/REFERRAL DATA ---
+    // This handles "Get Started" or "Send Message" clicks from Ads
+    let referralData = null;
+    if (event.referral) {
+        referralData = event.referral;
+    } else if (event.postback && event.postback.referral) {
+        referralData = event.postback.referral;
+    }
+    
+    if (referralData) {
+        const adSource = referralData.source || 'ad';
+        const adRef = referralData.ref || 'unknown';
+        const adId = referralData.ad_id || 'unknown';
+        console.log(`[Webhook] Referral/Ad Detected. Source: ${adSource}, Ref: ${adRef}, Ad ID: ${adId}`);
+        
+        // Append to text for AI visibility (if not already there)
+        // We push this as a separate system note in the buffer logic
+    }
+    // --------------------------------
+
     // 1. Handle Postback (Button Clicks)
     if (event.postback) {
         // PRIORITIZE PAYLOAD, THEN TITLE. Ensure it's a string.
@@ -234,7 +254,8 @@ async function queueMessage(event) {
         reply_to: replyToId,
         images: thisMsgImages,
         audios: thisMsgAudios,
-        isPostback: !!event.postback
+        isPostback: !!event.postback,
+        referral: referralData // Pass referral data to buffer
     });
 
     console.log(`Queued message for ${sessionId}. Buffer size: ${sessionData.messages.length}`);
@@ -278,6 +299,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     let allImages = [];
     let allAudios = [];
     let hasPostback = false;
+    let adContext = ""; // To store referral info
 
     for (const msg of messages) {
         if (typeof msg === 'string') {
@@ -288,9 +310,19 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
             if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
             if (msg.isPostback) hasPostback = true;
+            
+            // Extract Referral/Ad Info
+            if (msg.referral) {
+                const ref = msg.referral.ref || 'N/A';
+                const source = msg.referral.source || 'Ad';
+                const adId = msg.referral.ad_id || 'N/A';
+                adContext = `\n[System Note: User clicked on an AD. Source: ${source}, Ref: "${ref}", Ad ID: ${adId}. Use this context to identify the product they are interested in.]`;
+            }
         }
     }
     combinedText = combinedText.trim();
+    if (adContext) combinedText += adContext; // Append Ad Context
+
     console.log(`Processing buffered messages for ${sessionId}. Text: ${combinedText.substring(0,50)}... Images: ${allImages.length}, Audios: ${allAudios.length}`);
 
     try {
