@@ -26,7 +26,7 @@ import { toast } from "sonner";
 export default function OrderTrackingPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom'>('today');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom' | 'all'>('today');
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -145,6 +145,7 @@ Phone: ${order.number || 'N/A'}`;
                           <SelectItem value="today">Today</SelectItem>
                           <SelectItem value="yesterday">Yesterday</SelectItem>
                           <SelectItem value="custom">Custom Date</SelectItem>
+                          <SelectItem value="all">All Time</SelectItem>
                       </SelectContent>
                   </Select>
                   

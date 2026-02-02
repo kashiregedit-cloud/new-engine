@@ -274,6 +274,16 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             return;
         }
 
+        // --- FAILURE LOCK CHECK ---
+        const isLocked = await dbService.checkLockStatus(pageId, senderId);
+        if (isLocked) {
+            const logMsg = `[Failure Lock] Conversation with ${senderId} is locked for 24h due to repeated failures.`;
+            console.log(logMsg);
+            logToFile(logMsg);
+            return;
+        }
+        // --------------------------
+
         // --- OPTIMIZATION: PARALLEL DATA FETCHING ---
         // We fetch Prompts, User Profile, Chat History, and FB Messages (for handover) in parallel
         // This significantly reduces latency (User Feedback: "1s debounce but late reply")
@@ -513,7 +523,19 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // User Instruction: If AI fails (reply is null/empty), DO NOT send anything.
         if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
-             console.log(`[AI] No response generated. Skipping reply.`);
+             console.log(`[AI] No response generated. Recording silent failure.`);
+             
+             // Save failure status for Lock Logic
+             await dbService.saveFbChat({
+                page_id: pageId,
+                sender_id: pageId, // Bot is sender
+                recipient_id: senderId,
+                message_id: `fail_${Date.now()}`,
+                text: '[Silent Failure: Off-topic or Error]',
+                timestamp: Date.now(),
+                status: 'ai_ignored',
+                reply_by: 'bot'
+             });
              return;
         }
 

@@ -354,6 +354,41 @@ async function saveOrderTracking(orderData) {
     return data[0];
 }
 
+// 13. Check Conversation Lock Status (Failure Lock)
+async function checkLockStatus(pageId, senderId) {
+    try {
+        // Fetch last 4 bot replies
+        const { data, error } = await supabase
+            .from('fb_chats')
+            .select('status, timestamp')
+            .eq('page_id', pageId)
+            .eq('recipient_id', senderId)
+            .eq('reply_by', 'bot')
+            .order('timestamp', { ascending: false })
+            .limit(4);
+
+        if (error || !data || data.length < 4) return false;
+
+        // Check if all 4 are 'ai_ignored' (Silent Failures)
+        const allIgnored = data.every(msg => msg.status === 'ai_ignored');
+        if (!allIgnored) return false;
+
+        // Check if within 24 hours
+        // timestamp is stored as BigInt (Date.now())
+        const lastIgnoredTime = Number(data[0].timestamp); 
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        
+        if (Date.now() - lastIgnoredTime < ONE_DAY_MS) {
+            return true;
+        }
+        
+        return false;
+    } catch (e) {
+        console.error("Lock Check Error:", e);
+        return false;
+    }
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -369,5 +404,6 @@ module.exports = {
     saveFbComment,
     logMessage,
     getMessageById,
-    saveOrderTracking
+    saveOrderTracking,
+    checkLockStatus
 };
