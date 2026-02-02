@@ -392,16 +392,45 @@ async function checkLockStatus(pageId, senderId) {
 // 14. Get All Active Page IDs (Cache Warmup)
 async function getAllActivePages() {
     // Used for Gatekeeper / Allowed List cache
-    const { data, error } = await supabase
+    // Strategy: Page must be Active/Trial AND have Message Credits (Page-level or User-level)
+    const { data: pages, error } = await supabase
         .from('page_access_token_message')
-        .select('page_id')
+        .select('page_id, user_id, message_credit')
         .or('subscription_status.eq.active,subscription_status.eq.trial');
         
     if (error) {
         console.error("Error fetching active pages:", error);
         return [];
     }
-    return data.map(p => p.page_id);
+
+    // 2. Fetch Centralized User Credits (if user_id exists)
+    const userIds = [...new Set(pages.map(p => p.user_id).filter(Boolean))];
+    let userCredits = {};
+
+    if (userIds.length > 0) {
+        const { data: configs } = await supabase
+            .from('user_configs')
+            .select('user_id, message_credit')
+            .in('user_id', userIds);
+            
+        if (configs) {
+            configs.forEach(c => {
+                userCredits[c.user_id] = c.message_credit || 0;
+            });
+        }
+    }
+
+    // 3. Filter: Must have Credit > 0
+    const allowedPageIds = pages.filter(p => {
+        const pageCredit = Number(p.message_credit || 0);
+        const userCredit = Number(userCredits[p.user_id] || 0);
+
+        // Allow if EITHER has credit > 0
+        // (This covers both Legacy Page Credits and Centralized User Credits)
+        return pageCredit > 0 || userCredit > 0;
+    }).map(p => p.page_id);
+
+    return allowedPageIds;
 }
 
 module.exports = {
