@@ -74,6 +74,7 @@ export default function MessengerSettingsPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [planActive, setPlanActive] = useState(false);
   const [messageCredit, setMessageCredit] = useState(0);
+  const [isOwner, setIsOwner] = useState(true);
   
   // New State for System Prompt Modal
   const [isPromptOpen, setIsPromptOpen] = useState(false);
@@ -160,6 +161,11 @@ export default function MessengerSettingsPage() {
         const pageRow = pageData as any;
         
         setVerified(dbRow.verified !== false);
+
+        // Check ownership
+        const { data: { user } } = await supabase.auth.getUser();
+        const isPageOwner = user?.id === pageRow.user_id;
+        setIsOwner(isPageOwner);
         
         const apiKey = pageRow.api_key || "";
         
@@ -688,7 +694,7 @@ export default function MessengerSettingsPage() {
                                         </div>
                                         {(planActive || messageCredit > 0) && (
                                             <div className="text-xs text-green-600 font-medium">
-                                                {messageCredit} Credits Remaining
+                                                {messageCredit} {isOwner ? "Credits Remaining" : "Owner Credits (Shared)"}
                                             </div>
                                         )}
                                     </div>
