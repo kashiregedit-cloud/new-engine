@@ -35,6 +35,12 @@ export function DashboardHeader({ title, onMenuClick }: DashboardHeaderProps) {
   }, []);
 
   const handleLogout = async () => {
+    // Clear all local storage keys to prevent session leakage
+    localStorage.removeItem("active_fb_page_id");
+    localStorage.removeItem("active_fb_db_id");
+    localStorage.removeItem("active_wp_db_id");
+    localStorage.removeItem("active_wa_session_id");
+
     await supabase.auth.signOut();
     toast.success("Logged out successfully");
     navigate("/login");

@@ -46,6 +46,11 @@ export function DashboardLayout() {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (!session) {
+          // Clean up sensitive local storage on session end
+          localStorage.removeItem("active_fb_page_id");
+          localStorage.removeItem("active_fb_db_id");
+          localStorage.removeItem("active_wp_db_id");
+          localStorage.removeItem("active_wa_session_id");
           navigate("/login");
         }
       }
