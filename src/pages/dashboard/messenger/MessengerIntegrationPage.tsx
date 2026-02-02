@@ -87,6 +87,7 @@ export default function MessengerIntegrationPage() {
     // Manual Connect State
     const [manualPageId, setManualPageId] = useState("");
     const [manualLoading, setManualLoading] = useState(false);
+    const [isManualSetupOpen, setIsManualSetupOpen] = useState(false);
 
     // Subscription Modal State
     const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
@@ -792,50 +793,115 @@ export default function MessengerIntegrationPage() {
                 </TabsContent>
 
                 <TabsContent value="manual">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Manual App Integration</CardTitle>
-                            <CardDescription>Configure your own Facebook App Webhooks</CardDescription>
+                    <Card className="border-dashed border-2">
+                        <CardHeader className="text-center pb-2">
+                            <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-2">
+                                <Settings className="h-6 w-6 text-primary" />
+                            </div>
+                            <CardTitle>Manual Configuration</CardTitle>
+                            <CardDescription>
+                                Advanced setup for custom Facebook Apps or specific page connections.
+                            </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="p-4 bg-muted rounded-md space-y-3">
-                                <div className="space-y-1">
-                                    <Label className="text-xs text-muted-foreground">Webhook URL</Label>
-                                    <div className="flex items-center gap-2">
-                                        <code className="flex-1 bg-background p-2 rounded border text-xs font-mono break-all">
-                                            {`${BACKEND_URL}/webhook`}
-                                        </code>
-                                        <Button variant="outline" size="icon" onClick={copyWebhook}>
-                                            {copySuccess ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs text-muted-foreground">Verify Token</Label>
-                                    <code className="block bg-background p-2 rounded border text-xs font-mono">
-                                        orderly_verify_token
-                                    </code>
-                                </div>
-                            </div>
-
-                            <div className="flex gap-4 items-end pt-4 border-t">
-                                <div className="grid w-full max-w-sm items-center gap-1.5">
-                                    <Label htmlFor="pageId">Secret Code / Found ID</Label>
-                                    <Input 
-                                        type="text" 
-                                        id="pageId" 
-                                        placeholder="e.g. secret_123 or found_456" 
-                                        value={manualPageId}
-                                        onChange={(e) => setManualPageId(e.target.value)}
-                                    />
-                                </div>
-                                <Button onClick={handleManualConnect} disabled={manualLoading}>
-                                    {manualLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                                    Search & Connect
-                                </Button>
-                            </div>
+                        <CardContent className="flex justify-center pb-6">
+                            <Button onClick={() => setIsManualSetupOpen(true)} size="lg" className="gap-2">
+                                <Database className="h-4 w-4" />
+                                Open Manual Setup
+                            </Button>
                         </CardContent>
                     </Card>
+
+                    <Dialog open={isManualSetupOpen} onOpenChange={setIsManualSetupOpen}>
+                        <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                                <DialogTitle>Manual Integration Setup</DialogTitle>
+                                <DialogDescription>
+                                    Connect using a Page ID or configure your Webhook manually.
+                                </DialogDescription>
+                            </DialogHeader>
+                            
+                            <div className="grid gap-6 py-4">
+                                {/* Section 1: Easy Connect (Direct Search) */}
+                                <div className="space-y-4 border rounded-lg p-4 bg-muted/30">
+                                    <div className="flex items-center gap-2">
+                                        <div className="bg-green-100 p-1.5 rounded-md">
+                                            <Sparkles className="h-4 w-4 text-green-600" />
+                                        </div>
+                                        <h3 className="font-semibold text-sm">Easy Connect (By Page ID)</h3>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="manualPageId">Page ID / Secret Key</Label>
+                                        <div className="flex gap-2">
+                                            <Input 
+                                                id="manualPageId" 
+                                                placeholder="e.g. secret_123 or 102030..." 
+                                                value={manualPageId}
+                                                onChange={(e) => setManualPageId(e.target.value)}
+                                            />
+                                            <Button onClick={handleManualConnect} disabled={manualLoading}>
+                                                {manualLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                                                Connect
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Use this if you have a pre-configured Secret Key or want to connect a public page by ID.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Section 2: Professional Webhook Info */}
+                                <div className="space-y-4 border rounded-lg p-4 bg-blue-50/50 border-blue-100">
+                                    <div className="flex items-center gap-2">
+                                        <div className="bg-blue-100 p-1.5 rounded-md">
+                                            <Database className="h-4 w-4 text-blue-600" />
+                                        </div>
+                                        <h3 className="font-semibold text-sm">Professional Webhook Configuration</h3>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-medium">Callback URL</Label>
+                                            <div className="relative">
+                                                <Input readOnly value="https://webhook.salesmanchatbot.online/" className="pr-8 bg-white" />
+                                                <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="absolute right-1 top-1 h-7 w-7"
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText("https://webhook.salesmanchatbot.online/");
+                                                        toast.success("URL Copied!");
+                                                    }}
+                                                >
+                                                    <Copy className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-medium">Verify Token</Label>
+                                            <div className="relative">
+                                                <Input readOnly value="123456" className="pr-8 bg-white" />
+                                                <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="absolute right-1 top-1 h-7 w-7"
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText("123456");
+                                                        toast.success("Token Copied!");
+                                                    }}
+                                                >
+                                                    <Copy className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-blue-600">
+                                        * Enter these details in your Facebook App Developer Portal under <strong>Webhooks &gt; Page</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
                 </TabsContent>
             </Tabs>
 

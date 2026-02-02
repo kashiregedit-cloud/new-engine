@@ -349,6 +349,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         ]);
 
         const senderName = userProfile.name || 'Customer';
+        const senderGender = userProfile.gender || null;
         
         // --------------------------------------------
 
@@ -517,7 +518,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         // -----------------------------------------------------------------------
 
-        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, effectiveHistory, senderName);
+        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, effectiveHistory, senderName, senderGender);
         
         // --- ZERO COST ORDER TRACKING LOGIC ---
         // If AI detects order details, save to DB immediately.
@@ -569,7 +570,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // User Instruction: If AI fails (reply is null/empty), DO NOT send anything.
         if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
-             console.log(`[AI] No response generated. Recording silent failure.`);
+             const reason = replyText === null ? 'Strict Domain Control (Null Reply)' : 'Empty String Response';
+             console.log(`[AI] Silent Failure Triggered. Reason: ${reason}.`);
              
              // Save failure status for Lock Logic
              await dbService.saveFbChat({

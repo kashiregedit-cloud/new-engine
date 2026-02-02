@@ -272,10 +272,11 @@ async function getCommentReplies(commentId, accessToken) {
     }
 }
 
-// Get User Profile (Name)
+// Get User Profile (Name & Gender)
 async function getUserProfile(userId, accessToken) {
     try {
-        const url = `https://graph.facebook.com/v19.0/${userId}?fields=first_name,last_name,name&access_token=${accessToken}`;
+        // Attempt to fetch gender (though often restricted)
+        const url = `https://graph.facebook.com/v19.0/${userId}?fields=first_name,last_name,name,gender&access_token=${accessToken}`;
         const response = await axios.get(url);
         return response.data;
     } catch (error) {

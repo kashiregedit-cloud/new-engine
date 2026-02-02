@@ -63,7 +63,7 @@ async function fetchOgImage(url) {
 }
 
 // Step 2: Business Logic / AI Brain
-async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer') {
+async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer', senderGender = null) {
     
     // --- 0. SMART CACHE CHECK (Zero Cost) ---
     // DISABLED TEMPORARILY TO FIX CROSS-PAGE LEAK
@@ -276,9 +276,11 @@ Ctx: ${basePrompt}
 ${personaInstruction}
 Rules:
 1. Reply in BENGALI. Keep answers extremely CONCISE and SHORT (maximum 1-2 sentences unless detailed explanation is absolutely necessary).
-2. STRICT DOMAIN CONTROL: You are a specialized assistant for this business. You MUST ONLY answer questions related to the business/products described in the 'Ctx'. If the user asks about UNRELATED topics (e.g. health, politics, personal advice, religion) that are NOT in the context, you MUST return null for the 'reply' field. Do not try to be helpful for unrelated topics.
-3. PHONE VALIDATION: If user provides a phone number, it MUST be a valid 11-digit number (for Bangladesh) or valid international format. If invalid (e.g. less than 11 digits), ask for the correct number again. DO NOT confirm order or extract 'order_details' until a valid number is provided.
-4. Output RAW JSON:
+2. GENDER & ADDRESSING: User Name: '${senderName}'. User Gender: '${senderGender || 'Unknown'}'. If Gender is 'male', address as 'Sir' or 'Bhaiya'. If 'female', address as 'Apu' or 'Ma'am'. If Unknown, infer from name. NEVER address a Male user as 'Apu'.
+3. IMAGE HANDLING: If the user sends an image, the system will provide a visual analysis. Use this analysis to identify the product type (e.g., 'Blue Saree', 'Leather Watch'). If the EXACT item is not in your 'Ctx', you MUST recommend the CLOSEST SIMILAR available product from the list. Say something like: "We don't have this exact one, but here is a similar [Product Name]...".
+4. STRICT DOMAIN CONTROL: You are a specialized assistant for this business. You MUST ONLY answer questions related to the business/products described in the 'Ctx'. If the user asks about UNRELATED topics (e.g. health, politics, personal advice, religion) that are NOT in the context, you MUST return null for the 'reply' field. Do not try to be helpful for unrelated topics.
+5. PHONE VALIDATION: If user provides a phone number, it MUST be a valid 11-digit number (for Bangladesh) or valid international format. If invalid (e.g. less than 11 digits), ask for the correct number again. DO NOT confirm order or extract 'order_details' until a valid number is provided.
+6. Output RAW JSON:
 {
   "reply": "Bengali text"|null,
   "sentiment": "pos|neu|neg",
@@ -913,7 +915,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
         {
           role: "user",
           content: [
-            { type: "text", text: "You are a smart image analyzer. Detect product name, color, and read any visible text. Keep it very short (Name, Color, Text). You MUST start your response with exactly: 'Based on the image this is ' followed by the description." },
+            { type: "text", text: "You are a smart image analyzer. Analyze this image to identify the Product Type, Category (e.g. Clothing, Electronics), Visual Style, Color, and any visible text. Be descriptive but concise. You MUST start your response with exactly: 'Based on the image this is ' followed by the detailed description." },
             { type: "image_url", image_url: { url: finalImageUrl } }
           ]
         }
