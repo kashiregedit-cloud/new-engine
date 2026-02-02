@@ -386,13 +386,13 @@ export default function MessengerSettingsPage() {
 
               if (configError) {
                   console.error("Failed to update user config:", configError);
-                  toast.error("Failed to add credits to account");
-              } else {
-                  // Update local state to reflect new global credit
-                  setMessageCredit(newGlobal);
-                  // Ensure we show it immediately
-                  setPlanActive(true); 
+                  throw new Error("Failed to add credits: " + (configError as any).message);
               }
+              
+              // Update local state to reflect new global credit
+              setMessageCredit(newGlobal);
+              // Ensure we show it immediately
+              setPlanActive(true); 
           }
 
           // Record Transaction (Mock or Real)
