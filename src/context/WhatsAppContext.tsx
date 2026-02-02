@@ -15,6 +15,11 @@ export interface WhatsAppContextType {
   setCurrentSession: (session: WahaSession | null) => void;
   refreshSessions: () => Promise<void>;
   loading: boolean;
+  // Team Features
+  isTeamMember: boolean;
+  teamOwnerEmail: string | null;
+  viewMode: 'personal' | 'team';
+  switchViewMode: (mode: 'personal' | 'team') => void;
 }
 
 const WhatsAppContext = createContext<WhatsAppContextType | undefined>(undefined);
@@ -24,6 +29,18 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
   const [currentSession, setCurrentSession] = useState<WahaSession | null>(null);
   const [loading, setLoading] = useState(true);
   const currentSessionRef = React.useRef(currentSession);
+  
+  // Team State
+  const [isTeamMember, setIsTeamMember] = useState(false);
+  const [teamOwnerEmail, setTeamOwnerEmail] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'personal' | 'team'>(() => {
+    return (localStorage.getItem('whatsapp_view_mode') as 'personal' | 'team') || 'personal';
+  });
+
+  const switchViewMode = (mode: 'personal' | 'team') => {
+    setViewMode(mode);
+    localStorage.setItem('whatsapp_view_mode', mode);
+  };
 
   useEffect(() => {
     currentSessionRef.current = currentSession;
@@ -35,6 +52,32 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       // 1. Get current user
       const { data: { user } } = await supabase.auth.getUser();
       
+      if (!user?.email) {
+          setSessions([]);
+          return;
+      }
+
+      // Check Team Membership
+      const { data: teamData } = await (supabase
+          .from('team_members') as any)
+          .select('owner_email, permissions')
+          .eq('member_email', user.email)
+          .maybeSingle();
+      
+      const isMember = !!teamData;
+      const ownerEmail = teamData?.owner_email || null;
+
+      setIsTeamMember(isMember);
+      setTeamOwnerEmail(ownerEmail);
+
+      // Determine target email
+      let targetEmail = user.email;
+      if (viewMode === 'team' && isMember && ownerEmail) {
+          targetEmail = ownerEmail;
+      } else if (viewMode === 'team' && !isMember) {
+          targetEmail = user.email;
+      }
+
       // 2. Fetch all from WAHA via Backend
       const res = await fetch(`${BACKEND_URL}/sessions`);
       const wahaSessions = await res.json();
@@ -42,22 +85,25 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
 
       let formattedSessions: WahaSession[] = [];
 
-      if (user && user.email) {
-        // 3. Filter by user email from Supabase
-        const { data: mySessions } = await supabase
+      // 3. Filter by target email from Supabase
+      const { data: mySessions } = await supabase
           .from('whatsapp_sessions')
           .select('session_name')
-          .eq('user_email', user.email)
+          .eq('user_email', targetEmail)
           .returns<{ session_name: string | null }[]>();
-          
-        const allowedNames = mySessions?.map(s => s.session_name) || [];
         
-        // Filter WAHA sessions to only show those owned by user
-        formattedSessions = allSessions.filter((s) => allowedNames.includes(s.name));
-      } else {
-        // If no user logged in, show nothing or handle accordingly
-        formattedSessions = []; 
+      let allowedNames = mySessions?.map(s => s.session_name) || [];
+      
+      // Filter by Team Permissions
+      if (viewMode === 'team' && isMember && teamData?.permissions?.wa_sessions) {
+          const allowedPermissions = teamData.permissions.wa_sessions;
+          if (Array.isArray(allowedPermissions)) {
+             allowedNames = allowedNames.filter(name => name && allowedPermissions.includes(name));
+          }
       }
+      
+      // Filter WAHA sessions to only show allowed ones
+      formattedSessions = allSessions.filter((s) => allowedNames.includes(s.name));
       
       setSessions(formattedSessions);
       
@@ -77,14 +123,24 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     refreshSessions();
   }, [refreshSessions]);
 
   return (
-    <WhatsAppContext.Provider value={{ sessions, currentSession, setCurrentSession, refreshSessions, loading }}>
+    <WhatsAppContext.Provider value={{ 
+        sessions, 
+        currentSession, 
+        setCurrentSession, 
+        refreshSessions, 
+        loading,
+        isTeamMember,
+        teamOwnerEmail,
+        viewMode,
+        switchViewMode
+    }}>
       {children}
     </WhatsAppContext.Provider>
   );

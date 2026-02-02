@@ -15,12 +15,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<{ email?: string; id?: string } | null>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [newMemberEmail, setNewMemberEmail] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Resource Selection State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [availableFbPages, setAvailableFbPages] = useState<any[]>([]);
+  const [availableWaSessions, setAvailableWaSessions] = useState<any[]>([]);
+  const [selectedFbPages, setSelectedFbPages] = useState<string[]>([]);
+  const [selectedWaSessions, setSelectedWaSessions] = useState<string[]>([]);
+  const [resourceLoading, setResourceLoading] = useState(false);
 
   useEffect(() => {
     const getUser = async () => {
@@ -47,14 +58,42 @@ export default function ProfilePage() {
     }
   };
 
+  const fetchResources = async () => {
+    if (!user?.email) return;
+    setResourceLoading(true);
+    
+    // FB Pages
+    const { data: fbData } = await supabase
+      .from('page_access_token_message')
+      .select('page_id, name')
+      .eq('email', user.email);
+    setAvailableFbPages(fbData || []);
+
+    // WA Sessions
+    const { data: waData } = await supabase
+      .from('whatsapp_sessions')
+      .select('session_name, status')
+      .eq('user_email', user.email);
+    setAvailableWaSessions(waData || []);
+    
+    setResourceLoading(false);
+  };
+
+  const openAddModal = () => {
+      if (teamMembers.length >= 10) {
+          toast.error("Maximum 10 team members allowed");
+          return;
+      }
+      setNewMemberEmail("");
+      setSelectedFbPages([]);
+      setSelectedWaSessions([]);
+      setIsAddModalOpen(true);
+      fetchResources();
+  };
+
   const handleAddMember = async () => {
     if (!newMemberEmail || !user?.email) return;
     
-    if (teamMembers.length >= 3) {
-      toast.error("Maximum 3 team members allowed");
-      return;
-    }
-
     if (newMemberEmail.toLowerCase() === user.email.toLowerCase()) {
       toast.error("You cannot add yourself");
       return;
@@ -67,17 +106,24 @@ export default function ProfilePage() {
     }
 
     setLoading(true);
+    
+    const permissions = {
+        fb_pages: selectedFbPages,
+        wa_sessions: selectedWaSessions
+    };
+
     const { error } = await (supabase.from('team_members') as any).insert({
       owner_email: user.email,
       member_email: newMemberEmail.toLowerCase(),
-      status: 'active'
+      status: 'active',
+      permissions: permissions
     });
 
     if (error) {
       toast.error("Failed to add member: " + error.message);
     } else {
       toast.success("Team member added successfully");
-      setNewMemberEmail("");
+      setIsAddModalOpen(false);
       fetchTeamMembers(user.email);
     }
     setLoading(false);
@@ -173,32 +219,102 @@ export default function ProfilePage() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Team Management</CardTitle>
-                <CardDescription>Share your account access (Max 3 members)</CardDescription>
+                <CardDescription>Share your account access (Max 10 members)</CardDescription>
               </div>
-              <Badge variant={teamMembers.length >= 3 ? "destructive" : "secondary"}>
-                {teamMembers.length}/3 Members
+              <Badge variant={teamMembers.length >= 10 ? "destructive" : "secondary"}>
+                {teamMembers.length}/10 Members
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
             
             {/* Add Member Form */}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Mail className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Enter member email"
-                  type="email"
-                  className="pl-9"
-                  value={newMemberEmail}
-                  onChange={(e) => setNewMemberEmail(e.target.value)}
-                />
-              </div>
-              <Button onClick={handleAddMember} disabled={loading || teamMembers.length >= 3}>
+            <div className="flex justify-end">
+              <Button onClick={openAddModal} disabled={loading || teamMembers.length >= 10}>
                 <UserPlus className="h-4 w-4 mr-2" />
-                Add
+                Add New Member
               </Button>
             </div>
+
+            <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add Team Member</DialogTitle>
+                  <DialogDescription>
+                    Invite a member and assign specific resources.
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                     <label className="text-sm font-medium">Member Email</label>
+                     <Input
+                       placeholder="Enter member email"
+                       type="email"
+                       value={newMemberEmail}
+                       onChange={(e) => setNewMemberEmail(e.target.value)}
+                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Facebook Pages Access</label>
+                    {resourceLoading ? <p className="text-xs text-muted-foreground">Loading...</p> : (
+                        <ScrollArea className="h-[120px] w-full rounded-md border p-4">
+                            {availableFbPages.length === 0 ? <p className="text-xs text-muted-foreground">No pages found.</p> : 
+                              availableFbPages.map(page => (
+                                <div key={page.page_id} className="flex items-center space-x-2 mb-2 last:mb-0">
+                                  <Checkbox 
+                                    id={`fb-${page.page_id}`} 
+                                    checked={selectedFbPages.includes(page.page_id)}
+                                    onCheckedChange={(checked) => {
+                                       if(checked) setSelectedFbPages([...selectedFbPages, page.page_id]);
+                                       else setSelectedFbPages(selectedFbPages.filter(id => id !== page.page_id));
+                                    }}
+                                  />
+                                  <label htmlFor={`fb-${page.page_id}`} className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                                    {page.name}
+                                  </label>
+                                </div>
+                              ))
+                            }
+                        </ScrollArea>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">WhatsApp Sessions Access</label>
+                    {resourceLoading ? <p className="text-xs text-muted-foreground">Loading...</p> : (
+                        <ScrollArea className="h-[120px] w-full rounded-md border p-4">
+                            {availableWaSessions.length === 0 ? <p className="text-xs text-muted-foreground">No sessions found.</p> : 
+                              availableWaSessions.map(session => (
+                                <div key={session.session_name} className="flex items-center space-x-2 mb-2 last:mb-0">
+                                  <Checkbox 
+                                    id={`wa-${session.session_name}`} 
+                                    checked={selectedWaSessions.includes(session.session_name)}
+                                    onCheckedChange={(checked) => {
+                                       if(checked) setSelectedWaSessions([...selectedWaSessions, session.session_name]);
+                                       else setSelectedWaSessions(selectedWaSessions.filter(id => id !== session.session_name));
+                                    }}
+                                  />
+                                  <label htmlFor={`wa-${session.session_name}`} className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                                    {session.session_name} <span className="text-xs text-muted-foreground">({session.status})</span>
+                                  </label>
+                                </div>
+                              ))
+                            }
+                        </ScrollArea>
+                    )}
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
+                  <Button onClick={handleAddMember} disabled={loading}>
+                      {loading ? "Adding..." : "Add Member"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Members List */}
             <div className="rounded-md border">

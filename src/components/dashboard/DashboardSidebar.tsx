@@ -138,10 +138,15 @@ export function DashboardSidebar() {
       <nav className="flex-1 overflow-y-auto p-2">
         {platform && !collapsed && (
           <div className="mb-4">
-             {platform === 'whatsapp' && <SessionSelector />}
+             {platform === 'whatsapp' && (
+                <>
+                  <WorkspaceSwitcher platform="whatsapp" />
+                  <SessionSelector />
+                </>
+             )}
              {platform === 'messenger' && (
                 <>
-                  <WorkspaceSwitcher />
+                  <WorkspaceSwitcher platform="messenger" />
                   <PageSelector />
                 </>
              )}

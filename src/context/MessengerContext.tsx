@@ -55,7 +55,7 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       // Check Team Membership first
       const { data: teamData } = await (supabase
           .from('team_members') as any)
-          .select('owner_email')
+          .select('owner_email, permissions')
           .eq('member_email', user.email)
           .maybeSingle();
       
@@ -102,13 +102,21 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       if (dbError) throw dbError;
 
       // 3. Merge Data
-      const mergedPages: MessengerPage[] = pagesData.map((p: any) => {
+      let mergedPages: MessengerPage[] = pagesData.map((p: any) => {
         const dbEntry = (dbData as any[])?.find((d: any) => d.page_id === p.page_id);
         return {
           ...p,
           db_id: dbEntry?.id
         };
       });
+
+      // Filter by Team Permissions
+      if (viewMode === 'team' && isMember && teamData?.permissions?.fb_pages) {
+          const allowedIds = teamData.permissions.fb_pages;
+          if (Array.isArray(allowedIds)) {
+             mergedPages = mergedPages.filter(p => allowedIds.includes(p.page_id));
+          }
+      }
 
       setPages(mergedPages);
       

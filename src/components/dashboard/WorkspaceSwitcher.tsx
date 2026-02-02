@@ -1,5 +1,4 @@
 import { Check, ChevronsUpDown, Building, User, Users } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -16,15 +15,32 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useMessenger } from "@/context/MessengerContext";
+import { useWhatsApp } from "@/context/WhatsAppContext";
 import { useState } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-export function WorkspaceSwitcher() {
-  // Safe destructuring in case context is missing (though parent ensures it)
+interface WorkspaceSwitcherProps {
+  platform?: 'messenger' | 'whatsapp';
+}
+
+export function WorkspaceSwitcher({ platform = 'messenger' }: WorkspaceSwitcherProps) {
+    if (platform === 'messenger') return <MessengerSwitcher />;
+    if (platform === 'whatsapp') return <WhatsAppSwitcher />;
+    return null;
+}
+
+function MessengerSwitcher() {
   const context = useMessenger();
-  
   if (!context) return null;
+  return <SwitcherUI context={context} />;
+}
 
+function WhatsAppSwitcher() {
+  const context = useWhatsApp();
+  if (!context) return null;
+  return <SwitcherUI context={context} />;
+}
+
+function SwitcherUI({ context }: { context: any }) {
   const { 
     isTeamMember, 
     teamOwnerEmail, 
