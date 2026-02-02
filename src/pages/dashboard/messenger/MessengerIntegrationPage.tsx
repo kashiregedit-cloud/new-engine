@@ -184,7 +184,17 @@ export default function MessengerIntegrationPage() {
                         .maybeSingle();
                     
                     if (activePageData) {
-                        finalPages = [activePageData, ...finalPages];
+                        // Validate ownership before injecting (Security Fix)
+                        // Cast to any to avoid "Property 'email' does not exist on type 'never'" error
+                        const pageToCheck = activePageData as any;
+                        
+                        if (pageToCheck.email === userEmail) {
+                            finalPages = [pageToCheck, ...finalPages];
+                        } else {
+                            // If the cached page doesn't belong to the current user (or their team owner), 
+                            // ignore it and clear the invalid cache.
+                            localStorage.removeItem("active_fb_page_id");
+                        }
                     }
                 }
             }

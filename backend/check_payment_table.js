@@ -56,11 +56,20 @@ async function checkTables() {
         console.log("✅ RPC function 'deduct_credits_via_page' EXISTS.");
     }
 
-    console.log("\nChecking 'page_access_token_message' for user_id...");
-    const { data: pageData, error: pageError } = await supabase
+    console.log("\nChecking 'page_access_token_message' for cheap_engine column...");
+    const { data: pageColumns, error: colError } = await supabase
         .from('page_access_token_message')
-        .select('page_id, user_id, email')
-        .limit(5);
+        .select('cheap_engine')
+        .limit(1);
+    
+    if (colError) {
+        console.error("Error checking cheap_engine:", colError.message);
+        if (colError.message.includes('does not exist')) {
+             console.log("Column 'cheap_engine' MISSING! Need to add it.");
+        }
+    } else {
+        console.log("Column 'cheap_engine' EXISTS.");
+    }
         
     if (pageError) {
         console.error("❌ Error accessing 'page_access_token_message':", pageError.message);

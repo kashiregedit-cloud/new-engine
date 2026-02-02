@@ -40,6 +40,7 @@ export function DashboardHeader({ title, onMenuClick }: DashboardHeaderProps) {
     localStorage.removeItem("active_fb_db_id");
     localStorage.removeItem("active_wp_db_id");
     localStorage.removeItem("active_wa_session_id");
+    localStorage.removeItem("supabase.auth.token");
 
     await supabase.auth.signOut();
     toast.success("Logged out successfully");
