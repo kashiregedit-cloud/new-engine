@@ -814,7 +814,7 @@ export default function MessengerIntegrationPage() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Connected Pages</CardTitle>
+                    <CardTitle>Connected Pages ({pages.length})</CardTitle>
                     <CardDescription>List of Facebook pages integrated with the bot.</CardDescription>
                 </CardHeader>
                 <CardContent>
