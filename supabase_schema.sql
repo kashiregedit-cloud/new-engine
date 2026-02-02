@@ -185,3 +185,13 @@ alter table api_list add column if not exists last_date_checked date default CUR
 
 -- Create index for fast lookup
 create index if not exists idx_api_list_provider on api_list(provider);
+
+-- 13. Team Members System
+create table if not exists team_members (
+  id uuid default uuid_generate_v4() primary key,
+  owner_email text not null,
+  member_email text not null,
+  status text default 'active', -- active, pending
+  created_at timestamp with time zone default now(),
+  constraint team_members_unique_pair unique (owner_email, member_email)
+);

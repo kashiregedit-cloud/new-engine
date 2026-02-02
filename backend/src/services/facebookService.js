@@ -1,4 +1,17 @@
 const axios = require('axios');
+const dbService = require('./dbService'); // Required for token invalidation
+
+// Helper: Handle Facebook Errors
+async function handleFacebookError(error, pageId) {
+    if (error.response && error.response.data && error.response.data.error) {
+        const fbError = error.response.data.error;
+        // Error Code 190: Invalid OAuth Access Token
+        if (fbError.code === 190 || fbError.code === 102) { // 102 can also be session invalid
+             console.error(`[Facebook] Critical Token Error for Page ${pageId}: ${fbError.message}`);
+             await dbService.markPageTokenInvalid(pageId);
+        }
+    }
+}
 
 // Step 4: HTTP Request to Send Message (with Splitting)
 async function sendMessage(pageId, recipientId, text, accessToken) {
@@ -87,6 +100,7 @@ async function sendMessage(pageId, recipientId, text, accessToken) {
         }
     } catch (error) {
         console.error(`Error sending FB message for page ${pageId}:`, error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+        await handleFacebookError(error, pageId);
         throw error;
     }
 }
@@ -102,6 +116,8 @@ async function sendTypingAction(recipientId, accessToken, action = 'typing_on') 
         });
     } catch (error) {
         // Ignore typing errors, not critical
+        // But check if token is invalid
+        await handleFacebookError(error, 'unknown_page_typing'); 
     }
 }
 
@@ -124,6 +140,7 @@ async function getConversationMessages(pageId, userId, accessToken, limit = 5) {
         return [];
     } catch (error) {
         console.error(`Error fetching conversation for ${pageId}:`, error.response ? error.response.data : error.message);
+        await handleFacebookError(error, pageId);
         return [];
     }
 }

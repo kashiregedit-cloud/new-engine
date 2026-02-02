@@ -35,12 +35,25 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      let targetEmail = user.email;
+      
+      // Check Team Membership
+      const { data: teamData } = await (supabase
+          .from('team_members') as any)
+          .select('owner_email')
+          .eq('member_email', user.email)
+          .single();
+      
+      if (teamData) {
+          targetEmail = teamData.owner_email;
+      }
+
       // 1. Fetch Pages
       // Explicitly typing the response to avoid 'never' issues
       const { data: pagesData, error: pagesError } = await supabase
         .from('page_access_token_message')
         .select('*')
-        .eq('email', user.email);
+        .eq('email', targetEmail);
 
       if (pagesError) throw pagesError;
       

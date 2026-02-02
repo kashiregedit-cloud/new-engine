@@ -433,6 +433,17 @@ async function getAllActivePages() {
     return allowedPageIds;
 }
 
+// 15. Mark Page Token as Invalid
+async function markPageTokenInvalid(pageId) {
+    console.warn(`[DB] Marking token as INVALID for page ${pageId}`);
+    const { error } = await supabase
+        .from('page_access_token_message')
+        .update({ subscription_status: 'invalid_token' })
+        .eq('page_id', pageId);
+        
+    if (error) console.error(`Error marking page ${pageId} invalid:`, error);
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -450,5 +461,6 @@ module.exports = {
     getMessageById,
     saveOrderTracking,
     checkLockStatus,
-    getAllActivePages
+    getAllActivePages,
+    markPageTokenInvalid
 };
