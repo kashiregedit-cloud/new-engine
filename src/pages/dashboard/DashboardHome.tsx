@@ -42,11 +42,32 @@ export default function DashboardHome() {
             .eq('user_id', user.id);
             
           setStats(prev => ({ ...prev, sessions: sessionCount || 0 }));
+        } else if (platform === 'messenger') {
+            // Fetch connected pages for Messenger
+            let targetEmail = user.email;
+            
+            // Check if team member
+            const { data: teamData } = await (supabase
+                .from('team_members') as any)
+                .select('owner_email')
+                .eq('member_email', user.email)
+                .maybeSingle();
+
+            if (teamData) {
+                targetEmail = teamData.owner_email;
+            }
+
+            const { count: pageCount } = await supabase
+                .from('page_access_token_message')
+                .select('*', { count: 'exact', head: true })
+                .eq('email', targetEmail);
+            
+            setStats(prev => ({ ...prev, sessions: pageCount || 0 }));
         }
       }
     }
     getUser();
-  }, [isWhatsApp]);
+  }, [isWhatsApp, platform]);
 
   return (
     <div className="space-y-8 animate-fade-in">

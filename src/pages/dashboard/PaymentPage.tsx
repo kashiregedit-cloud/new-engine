@@ -409,38 +409,56 @@ export default function PaymentPage() {
                             <TableCell colSpan={2} className="text-center py-8 text-muted-foreground">No transactions found</TableCell>
                         </TableRow>
                     ) : (
-                        transactions.map((txn) => (
-                        <TableRow key={txn.id} className="group">
+                        transactions.map((txn) => {
+                          const isExpense = ['plan_purchase', 'credit_purchase', 'balance_deduction'].includes(txn.method);
+                          const methodLabels: Record<string, string> = {
+                            'plan_purchase': 'Plan Purchase',
+                            'credit_purchase': 'Credit Purchase',
+                            'balance_deduction': 'Balance Deduction',
+                            'bkash': 'bKash Deposit',
+                            'nagad': 'Nagad Deposit',
+                            'rocket': 'Rocket Deposit',
+                            'referral_reward': 'Referral Reward'
+                          };
+
+                          return (
+                        <TableRow key={txn.id} className="group hover:bg-muted/50 transition-colors">
                             <TableCell>
                                 <div className="flex flex-col gap-1">
                                     <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-5">
-                                            {txn.method}
+                                        <span className="font-semibold text-sm">
+                                            {methodLabels[txn.method] || txn.method}
+                                        </span>
+                                        <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 font-mono text-muted-foreground hidden sm:inline-flex">
+                                            {txn.trx_id?.startsWith('SYS_') ? 'SYSTEM' : txn.trx_id}
                                         </Badge>
-                                        <span className="text-sm font-medium">{txn.trx_id || "System"}</span>
                                     </div>
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <span>{new Date(txn.created_at).toLocaleDateString()}</span>
-                                        <span>•</span>
-                                        <div className={`flex items-center gap-1 ${
-                                            txn.status === "completed" ? "text-green-500" :
-                                            txn.status === "pending" ? "text-yellow-500" : "text-red-500"
-                                        }`}>
-                                            {txn.status === "completed" && <CheckCircle className="h-3 w-3" />}
-                                            {txn.status === "pending" && <Clock className="h-3 w-3" />}
-                                            {txn.status === "failed" && <XCircle className="h-3 w-3" />}
-                                            <span className="capitalize">{txn.status}</span>
-                                        </div>
+                                        <Clock className="h-3 w-3" />
+                                        <span>{new Date(txn.created_at).toLocaleString()}</span>
                                     </div>
                                 </div>
                             </TableCell>
                             <TableCell className="text-right">
-                                <span className={`font-mono font-bold ${txn.method === 'plan_purchase' ? 'text-red-600' : 'text-green-600'}`}>
-                                    {txn.method === 'plan_purchase' ? '-' : '+'}৳{txn.amount}
-                                </span>
+                                <div className="flex flex-col items-end gap-1">
+                                    <span className={`font-mono font-bold text-base ${isExpense ? 'text-red-600' : 'text-green-600'}`}>
+                                        {isExpense ? '-' : '+'}৳{txn.amount}
+                                    </span>
+                                    <Badge 
+                                        variant="secondary" 
+                                        className={`text-[10px] h-5 capitalize ${
+                                            txn.status === 'completed' ? 'bg-green-100 text-green-700 hover:bg-green-100' :
+                                            txn.status === 'pending' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-100' :
+                                            'bg-red-100 text-red-700 hover:bg-red-100'
+                                        }`}
+                                    >
+                                        {txn.status}
+                                    </Badge>
+                                </div>
                             </TableCell>
                         </TableRow>
-                        ))
+                        );
+                        })
                     )}
                   </TableBody>
                 </Table>

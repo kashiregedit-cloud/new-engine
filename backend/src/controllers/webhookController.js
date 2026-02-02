@@ -345,12 +345,23 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
              return;
         }
         
-        if (pageConfig.message_credit <= 0) {
-            const logMsg = `Page ${pageId} out of credits. (Source: ${pageConfig.credit_source || 'page_balance'})`;
-            console.log(logMsg);
-            logToFile(logMsg);
-            return;
+        // --- CREDIT CHECK LOGIC (Modified for Cheap Engine vs Own API) ---
+        // Default to TRUE (Cheap Engine) if undefined, for backward compatibility
+        const isCheapEngine = pageConfig.cheap_engine !== false; 
+
+        if (isCheapEngine) {
+            // CHEAP ENGINE: Must have credits
+            if (pageConfig.message_credit <= 0) {
+                const logMsg = `Page ${pageId} out of credits (Cheap Engine Active). (Source: ${pageConfig.credit_source || 'page_balance'})`;
+                console.log(logMsg);
+                logToFile(logMsg);
+                return; // STOP Processing
+            }
+        } else {
+            // OWN API: Ignore credit check (Allow even if 0)
+            console.log(`Page ${pageId} using Own API. Bypassing credit check.`);
         }
+        // -----------------------------------------------------------------
 
         // --- FAILURE LOCK CHECK ---
         const isLocked = await dbService.checkLockStatus(pageId, senderId);
@@ -843,8 +854,12 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             reply: replyText
         });
 
-        // 8. Deduct Credit
-        await dbService.deductCredit(pageId, pageConfig.message_credit);
+        // 8. Deduct Credit (ONLY IF CHEAP ENGINE IS ACTIVE)
+        if (isCheapEngine) {
+            await dbService.deductCredit(pageId, pageConfig.message_credit);
+        } else {
+            console.log(`[Credit] Skipped deduction for Page ${pageId} (Own API Mode)`);
+        }
 
     } catch (error) {
         console.error("Error processing event:", error);
@@ -885,10 +900,19 @@ async function processCommentEvent(changeValue) {
              return;
         }
 
-        if (pageConfig.message_credit <= 0) {
-            console.log(`Page ${pageId} out of credits for comments.`);
-            return;
+        // --- CREDIT CHECK LOGIC (Modified for Cheap Engine vs Own API) ---
+        // Default to TRUE (Cheap Engine) if undefined, for backward compatibility
+        const isCheapEngine = pageConfig.cheap_engine !== false; 
+
+        if (isCheapEngine) {
+            if (pageConfig.message_credit <= 0) {
+                console.log(`Page ${pageId} out of credits for comments (Cheap Engine Active).`);
+                return;
+            }
+        } else {
+             console.log(`Page ${pageId} using Own API for comments. Bypassing credit check.`);
         }
+        // -----------------------------------------------------------------
 
         // 3. Generate AI Reply
         // Use a simplified prompt for comments (or same as chat)
@@ -916,8 +940,12 @@ async function processCommentEvent(changeValue) {
             status: 'replied'
         });
 
-        // 6. Deduct Credit
-        await dbService.deductCredit(pageId, pageConfig.message_credit);
+        // 6. Deduct Credit (ONLY IF CHEAP ENGINE IS ACTIVE)
+        if (isCheapEngine) {
+             await dbService.deductCredit(pageId, pageConfig.message_credit);
+        } else {
+             console.log(`[Credit] Skipped deduction for Page ${pageId} (Own API Mode)`);
+        }
         
         console.log(`Replied to comment ${commentId}`);
 

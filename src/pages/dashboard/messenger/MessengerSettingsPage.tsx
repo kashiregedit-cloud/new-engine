@@ -333,7 +333,8 @@ export default function MessengerSettingsPage() {
       const updates: any = {
           ai: values.provider,
           api_key: values.api_key,
-          chat_model: values.chatmodel
+          chat_model: values.chatmodel,
+          cheap_engine: mode === "managed" // TRUE for Cheap Engine, FALSE for Own API
       };
 
       let creditToAdd = 0;
@@ -349,89 +350,66 @@ export default function MessengerSettingsPage() {
           
           creditToAdd = creditMap[selectedPlan] || 500;
 
-          // CENTRALIZED CREDIT LOGIC: Update user_configs instead of page table
-          // 1. Fetch Page Owner ID (UUID)
-          const { data: pageDataForOwner } = await supabase
+          // CENTRALIZED CREDIT LOGIC: Secure RPC Call
+          // This handles Team Member purchases (deducts from Buyer, credits Owner)
+          
+          const priceMap: Record<string, number> = { 
+              '500_free': 0, 
+              '1000': 500, 
+              '5000': 2000, 
+              '10000': 3500 
+          };
+          const price = priceMap[selectedPlan] || 0;
+
+          // If price > 0, use secure RPC
+          if (price > 0) {
+              const { data: rpcData, error: rpcError } = await (supabase as any)
+                .rpc('purchase_credits', {
+                    p_page_id: pageId,
+                    p_credit_amount: creditToAdd,
+                    p_cost: price
+                });
+
+              if (rpcError) {
+                  console.error("Purchase failed:", rpcError);
+                  throw new Error(rpcError.message);
+              }
+              
+              toast.success(`Purchased ${creditToAdd} credits for ৳${price}`);
+          } else {
+              // Free plan logic (just update owner credit directly if allowed, or use RPC with 0 cost)
+              // Since free plan is usually one-time or trial, we can keep the manual logic or use RPC with 0 cost.
+              // Let's use RPC for consistency if possible, but RPC checks balance. 0 balance check passes.
+              const { error: rpcError } = await (supabase as any)
+                .rpc('purchase_credits', {
+                    p_page_id: pageId,
+                    p_credit_amount: creditToAdd,
+                    p_cost: 0
+                });
+                
+              if (rpcError) throw new Error(rpcError.message);
+              toast.success(`Activated Free Plan (${creditToAdd} credits)`);
+          }
+
+          // Fetch updated credit to show in UI
+          // We need to fetch the OWNER'S credit
+          const { data: pageData } = await supabase
             .from('page_access_token_message')
             .select('user_id')
             .eq('page_id', pageId)
             .single();
-          
-          let ownerUUID = (pageDataForOwner as any)?.user_id;
-
-          if (!ownerUUID) {
-               // Fallback: Try to get current user ID
-               const { data: { user } } = await supabase.auth.getUser();
-               if (user) ownerUUID = user.id;
-          }
-
-          if (ownerUUID) {
-              // 2. Fetch Current Global Credit & Balance
-              const { data: userConfig, error: fetchError } = await supabase
-                  .from('user_configs')
-                  .select('message_credit, balance')
-                  .eq('user_id', ownerUUID)
-                  .maybeSingle();
-              
-              if (fetchError) throw new Error("Failed to fetch user config: " + fetchError.message);
-
-              const currentGlobal = (userConfig as any)?.message_credit || 0;
-              const currentBalance = (userConfig as any)?.balance || 0;
-              
-              // Determine Price
-              const priceMap: Record<string, number> = { 
-                  '500_free': 0, 
-                  '1000': 500, 
-                  '5000': 2000, 
-                  '10000': 3500 
-              };
-              const price = priceMap[selectedPlan] || 0;
-
-              // 3. Check Balance (for paid plans)
-              if (price > 0 && currentBalance < price) {
-                  throw new Error(`Insufficient balance. Required: ৳${price}, Available: ৳${currentBalance}. Please top up first.`);
-              }
-
-              const newGlobal = currentGlobal + creditToAdd;
-              const newBalance = currentBalance - price;
-              
-              // 4. Update User Configs (Deduct Balance + Add Credit)
-              const { error: configError } = await (supabase
-                  .from('user_configs') as any)
-                  .upsert({ 
-                      user_id: ownerUUID,
-                      message_credit: newGlobal,
-                      balance: newBalance
-                  }, { onConflict: 'user_id' });
-
-              if (configError) {
-                  console.error("Failed to update user config:", configError);
-                  throw new Error("Failed to process transaction: " + (configError as any).message);
-              }
-              
-              // 5. Record Transaction
-              if (price > 0) {
-                  const { data: { user } } = await supabase.auth.getUser();
-                  const userEmail = user?.email || "unknown_user";
-
-                  await (supabase.from('payment_transactions') as any).insert({
-                      user_email: userEmail,
-                      amount: price,
-                      method: 'balance_deduction',
-                      trx_id: 'SYS_' + Date.now(),
-                      sender_number: 'SYSTEM',
-                      status: 'completed'
-                  });
-              }
-              
-              // Update local state to reflect new global credit
-              setMessageCredit(newGlobal);
-              // Ensure we show it immediately
-              setPlanActive(true); 
-              
-              if (price > 0) {
-                  toast.success(`Purchased ${creditToAdd} credits for ৳${price}`);
-              }
+            
+          if ((pageData as any)?.user_id) {
+             const { data: ownerConfig } = await supabase
+                .from('user_configs')
+                .select('message_credit')
+                .eq('user_id', (pageData as any).user_id)
+                .single();
+             
+             if (ownerConfig) {
+                 setMessageCredit((ownerConfig as any).message_credit);
+                 setPlanActive(true);
+             }
           }
 
           updates.subscription_status = 'active';
@@ -578,23 +556,19 @@ export default function MessengerSettingsPage() {
           <CardContent>
             <div className="mb-6">
                 <RadioGroup defaultValue={mode} value={mode} onValueChange={(v) => {
-                    // Force Managed Mode (Locked)
-                    if (v === "own") {
-                        toast.error("This feature is temporarily locked by administrator.");
-                        return;
+                    setMode(v as "own" | "managed");
+                    if (v === "managed") {
+                        setIsPricingOpen(true);
                     }
-                    setMode("managed");
-                    setIsPricingOpen(true);
                 }} className="grid grid-cols-2 gap-4">
                   <div>
-                    <RadioGroupItem value="own" id="own" className="peer sr-only" disabled={true} />
+                    <RadioGroupItem value="own" id="own" className="peer sr-only" />
                     <Label
                       htmlFor="own"
-                      className={`flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 opacity-50 cursor-not-allowed`}
+                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
                     >
-                      <Lock className="mb-1 h-4 w-4 text-destructive" />
                       <Key className="mb-3 h-6 w-6" />
-                      Use Own API (Locked)
+                      Use Own API
                     </Label>
                   </div>
                   <div>
