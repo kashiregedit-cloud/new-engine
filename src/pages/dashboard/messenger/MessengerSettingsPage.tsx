@@ -67,6 +67,7 @@ export default function MessengerSettingsPage() {
   const [pageId, setPageId] = useState<string | null>(null);
   const [verified, setVerified] = useState(true);
   const [mode, setMode] = useState<"own" | "managed">("own");
+  const [activeMode, setActiveMode] = useState<"own" | "managed" | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("5000");
   const [isPricingOpen, setIsPricingOpen] = useState(false);
   const [couponCode, setCouponCode] = useState("");
@@ -206,6 +207,7 @@ export default function MessengerSettingsPage() {
         }
 
         setMode(isManaged ? "managed" : "own");
+        setActiveMode(isManaged ? "managed" : "own");
 
         // Clean model name (remove :free suffix for display)
         const rawModel = pageRow.chat_model || "arcee-ai/trinity-large-preview";
@@ -315,44 +317,10 @@ export default function MessengerSettingsPage() {
     }
   };
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    if (!dbId || !pageId) return;
-    setLoading(true);
-
-    if (mode === "managed") {
-        values.provider = "gemini"; // Or openrouter if that's what the backend expects for this model
-        values.api_key = MANAGED_SECRET_KEY;
-        values.chatmodel = MANAGED_MODEL;
-    } else {
-        if (!values.api_key) {
-            toast.error("API Key is required for own provider");
-            setLoading(false);
-            return;
-        }
-    }
-
-    try {
-      // Update text_prompt in fb_message_database
-      const { error: dbError } = await (supabase
-        .from('fb_message_database') as any)
-        .update({
-            text_prompt: values.text_prompt
-        })
-        .eq('id', parseInt(dbId));
-
-      if (dbError) throw dbError;
-
-      const updates: any = {
-          ai: values.provider,
-          api_key: values.api_key,
-          chat_model: values.chatmodel,
-          cheap_engine: mode === "managed" // TRUE for Cheap Engine, FALSE for Own API
-      };
-
-      let creditToAdd = 0;
-
-      // Handle Plan Activation Logic
-      if (mode === "managed") {
+  const handlePurchaseCredits = async () => {
+      if (!pageId) return;
+      setLoading(true);
+      try {
           const creditMap: Record<string, number> = {
               '500_free': 500,
               '1000': 1000,
@@ -360,10 +328,7 @@ export default function MessengerSettingsPage() {
               '10000': 10000
           };
           
-          creditToAdd = creditMap[selectedPlan] || 500;
-
-          // CENTRALIZED CREDIT LOGIC: Secure RPC Call
-          // This handles Team Member purchases (deducts from Buyer, credits Owner)
+          const creditToAdd = creditMap[selectedPlan] || 500;
           
           const priceMap: Record<string, number> = { 
               '500_free': 0, 
@@ -382,16 +347,9 @@ export default function MessengerSettingsPage() {
                     p_cost: price
                 });
 
-              if (rpcError) {
-                  console.error("Purchase failed:", rpcError);
-                  throw new Error(rpcError.message);
-              }
-              
+              if (rpcError) throw new Error(rpcError.message);
               toast.success(`Purchased ${creditToAdd} credits for ৳${price}`);
           } else {
-              // Free plan logic (just update owner credit directly if allowed, or use RPC with 0 cost)
-              // Since free plan is usually one-time or trial, we can keep the manual logic or use RPC with 0 cost.
-              // Let's use RPC for consistency if possible, but RPC checks balance. 0 balance check passes.
               const { error: rpcError } = await (supabase as any)
                 .rpc('purchase_credits', {
                     p_page_id: pageId,
@@ -403,8 +361,7 @@ export default function MessengerSettingsPage() {
               toast.success(`Activated Free Plan (${creditToAdd} credits)`);
           }
 
-          // Fetch updated credit to show in UI
-          // We need to fetch the OWNER'S credit
+          // Fetch updated credit
           const { data: pageData } = await supabase
             .from('page_access_token_message')
             .select('user_id')
@@ -424,13 +381,49 @@ export default function MessengerSettingsPage() {
              }
           }
 
-          updates.subscription_status = 'active';
-          updates.subscription_plan = selectedPlan;
-          updates.subscription_expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
-          // NOTE: We do NOT update updates.message_credit here anymore.
-      }
+          setIsPricingOpen(false);
 
-      // Update AI settings in page_access_token_message
+      } catch (error: any) {
+          console.error("Purchase error:", error);
+          toast.error("Purchase failed: " + error.message);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (!dbId || !pageId) return;
+    setLoading(true);
+
+    if (mode === "managed") {
+        values.provider = "gemini"; 
+        values.api_key = MANAGED_SECRET_KEY;
+        values.chatmodel = MANAGED_MODEL;
+    } else {
+        if (!values.api_key) {
+            toast.error("API Key is required for own provider");
+            setLoading(false);
+            return;
+        }
+    }
+
+    try {
+      const { error: dbError } = await (supabase
+        .from('fb_message_database') as any)
+        .update({
+            text_prompt: values.text_prompt
+        })
+        .eq('id', parseInt(dbId));
+
+      if (dbError) throw dbError;
+
+      const updates: any = {
+          ai: values.provider,
+          api_key: values.api_key,
+          chat_model: values.chatmodel,
+          cheap_engine: mode === "managed" 
+      };
+
       const { error: pageError } = await (supabase
         .from('page_access_token_message') as any)
         .update(updates)
@@ -438,18 +431,12 @@ export default function MessengerSettingsPage() {
 
       if (pageError) throw pageError;
 
-      if (mode === "managed") {
-          setPlanActive(true);
-          // setMessageCredit handled inside ownerUUID block
-          toast.success(`Plan activated! Added ${creditToAdd} message credits.`);
-      } else {
-          toast.success("AI settings saved successfully");
-      }
+      setActiveMode(mode); // Update active mode indicator
+      toast.success("AI settings saved successfully");
       
     } catch (error: any) {
         console.error("Save settings error:", error);
-        const message = error.message || (typeof error === 'string' ? error : JSON.stringify(error));
-        toast.error("Failed to save settings: " + message);
+        toast.error("Failed to save settings: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -560,7 +547,14 @@ export default function MessengerSettingsPage() {
       <div className="grid gap-6">
         <Card className="border-l-4 border-l-purple-500 shadow-md">
           <CardHeader>
-            <CardTitle>AI Provider Configuration</CardTitle>
+            <CardTitle className="flex justify-between items-center">
+                AI Provider Configuration
+                {activeMode && (
+                    <Badge variant={activeMode === 'managed' ? "default" : "outline"} className={activeMode === 'managed' ? "bg-purple-600 hover:bg-purple-700" : "text-blue-600 border-blue-600"}>
+                        Status: {activeMode === 'managed' ? "User Cloud API" : "Own API"}
+                    </Badge>
+                )}
+            </CardTitle>
             <CardDescription>
               Select an AI provider and enter your API Key.
             </CardDescription>
@@ -676,7 +670,7 @@ export default function MessengerSettingsPage() {
                                         <Sparkles className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                                     </div>
                                     <div>
-                                        <h3 className="font-semibold text-purple-900 dark:text-purple-100">Premium Managed AI</h3>
+                                        <h3 className="font-semibold text-purple-900 dark:text-purple-100">User Cloud API</h3>
                                         <p className="text-sm text-purple-700 dark:text-purple-300">
                                             High-speed engine. No setup required.
                                         </p>
@@ -705,7 +699,7 @@ export default function MessengerSettingsPage() {
                                         onClick={() => setIsPricingOpen(true)} 
                                         className="border-purple-200 hover:bg-purple-50 text-purple-700"
                                     >
-                                        Change
+                                        Top Up / Change Plan
                                     </Button>
                                 </div>
                             </div>
@@ -806,7 +800,7 @@ export default function MessengerSettingsPage() {
                                     <Button type="button" variant="outline" onClick={() => setIsPricingOpen(false)}>
                                         Cancel
                                     </Button>
-                                    <Button type="button" onClick={form.handleSubmit(onSubmit)} className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700">
+                                    <Button type="button" onClick={handlePurchaseCredits} className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700">
                                         Confirm & Pay
                                     </Button>
                                 </DialogFooter>
@@ -817,30 +811,13 @@ export default function MessengerSettingsPage() {
 
                 <div className="flex justify-end">
                   <Button 
-                    type={mode === 'managed' ? "button" : "submit"} 
+                    type="submit" 
                     size="lg" 
                     disabled={loading} 
-                    onClick={mode === 'managed' ? () => setIsPricingOpen(true) : undefined}
-                    className={mode === 'managed' ? (selectedPlan === '500_free' ? 'bg-green-600 hover:bg-green-700 w-full md:w-auto' : 'bg-purple-600 hover:bg-purple-700 w-full md:w-auto') : ''}
+                    className="bg-primary hover:bg-primary/90 w-full md:w-auto"
                   >
-                    {mode === 'managed' ? (
-                        selectedPlan === '500_free' ? (
-                            <>
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Activate Free Trial
-                            </>
-                        ) : (
-                            <>
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Buy & Activate Plan
-                            </>
-                        )
-                    ) : (
-                        <>
-                            <Save className="mr-2 h-4 w-4" />
-                            Save Configuration
-                        </>
-                    )}
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Configuration
                   </Button>
                 </div>
               </form>
