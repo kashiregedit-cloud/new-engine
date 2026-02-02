@@ -163,7 +163,7 @@ export default function MessengerSettingsPage() {
         const apiKey = pageRow.api_key || "";
         
         // --- SHARED CREDIT FETCH ---
-        let currentCredit = pageRow.message_credit || 0;
+        let currentCredit = 0; // Initialize to 0, ignoring page-specific credit
         
         // If page is linked to a user, fetch the User's shared credit balance
         if (pageRow.user_id) {
@@ -337,21 +337,46 @@ export default function MessengerSettingsPage() {
               '10000': 10000
           };
           
-          // Only update subscription if we are actually buying/activating (this logic might need refinement if just saving prompt)
-          // For now, if mode is managed, we ensure subscription is active. 
-          // Ideally, we should check if they actually clicked "Buy" or just "Save", but the button text says "Buy & Activate".
-          // We'll assume clicking the button in managed mode intends to activate the selected plan.
+          const creditToAdd = creditMap[selectedPlan] || 500;
+
+          // CENTRALIZED CREDIT LOGIC: Update user_configs instead of page table
+          // 1. Fetch Page Owner ID (UUID)
+          const { data: pageDataForOwner } = await supabase
+            .from('page_access_token_message')
+            .select('user_id')
+            .eq('page_id', pageId)
+            .single();
           
-          // However, if they already have a plan and just want to save the prompt, we shouldn't reset credits.
-          // We can check if planActive is false OR if they selected a new plan?
-          // For simplicity/demo: We update if they are in managed mode.
-          
-          // BETTER LOGIC: If plan is NOT active, OR they explicitly selected a plan via pricing (which we can't easily track here without more state).
-          // Let's assume every save in Managed mode refreshes the plan for now, OR we only set it if not active.
-          
-          // User request: "buy and active plan e click korle work kroe na"
-          // We will update the credits and status.
-          
+          const ownerUUID = (pageDataForOwner as any)?.user_id;
+
+          if (ownerUUID) {
+              // 2. Fetch Current Global Credit
+              const { data: userConfig } = await supabase
+                  .from('user_configs')
+                  .select('message_credit')
+                  .eq('user_id', ownerUUID)
+                  .maybeSingle();
+              
+              const currentGlobal = (userConfig as any)?.message_credit || 0;
+              const newGlobal = currentGlobal + creditToAdd;
+              
+              // 3. Update User Configs
+              const { error: configError } = await supabase
+                  .from('user_configs')
+                  .upsert({ 
+                      user_id: ownerUUID,
+                      message_credit: newGlobal
+                  }, { onConflict: 'user_id' });
+
+              if (configError) {
+                  console.error("Failed to update user config:", configError);
+                  toast.error("Failed to add credits to account");
+              } else {
+                  // Update local state to reflect new global credit
+                  setMessageCredit(newGlobal);
+              }
+          }
+
           // Record Transaction (Mock or Real)
           const priceMap: Record<string, number> = { 
               '500_free': 0, 
@@ -380,8 +405,8 @@ export default function MessengerSettingsPage() {
 
           updates.subscription_status = 'active';
           updates.subscription_plan = selectedPlan;
-          updates.message_credit = creditMap[selectedPlan] || 500;
           updates.subscription_expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
+          // NOTE: We do NOT update updates.message_credit here anymore.
       }
 
       // Update AI settings in page_access_token_message

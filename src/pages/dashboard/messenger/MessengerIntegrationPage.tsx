@@ -71,6 +71,7 @@ export default function MessengerIntegrationPage() {
     
     // --- State ---
     const [userEmail, setUserEmail] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
     const [pages, setPages] = useState<PageData[]>([]);
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState(false);
@@ -97,6 +98,8 @@ export default function MessengerIntegrationPage() {
         const getUser = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (user?.email) {
+                setUserId(user.id); // Store UUID
+                
                 const { data: teamData } = await (supabase
                     .from('team_members') as any)
                     .select('owner_email')
@@ -349,7 +352,7 @@ export default function MessengerIntegrationPage() {
                         subscription_plan: 'free',
                         message_credit: 0, // INTEGRATION IS FREE, but usage requires credits
                         email: userEmail,
-                        user_id: userEmail, // Ensure user_id is set for Centralized Credit Check
+                        user_id: userId, // Ensure user_id is set to UUID for Centralized Credit Check
                         secret_key: String(dbId),
                         found_id: String(dbId)
                     } as any, { onConflict: 'page_id' });
@@ -595,12 +598,33 @@ export default function MessengerIntegrationPage() {
                 expiryDate.setDate(expiryDate.getDate() + days);
 
                 // Activate Trial
+                
+                // CENTRALIZED CREDIT: Add 500 to user_configs
+                const ownerUUID = (selectedPageForSub as any).user_id;
+                
+                if (ownerUUID) {
+                    const { data: userConfig } = await supabase
+                        .from('user_configs')
+                        .select('message_credit')
+                        .eq('user_id', ownerUUID)
+                        .maybeSingle();
+                    
+                    const currentGlobal = (userConfig as any)?.message_credit || 0;
+                    
+                    await supabase
+                        .from('user_configs')
+                        .upsert({ 
+                            user_id: ownerUUID,
+                            message_credit: currentGlobal + 500
+                        }, { onConflict: 'user_id' });
+                }
+
                 const { error } = await (supabase
                     .from('page_access_token_message') as any)
                     .update({
                         subscription_status: 'trial',
                         subscription_plan: 'trial',
-                        message_credit: 500, // 500 credits for trial
+                        // message_credit: 500, // REMOVED: Centralized credit
                         expires_at: expiryDate.toISOString()
                     })
                     .eq('page_id', selectedPageForSub.page_id);
@@ -686,10 +710,10 @@ export default function MessengerIntegrationPage() {
                     
                     <div className="grid gap-6 py-4">
                         {/* Section 1: Professional Webhook Configuration */}
-                        <div className="space-y-4 border rounded-lg p-4 bg-blue-50/50 border-blue-100">
+                        <div className="space-y-4 border rounded-lg p-4 bg-secondary/10">
                             <div className="flex items-center gap-2">
-                                <div className="bg-blue-100 p-1.5 rounded-md">
-                                    <Database className="h-4 w-4 text-blue-600" />
+                                <div className="bg-primary/10 p-1.5 rounded-md">
+                                    <Database className="h-4 w-4 text-primary" />
                                 </div>
                                 <h3 className="font-semibold text-sm">Professional Webhook Configuration</h3>
                             </div>
@@ -698,7 +722,7 @@ export default function MessengerIntegrationPage() {
                                 <div className="space-y-2">
                                     <Label className="text-xs font-medium">Callback URL</Label>
                                     <div className="relative">
-                                        <Input readOnly value="https://webhook.salesmanchatbot.online/webhook" className="pr-8 bg-white" />
+                                        <Input readOnly value="https://webhook.salesmanchatbot.online/webhook" className="pr-8" />
                                         <Button
                                             size="icon"
                                             variant="ghost"
@@ -716,7 +740,7 @@ export default function MessengerIntegrationPage() {
                                 <div className="space-y-2">
                                     <Label className="text-xs font-medium">Verify Token</Label>
                                     <div className="relative">
-                                        <Input readOnly value="123456" className="pr-8 bg-white" />
+                                        <Input readOnly value="123456" className="pr-8" />
                                         <Button
                                             size="icon"
                                             variant="ghost"
@@ -731,7 +755,7 @@ export default function MessengerIntegrationPage() {
                                     </div>
                                 </div>
                             </div>
-                            <p className="text-xs text-blue-600">
+                            <p className="text-xs text-muted-foreground">
                                 * Enter these details in your Facebook App Developer Portal under <strong>Webhooks &gt; Page</strong>.
                             </p>
                         </div>

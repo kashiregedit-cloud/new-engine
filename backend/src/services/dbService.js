@@ -141,28 +141,10 @@ async function deductCredit(pageId, currentCredit) {
     }
 
     // 3. Fallback to Legacy Page-Specific Credit (If RPC not setup and User credit empty/failed)
-    // Fetch FRESH page credit to avoid race conditions or inflated 'currentCredit' from getPageConfig
-    const { data: freshPageData } = await supabase
-        .from('page_access_token_message')
-        .select('message_credit')
-        .eq('page_id', pageId)
-        .single();
-        
-    const freshCredit = freshPageData ? freshPageData.message_credit : 0;
-
-    if (freshCredit <= 0) return false;
+    // REMOVED as per user instruction: "eta fall back hisebe rakar dorkar nai"
+    // Credits must be centralized in user_configs.
     
-    const newCredit = Number(freshCredit) - 1;
-    const { error } = await supabase
-        .from('page_access_token_message')
-        .update({ message_credit: newCredit })
-        .eq('page_id', pageId);
-        
-    if (error) {
-        console.error(`Failed to deduct credit for ${pageId}:`, error);
-        return false;
-    }
-    return true;
+    return false;
 }
 
 // 6. Get Chat History (Context Window)
