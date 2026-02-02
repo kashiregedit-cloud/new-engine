@@ -76,7 +76,7 @@ function SwitcherUI({ context }: { context: any }) {
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[220px] p-0" align="start">
+        <PopoverContent className="w-[220px] p-0 z-[1000]" align="start">
             <Command>
             <CommandList>
                 <CommandInput placeholder="Search workspace..." />

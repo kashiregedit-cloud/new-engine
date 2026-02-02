@@ -561,14 +561,14 @@ export default function MessengerIntegrationPage() {
                         Manage your connected Facebook pages and their automation settings.
                     </p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto mt-4 md:mt-0">
                     <Button variant="outline" onClick={() => setIsManualSetupOpen(true)} className="w-full sm:w-auto">
                         <Settings className="mr-2 h-4 w-4" />
-                        Open Manual Setup
+                        Manual Setup
                     </Button>
                     <Button onClick={handleConnectFacebook} disabled={connecting} className="w-full sm:w-auto">
                         {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
-                        {connecting ? "Connecting..." : "Connect with Facebook"}
+                        {connecting ? "Connecting..." : "Connect Facebook"}
                     </Button>
                 </div>
             </div>
@@ -634,7 +634,8 @@ export default function MessengerIntegrationPage() {
                             No pages connected yet. Click "Connect with Facebook" to get started.
                         </div>
                     ) : (
-                        <Table>
+                        <div className="overflow-x-auto">
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Page Name</TableHead>
@@ -649,12 +650,12 @@ export default function MessengerIntegrationPage() {
                                             <TableCell className="font-medium">
                                                 <div className="flex items-center gap-2">
                                                     <Facebook className="h-4 w-4 text-blue-600" />
-                                                    {page.name}
+                                                    <span className="whitespace-nowrap">{page.name}</span>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="font-mono text-xs">{page.page_id}</TableCell>
+                                            <TableCell className="font-mono text-xs whitespace-nowrap">{page.page_id}</TableCell>
                                             <TableCell>
-                                                <span className="text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Active (Free)</span>
+                                                <span className="text-green-600 flex items-center gap-1 whitespace-nowrap"><Check className="h-3 w-3" /> Active (Free)</span>
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-2">
@@ -674,7 +675,8 @@ export default function MessengerIntegrationPage() {
                                     ))}
                                 </TableBody>
                             </Table>
-                        )}
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>
