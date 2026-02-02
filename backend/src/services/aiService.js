@@ -270,6 +270,17 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         personaInstruction = `Persona: Gemini 2.5 Flash. Fast, accurate, Bengali expert. Strict JSON. No fluff.`;
     }
 
+    // Hardcoded Gender Fix for Bengali/Muslim Names
+    if (senderName && (
+        senderName.startsWith('Md') || 
+        senderName.startsWith('MD') || 
+        senderName.startsWith('Mohammad') || 
+        senderName.startsWith('Muhammed') || 
+        senderName.toLowerCase().includes('mr.')
+    )) {
+        senderGender = 'male';
+    }
+
     // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
     const n8nSystemPrompt = `Role: Bot ${pageConfig.bot_name || 'Assistant'} for ${senderName}.
 Ctx: ${basePrompt}
@@ -280,7 +291,8 @@ Rules:
 3. IMAGE HANDLING: If the user sends an image, the system will provide a visual analysis. Use this analysis to identify the product type (e.g., 'Blue Saree', 'Leather Watch'). If the EXACT item is not in your 'Ctx', you MUST recommend the CLOSEST SIMILAR available product from the list. Say something like: "We don't have this exact one, but here is a similar [Product Name]...".
 4. STRICT DOMAIN CONTROL: You are a specialized assistant for this business. You MUST ONLY answer questions related to the business/products described in the 'Ctx'. If the user asks about UNRELATED topics (e.g. health, politics, personal advice, religion) that are NOT in the context, you MUST return null for the 'reply' field. Do not try to be helpful for unrelated topics.
 5. PHONE VALIDATION: If user provides a phone number, it MUST be a valid 11-digit number (for Bangladesh) or valid international format. If invalid (e.g. less than 11 digits), ask for the correct number again. DO NOT confirm order or extract 'order_details' until a valid number is provided.
-6. Output RAW JSON:
+6. SENDING IMAGES: If the user explicitly asks for a photo/image (e.g. "sobi dao", "pic dao"), and you have the product image URL in your 'Ctx', you MUST include the image URL in your reply. Use format: "[Image: Product Name | URL]". You HAVE permission to send images. Never say "I cannot upload images".
+7. Output RAW JSON:
 {
   "reply": "Bengali text"|null,
   "sentiment": "pos|neu|neg",
@@ -915,7 +927,7 @@ async function processImageWithVision(imageUrl, pageConfig) {
         {
           role: "user",
           content: [
-            { type: "text", text: "You are a smart image analyzer. Analyze this image to identify the Product Type, Category (e.g. Clothing, Electronics), Visual Style, Color, and any visible text. Be descriptive but concise. You MUST start your response with exactly: 'Based on the image this is ' followed by the detailed description." },
+            { type: "text", text: "You are a smart image analyzer. Your PRIMARY TASK is to extract information from this image.\n\n1. TEXT DETECTION (PRIORITY): First, read and list ANY visible text, brand names, labels, or model numbers on the product or packaging.\n2. VISUAL ANALYSIS: Then, identify the Product Type, Category (e.g. Clothing, Electronics), Visual Style, and Color.\n\nYou MUST start your response with exactly: 'Based on the image this is ' followed by the detected text (if any) and then the detailed product description." },
             { type: "image_url", image_url: { url: finalImageUrl } }
           ]
         }
