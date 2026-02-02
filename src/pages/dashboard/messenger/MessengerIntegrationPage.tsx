@@ -611,8 +611,8 @@ export default function MessengerIntegrationPage() {
                     
                     const currentGlobal = (userConfig as any)?.message_credit || 0;
                     
-                    await supabase
-                        .from('user_configs')
+                    await (supabase
+                        .from('user_configs') as any)
                         .upsert({ 
                             user_id: ownerUUID,
                             message_credit: currentGlobal + 500

@@ -361,8 +361,8 @@ export default function MessengerSettingsPage() {
               const newGlobal = currentGlobal + creditToAdd;
               
               // 3. Update User Configs
-              const { error: configError } = await supabase
-                  .from('user_configs')
+              const { error: configError } = await (supabase
+                  .from('user_configs') as any)
                   .upsert({ 
                       user_id: ownerUUID,
                       message_credit: newGlobal
