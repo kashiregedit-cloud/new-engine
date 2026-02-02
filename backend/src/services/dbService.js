@@ -28,7 +28,12 @@ async function getPageConfig(pageId) {
       if (userData) {
           // OVERRIDE page credit with USER credit (Shared Pool)
           data.message_credit = userData.message_credit;
+          data.credit_source = 'shared_user_balance';
       }
+  }
+  
+  if (!data.credit_source) {
+      data.credit_source = 'page_balance';
   }
   // ---------------------------
 

@@ -346,7 +346,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         
         if (pageConfig.message_credit <= 0) {
-            const logMsg = `Page ${pageId} out of credits.`;
+            const logMsg = `Page ${pageId} out of credits. (Source: ${pageConfig.credit_source || 'page_balance'})`;
             console.log(logMsg);
             logToFile(logMsg);
             return;
