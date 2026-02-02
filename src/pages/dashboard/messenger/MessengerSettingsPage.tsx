@@ -192,7 +192,19 @@ export default function MessengerSettingsPage() {
         setPlanActive(isActive);
         setMessageCredit(currentCredit);
 
-        const isManaged = apiKey === MANAGED_SECRET_KEY || isActive;
+        // LOGIC FIX: Respect explicit 'cheap_engine' setting from DB
+        // If cheap_engine is explicitly FALSE, it means user wants Own API, even if they have credits.
+        let isManaged = false;
+        
+        if (pageRow.cheap_engine === false) {
+             isManaged = false; // User explicitly chose Own API
+        } else if (pageRow.cheap_engine === true) {
+             isManaged = true; // User explicitly chose Managed
+        } else {
+             // Legacy/Fallback: If apiKey is managed OR (isActive AND apiKey is empty/managed)
+             isManaged = apiKey === MANAGED_SECRET_KEY || (isActive && !apiKey);
+        }
+
         setMode(isManaged ? "managed" : "own");
 
         // Clean model name (remove :free suffix for display)
