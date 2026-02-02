@@ -389,7 +389,16 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Now we process all media together BEFORE generating the reply.
         
         // A. Process Images (Vision)
-        if (allImages.length > 0) {
+        const allVideos = [];
+        const TOO_MANY_IMAGES_THRESHOLD = 10;
+        const hasVideo = allVideos.length > 0;
+        const tooManyImages = allImages.length > TOO_MANY_IMAGES_THRESHOLD;
+
+        if (hasVideo || tooManyImages) {
+             console.log(`[Optimization] Skipping Vision Analysis. Video: ${hasVideo}, Images: ${allImages.length}`);
+             const reason = hasVideo ? "User sent a video." : `User sent ${allImages.length} images.`;
+             combinedText += `\n[System Note: ${reason} This is too costly/complex to analyze directly. Instead of analyzing these media files, use the Ad Context (Ref/Title) if available, or ask the user to specify which product they are interested in from the post.]`;
+        } else if (allImages.length > 0) {
             // Use the already fetched pagePrompts
             if (pagePrompts && pagePrompts.image_detection) {
                 console.log(`[Batch] Analyzing ${allImages.length} images...`);

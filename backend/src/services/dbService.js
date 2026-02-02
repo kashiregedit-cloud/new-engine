@@ -10,11 +10,28 @@ async function getPageConfig(pageId) {
     .eq('page_id', pageId)
     .single();
 
-
   if (error) {
     console.error(`Error fetching config for page ${pageId}:`, error);
     return null;
   }
+
+  // --- SHARED CREDIT LOGIC ---
+  // If the page is linked to a user account, use the User's credit balance.
+  // This ensures all pages under one account share the same credit pool.
+  if (data.user_id) {
+      const { data: userData } = await supabase
+          .from('user_configs')
+          .select('message_credit')
+          .eq('user_id', data.user_id)
+          .single();
+      
+      if (userData) {
+          // OVERRIDE page credit with USER credit (Shared Pool)
+          data.message_credit = userData.message_credit;
+      }
+  }
+  // ---------------------------
+
   return data;
 }
 
