@@ -569,9 +569,7 @@ export default function MessengerSettingsPage() {
             <div className="mb-6">
                 <RadioGroup defaultValue={mode} value={mode} onValueChange={(v) => {
                     setMode(v as "own" | "managed");
-                    if (v === "managed") {
-                        setIsPricingOpen(true);
-                    }
+                    // Removed auto-open popup behavior
                 }} className="grid grid-cols-2 gap-4">
                   <div>
                     <RadioGroupItem value="own" id="own" className="peer sr-only" />
@@ -593,7 +591,7 @@ export default function MessengerSettingsPage() {
                       className="flex flex-col items-center justify-between rounded-xl border-2 border-muted bg-card p-4 transition-all hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-purple-500 peer-data-[state=checked]:bg-purple-50 peer-data-[state=checked]:text-purple-700 dark:peer-data-[state=checked]:bg-purple-950/30 dark:peer-data-[state=checked]:text-purple-400 cursor-pointer shadow-sm"
                     >
                       <Sparkles className="mb-3 h-8 w-8 transition-colors peer-data-[state=checked]:text-purple-600" />
-                      <span className="font-semibold text-lg">Buy API (Managed)</span>
+                      <span className="font-semibold text-lg">User Cloud API</span>
                       <span className="text-xs text-muted-foreground mt-1 text-center peer-data-[state=checked]:text-purple-600/80">
                         Hassle-free, High Speed Engine
                       </span>
@@ -804,9 +802,12 @@ export default function MessengerSettingsPage() {
                                      )}
                                 </div>
 
-                                <DialogFooter>
-                                    <Button onClick={() => setIsPricingOpen(false)} className="w-full sm:w-auto">
-                                        Confirm Selection
+                                <DialogFooter className="flex flex-row justify-between gap-2 sm:justify-end">
+                                    <Button type="button" variant="outline" onClick={() => setIsPricingOpen(false)}>
+                                        Cancel
+                                    </Button>
+                                    <Button type="button" onClick={form.handleSubmit(onSubmit)} className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700">
+                                        Confirm & Pay
                                     </Button>
                                 </DialogFooter>
                             </DialogContent>
@@ -815,7 +816,13 @@ export default function MessengerSettingsPage() {
                 )}
 
                 <div className="flex justify-end">
-                  <Button type="submit" size="lg" disabled={loading} className={mode === 'managed' ? (selectedPlan === '500_free' ? 'bg-green-600 hover:bg-green-700 w-full md:w-auto' : 'bg-purple-600 hover:bg-purple-700 w-full md:w-auto') : ''}>
+                  <Button 
+                    type={mode === 'managed' ? "button" : "submit"} 
+                    size="lg" 
+                    disabled={loading} 
+                    onClick={mode === 'managed' ? () => setIsPricingOpen(true) : undefined}
+                    className={mode === 'managed' ? (selectedPlan === '500_free' ? 'bg-green-600 hover:bg-green-700 w-full md:w-auto' : 'bg-purple-600 hover:bg-purple-700 w-full md:w-auto') : ''}
+                  >
                     {mode === 'managed' ? (
                         selectedPlan === '500_free' ? (
                             <>
