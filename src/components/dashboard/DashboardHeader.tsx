@@ -61,6 +61,18 @@ export function DashboardHeader({ title, onMenuClick }: DashboardHeaderProps) {
         <h1 className="text-lg lg:text-xl font-semibold text-foreground">{title}</h1>
       </div>
 
+      {/* Desktop Search Bar */}
+      <div className="hidden md:flex items-center flex-1 max-w-sm ml-8">
+        <div className="relative w-full">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input 
+            type="search" 
+            placeholder="Search..." 
+            className="w-full pl-9 bg-background/50 focus:bg-background transition-colors" 
+          />
+        </div>
+      </div>
+
       <div className="flex items-center gap-2 lg:gap-4">
         {/* User Menu */}
         <DropdownMenu>

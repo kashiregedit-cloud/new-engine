@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { WhatsAppProvider } from "@/context/WhatsAppContext";
 import { MessengerProvider } from "@/context/MessengerContext";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -94,30 +95,32 @@ export function DashboardLayout() {
   if (!currentTitle) currentTitle = "Dashboard";
 
   const LayoutContent = (
-    <div className="min-h-screen bg-background flex w-full">
-      {/* Desktop Sidebar */}
-      <div className="hidden lg:block">
-        <DashboardSidebar />
-      </div>
-
-      {/* Mobile Sidebar */}
-      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="p-0 w-64">
+    <TooltipProvider>
+      <div className="min-h-screen bg-background flex w-full">
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block">
           <DashboardSidebar />
-        </SheetContent>
-      </Sheet>
+        </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen overflow-x-hidden">
-        <DashboardHeader
-          title={currentTitle}
-          onMenuClick={() => setMobileMenuOpen(true)}
-        />
-        <main className="flex-1 p-4 lg:p-6 overflow-auto">
-          <Outlet />
-        </main>
+        {/* Mobile Sidebar */}
+        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <SheetContent side="left" className="p-0 w-64">
+            <DashboardSidebar isMobile={true} onLinkClick={() => setMobileMenuOpen(false)} />
+          </SheetContent>
+        </Sheet>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-h-screen overflow-x-hidden">
+          <DashboardHeader
+            title={currentTitle}
+            onMenuClick={() => setMobileMenuOpen(true)}
+          />
+          <main className="flex-1 p-4 lg:p-6 overflow-auto">
+            <Outlet />
+          </main>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 
   if (platform === 'whatsapp') {

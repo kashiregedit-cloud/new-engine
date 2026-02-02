@@ -24,15 +24,23 @@ import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 import { SessionSelector } from "./SessionSelector";
 import { PageSelector } from "./PageSelector";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
-export function DashboardSidebar() {
+export function DashboardSidebar({ isMobile, onLinkClick }: { isMobile?: boolean; onLinkClick?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Force expanded state on mobile
+  const isCollapsed = isMobile ? false : collapsed;
 
   const pathParts = location.pathname.split('/');
   const platform = ['whatsapp', 'messenger', 'instagram'].includes(pathParts[2]) ? pathParts[2] : null;
@@ -81,8 +89,8 @@ export function DashboardSidebar() {
     return {
       switchItem,
       sections: [
-        { title: "Global Tools", items: globalTools },
         { title: "Platform Menu", items: platformItems },
+        { title: "Global Tools", items: globalTools },
         { title: null, items: [{ title: "Profile", icon: User, path: `${base}/profile` }] }
       ]
     };
@@ -112,9 +120,9 @@ export function DashboardSidebar() {
     >
       {/* Logo */}
       <div className="p-4 border-b border-sidebar-border flex items-center justify-between">
-        {!collapsed && (
+        {!isCollapsed && (
           <div className="flex flex-col gap-1">
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/" className="flex items-center gap-2" onClick={onLinkClick}>
               <img src={logo} alt="Service Hub BD" className="h-8 w-auto" />
             </Link>
             {platform && (
@@ -124,19 +132,21 @@ export function DashboardSidebar() {
             )}
           </div>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setCollapsed(!collapsed)}
-          className="text-sidebar-foreground hover:bg-sidebar-accent"
-        >
-          {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-        </Button>
+        {!isMobile && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(!collapsed)}
+            className="text-sidebar-foreground hover:bg-sidebar-accent"
+          >
+            {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </Button>
+        )}
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-2">
-        {platform && !collapsed && (
+        {platform && !isCollapsed && (
           <div className="mb-4">
              {platform === 'whatsapp' && (
                 <>
@@ -157,17 +167,36 @@ export function DashboardSidebar() {
           {/* Switch Platform (Highlighted) */}
           {menu.switchItem && (
             <li key={menu.switchItem.path} className="mb-2">
-              <Link
-                to={menu.switchItem.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border border-sidebar-border/50 bg-sidebar-accent/10"
-                )}
-              >
-                <menu.switchItem.icon size={20} className="shrink-0 text-primary" />
-                {!collapsed && (
+              {isCollapsed ? (
+                <Tooltip delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      to={menu.switchItem.path}
+                      onClick={onLinkClick}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border border-sidebar-border/50 bg-sidebar-accent/10",
+                        isCollapsed && "justify-center px-2"
+                      )}
+                    >
+                      <menu.switchItem.icon size={20} className="shrink-0 text-primary" />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {menu.switchItem.title}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Link
+                  to={menu.switchItem.path}
+                  onClick={onLinkClick}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground border border-sidebar-border/50 bg-sidebar-accent/10"
+                  )}
+                >
+                  <menu.switchItem.icon size={20} className="shrink-0 text-primary" />
                   <span className="text-sm font-medium">{menu.switchItem.title}</span>
-                )}
-              </Link>
+                </Link>
+              )}
             </li>
           )}
 
@@ -176,16 +205,44 @@ export function DashboardSidebar() {
             <div key={sectionIndex}>
               {section.title && (
                  <div className="mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-4">
-                   {!collapsed && section.title}
+                   {!isCollapsed && section.title}
                  </div>
               )}
               
               {section.items.map((item) => {
                 const isActive = location.pathname === item.path;
+                
+                if (isCollapsed) {
+                  return (
+                    <li key={item.path} className="mb-1">
+                      <Tooltip delayDuration={0}>
+                        <TooltipTrigger asChild>
+                          <Link
+                            to={item.path}
+                            onClick={onLinkClick}
+                            className={cn(
+                              "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 justify-center px-2",
+                              isActive
+                                ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
+                                : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            )}
+                          >
+                            <item.icon size={20} className="shrink-0" />
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          {item.title}
+                        </TooltipContent>
+                      </Tooltip>
+                    </li>
+                  );
+                }
+
                 return (
                   <li key={item.path} className="mb-1">
                     <Link
                       to={item.path}
+                      onClick={onLinkClick}
                       className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
                         isActive
@@ -194,9 +251,7 @@ export function DashboardSidebar() {
                       )}
                     >
                       <item.icon size={20} className="shrink-0" />
-                      {!collapsed && (
-                        <span className="text-sm font-medium">{item.title}</span>
-                      )}
+                      <span className="text-sm font-medium">{item.title}</span>
                     </Link>
                   </li>
                 );
@@ -213,17 +268,29 @@ export function DashboardSidebar() {
 
       {/* Logout */}
       <div className="p-2 border-t border-sidebar-border">
-        <Button
-          variant="ghost"
-          onClick={handleLogout}
-          className={cn(
-            "w-full text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground",
-            collapsed ? "justify-center" : "justify-start gap-3"
-          )}
-        >
-          <LogOut size={20} />
-          {!collapsed && <span>Logout</span>}
-        </Button>
+        {isCollapsed ? (
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                onClick={handleLogout}
+                className="w-full text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground justify-center"
+              >
+                <LogOut size={20} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Logout</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={handleLogout}
+            className="w-full text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground justify-start gap-3"
+          >
+            <LogOut size={20} />
+            <span>Logout</span>
+          </Button>
+        )}
       </div>
     </aside>
   );
