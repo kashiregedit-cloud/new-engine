@@ -60,7 +60,8 @@ export default function DashboardHome() {
             const { count: pageCount } = await supabase
                 .from('page_access_token_message')
                 .select('*', { count: 'exact', head: true })
-                .eq('email', targetEmail);
+                .eq('email', targetEmail)
+                .in('subscription_status', ['active', 'trial']);
             
             setStats(prev => ({ ...prev, sessions: pageCount || 0 }));
         }
@@ -80,20 +81,6 @@ export default function DashboardHome() {
           <p className="text-muted-foreground mt-1">
             {userEmail ? `Logged in as ${userEmail}` : 'Manage your automation empire'}
           </p>
-        </div>
-        <div className="flex gap-3">
-          <Button asChild variant="outline">
-            <Link to={`/dashboard/${platform}/settings`}>
-              <Settings className="mr-2 h-4 w-4" />
-              Settings
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link to={`/dashboard/${platform}/${isWhatsApp ? 'sessions' : 'integration'}`}>
-              <Plus className="mr-2 h-4 w-4" />
-              {isWhatsApp ? 'New Session' : 'Connect Page'}
-            </Link>
-          </Button>
         </div>
       </div>
 
