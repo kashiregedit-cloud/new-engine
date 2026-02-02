@@ -328,6 +328,8 @@ export default function MessengerSettingsPage() {
           chat_model: values.chatmodel
       };
 
+      let creditToAdd = 0;
+
       // Handle Plan Activation Logic
       if (mode === "managed") {
           const creditMap: Record<string, number> = {
@@ -337,7 +339,7 @@ export default function MessengerSettingsPage() {
               '10000': 10000
           };
           
-          const creditToAdd = creditMap[selectedPlan] || 500;
+          creditToAdd = creditMap[selectedPlan] || 500;
 
           // CENTRALIZED CREDIT LOGIC: Update user_configs instead of page table
           // 1. Fetch Page Owner ID (UUID)
@@ -419,8 +421,8 @@ export default function MessengerSettingsPage() {
 
       if (mode === "managed") {
           setPlanActive(true);
-          setMessageCredit(updates.message_credit);
-          toast.success(`Plan activated with ${updates.message_credit} message credits!`);
+          // setMessageCredit handled inside ownerUUID block
+          toast.success(`Plan activated! Added ${creditToAdd} message credits.`);
       } else {
           toast.success("AI settings saved successfully");
       }
