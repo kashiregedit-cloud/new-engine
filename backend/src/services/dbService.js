@@ -98,21 +98,25 @@ async function checkDuplicate(messageId) {
 // 5. Credit Deduction (Centralized User Balance)
 async function deductCredit(pageId, currentCredit) {
     // 1. Try Centralized Deduction (RPC) - Supports Multi-Page per User
+    // This RPC also logs the transaction to payment_transactions table for visibility
     const { data: success, error: rpcError } = await supabase
         .rpc('deduct_credits_via_page', { p_page_id: pageId });
 
     if (!rpcError) {
         // If RPC executed successfully, it returns true (deducted) or false (insufficient funds)
+        if (!success) {
+            console.warn(`[Credit] RPC deduction returned false (Insufficient funds) for Page ${pageId}`);
+        }
         return success; 
     }
 
-    // console.warn(`[dbService] RPC deduct_credits_via_page failed (${rpcError.message}). Falling back to legacy logic.`);
+    console.warn(`[dbService] RPC deduct_credits_via_page failed (${rpcError.message}). Falling back to legacy logic.`);
 
     // 2. Manual User Credit Deduction (Node.js Fallback if RPC missing)
     try {
         const { data: pageData } = await supabase
             .from('page_access_token_message')
-            .select('user_id')
+            .select('user_id, email') // Added email for transaction logging
             .eq('page_id', pageId)
             .single();
 
@@ -131,10 +135,29 @@ async function deductCredit(pageId, currentCredit) {
                     .eq('user_id', pageData.user_id);
                 
                 if (!updateError) {
-                    // console.log(`[Credit] Deducted 1 credit from User ${pageData.user_id}`);
+                    console.log(`[Credit] Deducted 1 credit from User ${pageData.user_id}`);
+                    
+                    // Log Transaction for History Visibility
+                    if (pageData.email) {
+                        await supabase.from('payment_transactions').insert({
+                           user_email: pageData.email,
+                           amount: 1,
+                           method: 'balance_deduction',
+                           trx_id: `DED_${Date.now()}`,
+                           sender_number: 'SYSTEM',
+                           status: 'completed'
+                       });
+                   }
+
                     return true;
+                } else {
+                    console.error(`[Credit] Update failed: ${updateError.message}`);
                 }
+            } else {
+                console.warn(`[Credit] Insufficient credits for User ${pageData.user_id}. Balance: ${userConfig?.message_credit}`);
             }
+        } else {
+            console.warn(`[Credit] Page ${pageId} not linked to any user.`);
         }
     } catch (err) {
         console.error("Error in manual user credit deduction:", err);
