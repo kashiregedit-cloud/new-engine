@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { 
     AlertCircle, 
-    Search, 
     Facebook, 
     Check, 
     Copy, 
@@ -20,8 +18,8 @@ import {
     Settings, 
     Trash2, 
     CreditCard, 
-    Sparkles, 
-    Gift 
+    Gift,
+    Sparkles
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { BACKEND_URL } from "@/config";
@@ -83,10 +81,6 @@ export default function MessengerIntegrationPage() {
     const [directPageId, setDirectPageId] = useState("");
     const [directAccessToken, setDirectAccessToken] = useState("");
     const [directLoading, setDirectLoading] = useState(false);
-
-    // Manual Connect State
-    const [manualPageId, setManualPageId] = useState("");
-    const [manualLoading, setManualLoading] = useState(false);
     const [isManualSetupOpen, setIsManualSetupOpen] = useState(false);
 
     // Subscription Modal State
@@ -515,67 +509,6 @@ export default function MessengerIntegrationPage() {
         }
     };
 
-    const handleManualConnect = async () => {
-        if (!manualPageId || manualPageId.length < 3) {
-            toast.error("Please enter a valid Secret Code or Found ID");
-            return;
-        }
-        
-        setManualLoading(true);
-        try {
-            // 1. Search in page_access_token_message by secret_key or found_id
-            const { data: pageData, error: pageError } = await supabase
-                .from('page_access_token_message')
-                .select('*')
-                .or(`secret_key.eq.${manualPageId},found_id.eq.${manualPageId}`)
-                .maybeSingle();
-                
-            if (pageError || !pageData) {
-                toast.error("Page not found with this Secret Code or ID.");
-                setManualLoading(false);
-                return;
-            }
-            
-            const page = pageData as any;
-            const realPageId = page.page_id;
-            
-            // 2. Search in fb_message_database using the retrieved page_id
-            const { data: dbData, error: dbError } = await supabase
-                .from('fb_message_database')
-                .select('id')
-                .eq('page_id', realPageId)
-                .maybeSingle();
-                
-            if (dbError) {
-                console.error("DB Error:", dbError);
-            }
-            
-            let dbId = dbData ? (dbData as any).id : null;
-            
-            if (page.page_access_token) {
-                // Set as active
-                if (dbId) {
-                    localStorage.setItem("active_fb_db_id", String(dbId));
-                }
-                localStorage.setItem("active_fb_page_id", realPageId);
-                
-                // Refresh list - this will re-fetch and show the newly connected page in the list
-                await fetchPages();
-                
-                toast.success(`Connected to ${page.name || 'Page'} successfully!`);
-                setManualPageId("");
-            } else {
-                toast.error("Page found but has no access token. Please reconnect via Facebook.");
-            }
-
-        } catch (err) {
-            console.error("Manual connect error:", err);
-            toast.error("Failed to connect page.");
-        } finally {
-            setManualLoading(false);
-        }
-    };
-
     const handleRemovePage = async (page: PageData) => {
         if (!confirm(`Are you sure you want to disconnect ${page.name}? This will stop the bot from replying.`)) {
             return;
@@ -731,6 +664,10 @@ export default function MessengerIntegrationPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setIsManualSetupOpen(true)}>
+                        <Settings className="mr-2 h-4 w-4" />
+                        Open Manual Setup
+                    </Button>
                     <Button onClick={handleConnectFacebook} disabled={connecting}>
                         {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Facebook className="mr-2 h-4 w-4" />}
                         {connecting ? "Connecting..." : "Connect with Facebook"}
@@ -738,21 +675,69 @@ export default function MessengerIntegrationPage() {
                 </div>
             </div>
 
-            <Tabs defaultValue="direct" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="direct">Easy Connect (Direct Token)</TabsTrigger>
-                    <TabsTrigger value="manual">Manual Setup (App Integration)</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="direct">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Direct Token Connection</CardTitle>
-                            <CardDescription>
-                                Connect a page manually by providing its Page ID and Access Token.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
+            <Dialog open={isManualSetupOpen} onOpenChange={setIsManualSetupOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Manual Integration Setup</DialogTitle>
+                        <DialogDescription>
+                            Configure your webhook and connect your page manually.
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="grid gap-6 py-4">
+                        {/* Section 1: Professional Webhook Configuration */}
+                        <div className="space-y-4 border rounded-lg p-4 bg-blue-50/50 border-blue-100">
+                            <div className="flex items-center gap-2">
+                                <div className="bg-blue-100 p-1.5 rounded-md">
+                                    <Database className="h-4 w-4 text-blue-600" />
+                                </div>
+                                <h3 className="font-semibold text-sm">Professional Webhook Configuration</h3>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-medium">Callback URL</Label>
+                                    <div className="relative">
+                                        <Input readOnly value="https://webhook.salesmanchatbot.online/webhook" className="pr-8 bg-white" />
+                                        <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="absolute right-1 top-1 h-7 w-7"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText("https://webhook.salesmanchatbot.online/webhook");
+                                                toast.success("URL Copied!");
+                                            }}
+                                        >
+                                            <Copy className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-medium">Verify Token</Label>
+                                    <div className="relative">
+                                        <Input readOnly value="123456" className="pr-8 bg-white" />
+                                        <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="absolute right-1 top-1 h-7 w-7"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText("123456");
+                                                toast.success("Token Copied!");
+                                            }}
+                                        >
+                                            <Copy className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-blue-600">
+                                * Enter these details in your Facebook App Developer Portal under <strong>Webhooks &gt; Page</strong>.
+                            </p>
+                        </div>
+
+                        {/* Section 2: Page Connection Fields */}
+                        <div className="space-y-4">
                             <div className="grid gap-2">
                                 <Label htmlFor="pageName">Page Name (Reference)</Label>
                                 <Input 
@@ -784,126 +769,14 @@ export default function MessengerIntegrationPage() {
                                     Ensure this token has <code>pages_messaging</code> permission.
                                 </p>
                             </div>
-                            <Button onClick={handleDirectConnect} disabled={directLoading}>
+                            <Button onClick={handleDirectConnect} disabled={directLoading} className="w-full">
                                 {directLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
                                 Connect Page
                             </Button>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                <TabsContent value="manual">
-                    <Card className="border-dashed border-2">
-                        <CardHeader className="text-center pb-2">
-                            <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-2">
-                                <Settings className="h-6 w-6 text-primary" />
-                            </div>
-                            <CardTitle>Manual Configuration</CardTitle>
-                            <CardDescription>
-                                Advanced setup for custom Facebook Apps or specific page connections.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="flex justify-center pb-6">
-                            <Button onClick={() => setIsManualSetupOpen(true)} size="lg" className="gap-2">
-                                <Database className="h-4 w-4" />
-                                Open Manual Setup
-                            </Button>
-                        </CardContent>
-                    </Card>
-
-                    <Dialog open={isManualSetupOpen} onOpenChange={setIsManualSetupOpen}>
-                        <DialogContent className="max-w-2xl">
-                            <DialogHeader>
-                                <DialogTitle>Manual Integration Setup</DialogTitle>
-                                <DialogDescription>
-                                    Connect using a Page ID or configure your Webhook manually.
-                                </DialogDescription>
-                            </DialogHeader>
-                            
-                            <div className="grid gap-6 py-4">
-                                {/* Section 1: Easy Connect (Direct Search) */}
-                                <div className="space-y-4 border rounded-lg p-4 bg-muted/30">
-                                    <div className="flex items-center gap-2">
-                                        <div className="bg-green-100 p-1.5 rounded-md">
-                                            <Sparkles className="h-4 w-4 text-green-600" />
-                                        </div>
-                                        <h3 className="font-semibold text-sm">Easy Connect (By Page ID)</h3>
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="manualPageId">Page ID / Secret Key</Label>
-                                        <div className="flex gap-2">
-                                            <Input 
-                                                id="manualPageId" 
-                                                placeholder="e.g. secret_123 or 102030..." 
-                                                value={manualPageId}
-                                                onChange={(e) => setManualPageId(e.target.value)}
-                                            />
-                                            <Button onClick={handleManualConnect} disabled={manualLoading}>
-                                                {manualLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                                                Connect
-                                            </Button>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Use this if you have a pre-configured Secret Key or want to connect a public page by ID.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Section 2: Professional Webhook Info */}
-                                <div className="space-y-4 border rounded-lg p-4 bg-blue-50/50 border-blue-100">
-                                    <div className="flex items-center gap-2">
-                                        <div className="bg-blue-100 p-1.5 rounded-md">
-                                            <Database className="h-4 w-4 text-blue-600" />
-                                        </div>
-                                        <h3 className="font-semibold text-sm">Professional Webhook Configuration</h3>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <Label className="text-xs font-medium">Callback URL</Label>
-                                            <div className="relative">
-                                                <Input readOnly value="https://webhook.salesmanchatbot.online/" className="pr-8 bg-white" />
-                                                <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="absolute right-1 top-1 h-7 w-7"
-                                                    onClick={() => {
-                                                        navigator.clipboard.writeText("https://webhook.salesmanchatbot.online/");
-                                                        toast.success("URL Copied!");
-                                                    }}
-                                                >
-                                                    <Copy className="h-3 w-3" />
-                                                </Button>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label className="text-xs font-medium">Verify Token</Label>
-                                            <div className="relative">
-                                                <Input readOnly value="123456" className="pr-8 bg-white" />
-                                                <Button
-                                                    size="icon"
-                                                    variant="ghost"
-                                                    className="absolute right-1 top-1 h-7 w-7"
-                                                    onClick={() => {
-                                                        navigator.clipboard.writeText("123456");
-                                                        toast.success("Token Copied!");
-                                                    }}
-                                                >
-                                                    <Copy className="h-3 w-3" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <p className="text-xs text-blue-600">
-                                        * Enter these details in your Facebook App Developer Portal under <strong>Webhooks &gt; Page</strong>.
-                                    </p>
-                                </div>
-                            </div>
-                        </DialogContent>
-                    </Dialog>
-                </TabsContent>
-            </Tabs>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Card>
                 <CardHeader>

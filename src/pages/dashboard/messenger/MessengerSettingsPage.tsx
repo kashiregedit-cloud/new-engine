@@ -161,10 +161,28 @@ export default function MessengerSettingsPage() {
         setVerified(dbRow.verified !== false);
         
         const apiKey = pageRow.api_key || "";
+        
+        // --- SHARED CREDIT FETCH ---
+        let currentCredit = pageRow.message_credit || 0;
+        
+        // If page is linked to a user, fetch the User's shared credit balance
+        if (pageRow.user_id) {
+            const { data: userData } = await supabase
+                .from('user_configs')
+                .select('message_credit')
+                .eq('user_id', pageRow.user_id)
+                .maybeSingle();
+            
+            if (userData) {
+                currentCredit = (userData as any).message_credit || 0;
+            }
+        }
+        // ---------------------------
+
         // Check if plan is active and has credits
-        const isActive = pageRow.subscription_status === 'active' && (pageRow.message_credit > 0);
+        const isActive = pageRow.subscription_status === 'active' && (currentCredit > 0);
         setPlanActive(isActive);
-        setMessageCredit(pageRow.message_credit || 0);
+        setMessageCredit(currentCredit);
 
         const isManaged = apiKey === MANAGED_SECRET_KEY || isActive;
         setMode(isManaged ? "managed" : "own");
