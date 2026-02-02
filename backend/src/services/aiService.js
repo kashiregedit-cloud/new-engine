@@ -175,7 +175,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     const MODEL_ALIASES = {
         'gemini-2.0-flash-exp': 'gemini-2.0-flash', // Auto-upgrade old "exp" users to latest 2.0
         'gemini-2.5-pro': 'gemini-2.5-pro-preview', // Assuming preview for now
-        'gemini-2.5-flash': 'gemini-2.0-flash', // Map 2.5 Flash to stable 2.0 Flash (API doesn't support 2.5 yet)
+        // 'gemini-2.5-flash': 'gemini-2.0-flash', // REMOVED by User Request: Let user use 2.5 explicitly if they want
         'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // Map friendly name to official ID
         // Groq Aliases
         'groq-fast': 'llama-3.3-70b-versatile', // Best balance of speed/quality on Groq
