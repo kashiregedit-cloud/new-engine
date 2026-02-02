@@ -577,20 +577,26 @@ export default function MessengerSettingsPage() {
                     <RadioGroupItem value="own" id="own" className="peer sr-only" />
                     <Label
                       htmlFor="own"
-                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                      className="flex flex-col items-center justify-between rounded-xl border-2 border-muted bg-card p-4 transition-all hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:bg-blue-50 peer-data-[state=checked]:text-blue-700 dark:peer-data-[state=checked]:bg-blue-950/30 dark:peer-data-[state=checked]:text-blue-400 cursor-pointer shadow-sm"
                     >
-                      <Key className="mb-3 h-6 w-6" />
-                      Use Own API
+                      <Key className="mb-3 h-8 w-8 transition-colors peer-data-[state=checked]:text-blue-600" />
+                      <span className="font-semibold text-lg">Use Own API</span>
+                      <span className="text-xs text-muted-foreground mt-1 text-center peer-data-[state=checked]:text-blue-600/80">
+                        Use your own API Key (Gemini, GPT)
+                      </span>
                     </Label>
                   </div>
                   <div>
                     <RadioGroupItem value="managed" id="managed" className="peer sr-only" />
                     <Label
                       htmlFor="managed"
-                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                      className="flex flex-col items-center justify-between rounded-xl border-2 border-muted bg-card p-4 transition-all hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-purple-500 peer-data-[state=checked]:bg-purple-50 peer-data-[state=checked]:text-purple-700 dark:peer-data-[state=checked]:bg-purple-950/30 dark:peer-data-[state=checked]:text-purple-400 cursor-pointer shadow-sm"
                     >
-                      <Sparkles className="mb-3 h-6 w-6 text-purple-500" />
-                      Buy API (Managed)
+                      <Sparkles className="mb-3 h-8 w-8 transition-colors peer-data-[state=checked]:text-purple-600" />
+                      <span className="font-semibold text-lg">Buy API (Managed)</span>
+                      <span className="text-xs text-muted-foreground mt-1 text-center peer-data-[state=checked]:text-purple-600/80">
+                        Hassle-free, High Speed Engine
+                      </span>
                     </Label>
                   </div>
                 </RadioGroup>
