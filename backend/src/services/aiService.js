@@ -270,13 +270,28 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         personaInstruction = `Persona: Gemini 2.5 Flash. Fast, accurate, Bengali expert. Strict JSON. No fluff.`;
     }
 
-    // Hardcoded Gender Fix for Bengali/Muslim Names
-    if (senderName && (
-        senderName.startsWith('Md') || 
-        senderName.startsWith('MD') || 
-        senderName.startsWith('Mohammad') || 
-        senderName.startsWith('Muhammed') || 
-        senderName.toLowerCase().includes('mr.')
+    // Enhanced Gender Fix for Bengali/Muslim Names
+    // Facebook API often fails to return gender, so we infer it from common names.
+    const COMMON_MALE_NAMES = [
+        'Jubayer', 'Jubair', 'Zubayer', 'Zubair',
+        'Rahim', 'Karim', 'Sujon', 'Sajib', 'Sakib', 'Rakib', 
+        'Hasan', 'Hossain', 'Ahmed', 'Ali', 'Khan', 'Sheikh', 
+        'Alam', 'Islam', 'Uddin', 'Rahman', 'Mamun', 'Masud',
+        'Fahim', 'Tanvir', 'Tanim', 'Rasel', 'Rubel', 'Sohel',
+        'Kamal', 'Jamal', 'Babul', 'Kabul', 'Shafik', 'Rafiq',
+        'Mizan', 'Milon', 'Biplob', 'Bipul', 'Shimul', 'Polash',
+        'Sagor', 'Akash', 'Batash', 'Rony', 'Jony', 'Raju',
+        'Sabbir', 'Mehedi', 'Mahmud', 'Sultan', 'Badol', 'Sumon'
+    ];
+
+    const nameLower = senderName ? senderName.toLowerCase() : '';
+
+    if (nameLower && (
+        nameLower.startsWith('md') || 
+        nameLower.startsWith('mohammad') || 
+        nameLower.startsWith('muhammed') || 
+        nameLower.includes('mr.') ||
+        COMMON_MALE_NAMES.some(n => nameLower.includes(n.toLowerCase()))
     )) {
         senderGender = 'male';
     }
