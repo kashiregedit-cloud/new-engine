@@ -8,7 +8,7 @@ import { Database, Search, CheckCircle, XCircle, Loader2, LogOut } from "lucide-
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-export default function DatabasePage() {
+export default function WhatsAppDatabasePage() {
   const [searchId, setSearchId] = useState("");
   const [loading, setLoading] = useState(false);
   const [connectedDb, setConnectedDb] = useState<any | null>(null);

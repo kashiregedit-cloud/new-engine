@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { Calendar as CalendarIcon, Download, ShoppingBag, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 
-export default function OrderTrackingPage() {
+export default function WhatsAppOrderTrackingPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom' | 'all'>('today');

@@ -3,12 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic } from "lucide-react";
+import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 
-export default function ControlPage() {
+export default function WhatsAppControlPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dbId, setDbId] = useState<string | null>(null);
@@ -19,7 +19,8 @@ export default function ControlPage() {
     image_detection: false,
     image_send: false,
     order_tracking: false,
-    audio_detection: false
+    audio_detection: false,
+    file_upload: false
   });
 
   useEffect(() => {
@@ -65,7 +66,8 @@ export default function ControlPage() {
           image_detection: row.image_detection ?? false,
           image_send: row.image_send ?? false,
           order_tracking: row.order_tracking ?? false,
-          audio_detection: row.audio_detection ?? false
+          audio_detection: row.audio_detection ?? false,
+          file_upload: row.file_upload ?? false
         });
       }
     } catch (error) {
@@ -111,7 +113,7 @@ export default function ControlPage() {
         <h2 className="text-2xl font-bold">No Database Connected</h2>
         <p className="text-muted-foreground">Please connect to a database to manage bot controls.</p>
         <Button asChild>
-            <Link to="/dashboard/database">Go to Database</Link>
+            <Link to="/dashboard/whatsapp/database">Go to Database</Link>
         </Button>
       </div>
     );
@@ -262,6 +264,25 @@ export default function ControlPage() {
             <Switch 
               checked={config.audio_detection}
               onCheckedChange={(c) => setConfig({...config, audio_detection: c})}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Direct File Upload */}
+        <Card className="bg-card border-border shadow-sm">
+          <CardContent className="p-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-full">
+                 <Upload size={24} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-lg font-semibold cursor-pointer">Direct File Upload</Label>
+                <p className="text-sm text-muted-foreground">Allow users to upload files directly.</p>
+              </div>
+            </div>
+            <Switch 
+              checked={config.file_upload}
+              onCheckedChange={(c) => setConfig({...config, file_upload: c})}
             />
           </CardContent>
         </Card>
