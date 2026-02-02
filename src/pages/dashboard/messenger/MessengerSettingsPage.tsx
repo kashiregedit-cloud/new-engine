@@ -166,11 +166,18 @@ export default function MessengerSettingsPage() {
         let currentCredit = 0; // Initialize to 0, ignoring page-specific credit
         
         // If page is linked to a user, fetch the User's shared credit balance
-        if (pageRow.user_id) {
+        let ownerId = pageRow.user_id;
+        if (!ownerId) {
+             // Fallback: Try to get current user ID
+             const { data: { user } } = await supabase.auth.getUser();
+             if (user) ownerId = user.id;
+        }
+
+        if (ownerId) {
             const { data: userData } = await supabase
                 .from('user_configs')
                 .select('message_credit')
-                .eq('user_id', pageRow.user_id)
+                .eq('user_id', ownerId)
                 .maybeSingle();
             
             if (userData) {
@@ -180,7 +187,8 @@ export default function MessengerSettingsPage() {
         // ---------------------------
 
         // Check if plan is active and has credits
-        const isActive = pageRow.subscription_status === 'active' && (currentCredit > 0);
+        // Show active if strictly active OR if we have credits (meaning user is using shared balance)
+        const isActive = (pageRow.subscription_status === 'active' || currentCredit > 0);
         setPlanActive(isActive);
         setMessageCredit(currentCredit);
 
@@ -349,7 +357,13 @@ export default function MessengerSettingsPage() {
             .eq('page_id', pageId)
             .single();
           
-          const ownerUUID = (pageDataForOwner as any)?.user_id;
+          let ownerUUID = (pageDataForOwner as any)?.user_id;
+
+          if (!ownerUUID) {
+               // Fallback: Try to get current user ID
+               const { data: { user } } = await supabase.auth.getUser();
+               if (user) ownerUUID = user.id;
+          }
 
           if (ownerUUID) {
               // 2. Fetch Current Global Credit
@@ -376,6 +390,8 @@ export default function MessengerSettingsPage() {
               } else {
                   // Update local state to reflect new global credit
                   setMessageCredit(newGlobal);
+                  // Ensure we show it immediately
+                  setPlanActive(true); 
               }
           }
 
@@ -673,7 +689,7 @@ export default function MessengerSettingsPage() {
                                             {selectedPlan === '5000' && "Pro (5k Msgs)"}
                                             {selectedPlan === '10000' && "Enterprise (10k Msgs)"}
                                         </div>
-                                        {planActive && (
+                                        {(planActive || messageCredit > 0) && (
                                             <div className="text-xs text-green-600 font-medium">
                                                 {messageCredit} Credits Remaining
                                             </div>
