@@ -58,17 +58,6 @@ declare global {
 
 // --- Constants ---
 
-const PLANS = {
-    '1_month': { label: '1 Month', price: 1000, duration_days: 30 },
-    '3_months': { label: '3 Months', price: 2500, duration_days: 90 },
-    '1_year': { label: '1 Year', price: 9000, duration_days: 365 },
-};
-
-const COUPON_TRIALS: Record<string, number> = {
-    'TRIAL7': 7,
-    'WELCOME14': 14
-};
-
 export default function MessengerIntegrationPage() {
     const navigate = useNavigate();
     const { 
@@ -94,12 +83,12 @@ export default function MessengerIntegrationPage() {
     const [directLoading, setDirectLoading] = useState(false);
     const [isManualSetupOpen, setIsManualSetupOpen] = useState(false);
 
-    // Subscription Modal State
-    const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
-    const [selectedPageForSub, setSelectedPageForSub] = useState<PageData | null>(null);
-    const [selectedPlan, setSelectedPlan] = useState("3_months");
-    const [couponCode, setCouponCode] = useState("");
-    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    // Subscription Modal State - DEPRECATED/REMOVED
+    // const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
+    // const [selectedPageForSub, setSelectedPageForSub] = useState<PageData | null>(null);
+    // const [selectedPlan, setSelectedPlan] = useState("3_months");
+    // const [couponCode, setCouponCode] = useState("");
+    // const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
     // --- Effects ---
 
@@ -320,9 +309,9 @@ export default function MessengerIntegrationPage() {
                         page_id: page.id,
                         name: page.name,
                         page_access_token: page.access_token,
-                        subscription_status: 'active', // Default to active on connect
-                        subscription_plan: 'free',
-                        message_credit: 0, // INTEGRATION IS FREE, but usage requires credits
+                        subscription_status: 'active', // ALWAYS ACTIVE (Free Integration)
+                        subscription_plan: 'unlimited_free', // No more plans
+                        message_credit: 0, // Usage requires credits
                         email: userEmail,
                         user_id: userId, // Ensure user_id is set to UUID for Centralized Credit Check
                         secret_key: String(dbId),
@@ -520,18 +509,19 @@ export default function MessengerIntegrationPage() {
     };
 
     const openSubscriptionModal = (page: PageData) => {
-        setSelectedPageForSub(page);
-        setCouponCode("");
-        setSelectedPlan("3_months");
-        setIsSubscriptionOpen(true);
+        // setSelectedPageForSub(page);
+        // setCouponCode("");
+        // setSelectedPlan("3_months");
+        // setIsSubscriptionOpen(true);
     };
 
     const handleManage = async (page: PageData) => {
+        // ALWAYS ALLOW MANAGE (Free Integration)
         // Check if active
-        if (page.subscription_status !== 'active' && page.subscription_status !== 'trial') {
-            openSubscriptionModal(page);
-            return;
-        }
+        // if (page.subscription_status !== 'active' && page.subscription_status !== 'trial') {
+        //    openSubscriptionModal(page);
+        //    return;
+        // }
 
         try {
             // Find linked database entry
@@ -559,95 +549,7 @@ export default function MessengerIntegrationPage() {
     };
 
     const handleSubscribe = async () => {
-        if (!selectedPageForSub) return;
-        setIsProcessingPayment(true);
-
-        try {
-            // 1. Check Coupon Code
-            if (couponCode && COUPON_TRIALS[couponCode.toUpperCase()]) {
-                const days = COUPON_TRIALS[couponCode.toUpperCase()];
-                const expiryDate = new Date();
-                expiryDate.setDate(expiryDate.getDate() + days);
-
-                // Activate Trial
-                
-                // CENTRALIZED CREDIT: Add 500 to user_configs
-                const ownerUUID = (selectedPageForSub as any).user_id;
-                
-                if (ownerUUID) {
-                    const { data: userConfig } = await supabase
-                        .from('user_configs')
-                        .select('message_credit')
-                        .eq('user_id', ownerUUID)
-                        .maybeSingle();
-                    
-                    const currentGlobal = (userConfig as any)?.message_credit || 0;
-                    
-                    await (supabase
-                        .from('user_configs') as any)
-                        .upsert({ 
-                            user_id: ownerUUID,
-                            message_credit: currentGlobal + 500
-                        }, { onConflict: 'user_id' });
-                }
-
-                const { error } = await (supabase
-                    .from('page_access_token_message') as any)
-                    .update({
-                        subscription_status: 'trial',
-                        subscription_plan: 'trial',
-                        // message_credit: 500, // REMOVED: Centralized credit
-                        expires_at: expiryDate.toISOString()
-                    })
-                    .eq('page_id', selectedPageForSub.page_id);
-
-                if (error) throw error;
-                
-                toast.success(`Trial Activated for ${days} days!`);
-                setIsSubscriptionOpen(false);
-                fetchPages();
-                return;
-            }
-
-            // 2. Handle Paid Subscription
-            const plan = PLANS[selectedPlan as keyof typeof PLANS];
-            if (!plan) throw new Error("Invalid Plan");
-
-            // Create Transaction Record
-            const { error: trxError } = await (supabase
-                .from('payment_transactions') as any)
-                .insert({
-                    user_email: userEmail,
-                    amount: plan.price,
-                    method: 'manual', // or 'bkash', etc.
-                    trx_id: `SUB-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-                    sender_number: 'N/A', // Since it's internal
-                    status: 'pending',
-                });
-
-            if (trxError) throw trxError;
-
-            // Update Page Status to Pending
-            const { error: pageError } = await (supabase
-                .from('page_access_token_message') as any)
-                .update({
-                    subscription_status: 'pending_payment',
-                    subscription_plan: selectedPlan
-                })
-                .eq('page_id', selectedPageForSub.page_id);
-
-            if (pageError) throw pageError;
-
-            toast.success("Subscription request submitted. Please wait for admin approval.");
-            setIsSubscriptionOpen(false);
-            fetchPages();
-
-        } catch (error: any) {
-            console.error("Subscription Error:", error);
-            toast.error(error.message || "Failed to process subscription");
-        } finally {
-            setIsProcessingPayment(false);
-        }
+        // FUNCTION REMOVED - FREE INTEGRATION
     };
 
     return (
@@ -753,105 +655,48 @@ export default function MessengerIntegrationPage() {
                         </div>
                     ) : (
                         <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Page Name</TableHead>
-                                    <TableHead>Page ID</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Plan</TableHead>
-                                    <TableHead className="text-right">Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {pages.map((page) => (
-                                    <TableRow key={page.page_id}>
-                                        <TableCell className="font-medium">
-                                            <div className="flex items-center gap-2">
-                                                <Facebook className="h-4 w-4 text-blue-600" />
-                                                {page.name}
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="font-mono text-xs">{page.page_id}</TableCell>
-                                        <TableCell>
-                                            {page.subscription_status === 'active' && <span className="text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Active</span>}
-                                            {page.subscription_status === 'trial' && <span className="text-blue-600 flex items-center gap-1"><Gift className="h-3 w-3" /> Trial</span>}
-                                            {page.subscription_status === 'pending_payment' && <span className="text-orange-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Pending</span>}
-                                            {!['active', 'trial', 'pending_payment'].includes(page.subscription_status || '') && <span className="text-gray-500">Inactive</span>}
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className="capitalize">{page.subscription_plan || 'Free'}</span>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <Button variant="outline" size="sm" onClick={() => copyWebhook()}>
-                                                    <Copy className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="default" size="sm" onClick={() => handleManage(page)}>
-                                                    <Database className="mr-2 h-4 w-4" />
-                                                    Manage
-                                                </Button>
-                                                <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </TableCell>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Page Name</TableHead>
+                                        <TableHead>Page ID</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Actions</TableHead>
                                     </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    )}
+                                </TableHeader>
+                                <TableBody>
+                                    {pages.map((page) => (
+                                        <TableRow key={page.page_id}>
+                                            <TableCell className="font-medium">
+                                                <div className="flex items-center gap-2">
+                                                    <Facebook className="h-4 w-4 text-blue-600" />
+                                                    {page.name}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="font-mono text-xs">{page.page_id}</TableCell>
+                                            <TableCell>
+                                                <span className="text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Active (Free)</span>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <Button variant="outline" size="sm" onClick={() => copyWebhook()}>
+                                                        <Copy className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="default" size="sm" onClick={() => handleManage(page)}>
+                                                        <Database className="mr-2 h-4 w-4" />
+                                                        Manage
+                                                    </Button>
+                                                    <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        )}
                 </CardContent>
             </Card>
-
-            <Dialog open={isSubscriptionOpen} onOpenChange={setIsSubscriptionOpen}>
-                <DialogContent className="sm:max-w-[500px]">
-                    <DialogHeader>
-                        <DialogTitle>Activate Subscription</DialogTitle>
-                        <DialogDescription>
-                            Select a plan for <strong>{selectedPageForSub?.name}</strong> to enable automation.
-                        </DialogDescription>
-                    </DialogHeader>
-                    
-                    <div className="grid gap-4 py-4">
-                        <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan} className="grid grid-cols-3 gap-4">
-                            {Object.entries(PLANS).map(([key, plan]) => (
-                                <div key={key}>
-                                    <RadioGroupItem value={key} id={key} className="peer sr-only" />
-                                    <Label
-                                        htmlFor={key}
-                                        className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary peer-data-[state=checked]:text-primary cursor-pointer"
-                                    >
-                                        <span className="text-sm font-semibold">{plan.label}</span>
-                                        <span className="text-xl font-bold mt-1">৳{plan.price}</span>
-                                    </Label>
-                                </div>
-                            ))}
-                        </RadioGroup>
-
-                        <div className="space-y-2 mt-4">
-                            <Label>Coupon Code (Optional)</Label>
-                            <div className="flex gap-2">
-                                <Input 
-                                    placeholder="Enter code" 
-                                    value={couponCode}
-                                    onChange={(e) => setCouponCode(e.target.value)}
-                                />
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                Use <strong>TRIAL7</strong> for 7 days free trial.
-                            </p>
-                        </div>
-                    </div>
-
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsSubscriptionOpen(false)}>Cancel</Button>
-                        <Button onClick={handleSubscribe} disabled={isProcessingPayment}>
-                            {isProcessingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" />}
-                            {couponCode ? "Activate Trial" : "Pay & Activate"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }
