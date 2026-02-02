@@ -4,6 +4,30 @@ const facebookService = require('../services/facebookService');
 const fs = require('fs');
 const path = require('path');
 
+// --- GATEKEEPER CACHE (In-Memory) ---
+// Purpose: Block unauthorized pages instantly to protect backend resources.
+let allowedPagesCache = new Set();
+let lastCacheUpdate = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 Minutes
+
+async function refreshAllowedPages() {
+    const now = Date.now();
+    if (now - lastCacheUpdate < CACHE_TTL && allowedPagesCache.size > 0) return;
+
+    // console.log("[Gatekeeper] Refreshing allowed pages cache...");
+    const pages = await dbService.getAllActivePages();
+    if (pages && pages.length > 0) {
+        allowedPagesCache = new Set(pages);
+        lastCacheUpdate = now;
+        console.log(`[Gatekeeper] Cache updated. Allowed Pages: ${allowedPagesCache.size}`);
+    }
+}
+
+// Initial Warmup
+refreshAllowedPages();
+setInterval(refreshAllowedPages, CACHE_TTL);
+// ------------------------------------
+
 // Helper to log to file
 function logToFile(message) {
     const logPath = path.join(__dirname, '../../debug.log');
@@ -26,6 +50,28 @@ const handleWebhook = async (req, res) => {
     // console.log('Webhook Body Received:', JSON.stringify(body, null, 2)); // Too verbose for production
 
     if (body.object === 'page') {
+        // --- GATEKEEPER CHECK (Fail Fast) ---
+        // Extract Page ID from the first entry (assuming batch is for same page usually)
+        const pageId = body.entry?.[0]?.id;
+        
+        if (pageId) {
+             // If cache is empty (server restart), try quick fetch or allow once to be safe?
+             // Better: If cache is empty, we force refresh.
+             if (allowedPagesCache.size === 0) await refreshAllowedPages();
+
+             if (!allowedPagesCache.has(pageId)) {
+                 // Double check DB before hard blocking (in case of new signup not in cache yet)
+                 const isActuallyActive = await dbService.getPageConfig(pageId);
+                 if (isActuallyActive && (isActuallyActive.subscription_status === 'active' || isActuallyActive.subscription_status === 'trial')) {
+                     allowedPagesCache.add(pageId); // Add to cache
+                 } else {
+                     console.warn(`[Gatekeeper] BLOCKED unauthorized event for Page ID: ${pageId}`);
+                     return res.status(200).send('EVENT_RECEIVED'); // Return 200 to satisfy FB but drop packet
+                 }
+             }
+        }
+        // ------------------------------------
+
         res.status(200).send('EVENT_RECEIVED');
 
         // Async Processing

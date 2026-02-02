@@ -389,6 +389,21 @@ async function checkLockStatus(pageId, senderId) {
     }
 }
 
+// 14. Get All Active Page IDs (Cache Warmup)
+async function getAllActivePages() {
+    // Used for Gatekeeper / Allowed List cache
+    const { data, error } = await supabase
+        .from('page_access_token_message')
+        .select('page_id')
+        .or('subscription_status.eq.active,subscription_status.eq.trial');
+        
+    if (error) {
+        console.error("Error fetching active pages:", error);
+        return [];
+    }
+    return data.map(p => p.page_id);
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -405,5 +420,6 @@ module.exports = {
     logMessage,
     getMessageById,
     saveOrderTracking,
-    checkLockStatus
+    checkLockStatus,
+    getAllActivePages
 };
