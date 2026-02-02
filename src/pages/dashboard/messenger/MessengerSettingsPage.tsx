@@ -366,59 +366,72 @@ export default function MessengerSettingsPage() {
           }
 
           if (ownerUUID) {
-              // 2. Fetch Current Global Credit
-              const { data: userConfig } = await supabase
+              // 2. Fetch Current Global Credit & Balance
+              const { data: userConfig, error: fetchError } = await supabase
                   .from('user_configs')
-                  .select('message_credit')
+                  .select('message_credit, balance')
                   .eq('user_id', ownerUUID)
                   .maybeSingle();
               
+              if (fetchError) throw new Error("Failed to fetch user config: " + fetchError.message);
+
               const currentGlobal = (userConfig as any)?.message_credit || 0;
-              const newGlobal = currentGlobal + creditToAdd;
+              const currentBalance = (userConfig as any)?.balance || 0;
               
-              // 3. Update User Configs
+              // Determine Price
+              const priceMap: Record<string, number> = { 
+                  '500_free': 0, 
+                  '1000': 500, 
+                  '5000': 2000, 
+                  '10000': 3500 
+              };
+              const price = priceMap[selectedPlan] || 0;
+
+              // 3. Check Balance (for paid plans)
+              if (price > 0 && currentBalance < price) {
+                  throw new Error(`Insufficient balance. Required: ৳${price}, Available: ৳${currentBalance}. Please top up first.`);
+              }
+
+              const newGlobal = currentGlobal + creditToAdd;
+              const newBalance = currentBalance - price;
+              
+              // 4. Update User Configs (Deduct Balance + Add Credit)
               const { error: configError } = await (supabase
                   .from('user_configs') as any)
                   .upsert({ 
                       user_id: ownerUUID,
-                      message_credit: newGlobal
+                      message_credit: newGlobal,
+                      balance: newBalance
                   }, { onConflict: 'user_id' });
 
               if (configError) {
                   console.error("Failed to update user config:", configError);
-                  throw new Error("Failed to add credits: " + (configError as any).message);
+                  throw new Error("Failed to process transaction: " + (configError as any).message);
+              }
+              
+              // 5. Record Transaction
+              if (price > 0) {
+                  const { data: { user } } = await supabase.auth.getUser();
+                  const userEmail = user?.email || "unknown_user";
+
+                  await (supabase.from('payment_transactions') as any).insert({
+                      user_email: userEmail,
+                      amount: price,
+                      method: 'balance_deduction',
+                      trx_id: 'SYS_' + Date.now(),
+                      sender_number: 'SYSTEM',
+                      status: 'completed'
+                  });
               }
               
               // Update local state to reflect new global credit
               setMessageCredit(newGlobal);
               // Ensure we show it immediately
               setPlanActive(true); 
-          }
-
-          // Record Transaction (Mock or Real)
-          const priceMap: Record<string, number> = { 
-              '500_free': 0, 
-              '1000': 500, 
-              '5000': 2000, 
-              '10000': 3500 
-          };
-          const price = priceMap[selectedPlan] || 0;
-
-          // Only record if price > 0 (or if it's a free trial activation we want to log)
-          if (price >= 0) {
-              // Fetch user email if not in scope (we can try to get it from current session or page data)
-              // For now, let's use a placeholder or try to fetch user
-              const { data: { user } } = await supabase.auth.getUser();
-              const userEmail = user?.email || "unknown_user";
-
-              await (supabase.from('payment_transactions') as any).insert({
-                  user_email: userEmail,
-                  amount: price,
-                  method: 'balance_deduction', // or 'mock_purchase'
-                  trx_id: 'SYS_' + Date.now(),
-                  sender_number: 'SYSTEM',
-                  status: 'completed'
-              });
+              
+              if (price > 0) {
+                  toast.success(`Purchased ${creditToAdd} credits for ৳${price}`);
+              }
           }
 
           updates.subscription_status = 'active';
