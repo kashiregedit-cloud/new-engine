@@ -382,13 +382,12 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Reduced history limit to save tokens (User Feedback: "System token besi kasse")
         const historyLimit = 20; 
         
-        const [pagePrompts, userProfile, fbMessages, history, typingResult, seenResult] = await Promise.all([
+        const [pagePrompts, userProfile, fbMessages, history, typingResult] = await Promise.all([
             dbService.getPagePrompts(pageId),
             facebookService.getUserProfile(senderId, pageConfig.page_access_token),
             facebookService.getConversationMessages(pageId, senderId, pageConfig.page_access_token, 10), // For Handover Check
             dbService.getChatHistory(sessionId, historyLimit),
-            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on'), // Fire and forget (awaited in parallel)
-            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'mark_seen') // Mark as Seen
+            facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'typing_on') // Fire and forget (awaited in parallel)
         ]);
 
         const senderName = userProfile.name || 'Customer';
@@ -538,6 +537,11 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             }
         }
         // ---------------------------------------
+
+        // --- MARK SEEN (Delayed until after Stop Logic) ---
+        // We only mark as seen if we are actually going to process the message.
+        await facebookService.sendTypingAction(senderId, pageConfig.page_access_token, 'mark_seen');
+        // --------------------------------------------------
 
         // --- REPLY TO LOGIC ---
         // User Instruction: Try to find old message by message_id from fb_chats first.
@@ -856,7 +860,8 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         // 8. Deduct Credit (ONLY IF CHEAP ENGINE IS ACTIVE)
         if (isCheapEngine) {
-            await dbService.deductCredit(pageId, pageConfig.message_credit);
+            const deductionResult = await dbService.deductCredit(pageId, pageConfig.message_credit);
+            console.log(`[Credit] Deduction Result for Page ${pageId}: ${deductionResult ? 'Success' : 'Failed/NoCredit'}`);
         } else {
             console.log(`[Credit] Skipped deduction for Page ${pageId} (Own API Mode)`);
         }
