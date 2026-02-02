@@ -86,10 +86,51 @@ async function deductCredit(pageId, currentCredit) {
 
     // console.warn(`[dbService] RPC deduct_credits_via_page failed (${rpcError.message}). Falling back to legacy logic.`);
 
-    // 2. Fallback to Legacy Page-Specific Credit (If RPC not setup)
-    if (currentCredit <= 0) return false;
+    // 2. Manual User Credit Deduction (Node.js Fallback if RPC missing)
+    try {
+        const { data: pageData } = await supabase
+            .from('page_access_token_message')
+            .select('user_id')
+            .eq('page_id', pageId)
+            .single();
+
+        if (pageData && pageData.user_id) {
+            const { data: userConfig } = await supabase
+                .from('user_configs')
+                .select('message_credit')
+                .eq('user_id', pageData.user_id)
+                .single();
+
+            // Prioritize User Credit
+            if (userConfig && userConfig.message_credit > 0) {
+                const { error: updateError } = await supabase
+                    .from('user_configs')
+                    .update({ message_credit: userConfig.message_credit - 1 })
+                    .eq('user_id', pageData.user_id);
+                
+                if (!updateError) {
+                    // console.log(`[Credit] Deducted 1 credit from User ${pageData.user_id}`);
+                    return true;
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error in manual user credit deduction:", err);
+    }
+
+    // 3. Fallback to Legacy Page-Specific Credit (If RPC not setup and User credit empty/failed)
+    // Fetch FRESH page credit to avoid race conditions or inflated 'currentCredit' from getPageConfig
+    const { data: freshPageData } = await supabase
+        .from('page_access_token_message')
+        .select('message_credit')
+        .eq('page_id', pageId)
+        .single();
+        
+    const freshCredit = freshPageData ? freshPageData.message_credit : 0;
+
+    if (freshCredit <= 0) return false;
     
-    const newCredit = Number(currentCredit) - 1;
+    const newCredit = Number(freshCredit) - 1;
     const { error } = await supabase
         .from('page_access_token_message')
         .update({ message_credit: newCredit })
