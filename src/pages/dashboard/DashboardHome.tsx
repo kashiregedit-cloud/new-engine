@@ -133,20 +133,6 @@ export default function DashboardHome() {
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Link to={`/dashboard/${platform}/sessions`} className="group">
-            <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-green-500 cursor-pointer">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
-                  <Smartphone className="h-5 w-5" />
-                  Connect {platformName}
-                </CardTitle>
-                <CardDescription>
-                  {isWhatsApp ? 'Scan QR code to connect new numbers' : 'Connect your pages'}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-
           <Link to={`/dashboard/${platform}/control`} className="group">
             <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-blue-500 cursor-pointer">
               <CardHeader>
@@ -156,20 +142,6 @@ export default function DashboardHome() {
                 </CardTitle>
                 <CardDescription>
                   Toggle Auto-Reply, Media, and AI settings
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-
-          <Link to={`/dashboard/${platform}/settings`} className="group">
-            <Card className="h-full hover:shadow-md transition-all border-l-4 border-l-purple-500 cursor-pointer">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 group-hover:text-primary transition-colors">
-                  <MessageSquare className="h-5 w-5" />
-                  AI Intelligence
-                </CardTitle>
-                <CardDescription>
-                  Change AI provider (GPT, Gemini, Claude)
                 </CardDescription>
               </CardHeader>
             </Card>
