@@ -270,47 +270,26 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         personaInstruction = `Persona: Gemini 2.5 Flash. Fast, accurate, Bengali expert. Strict JSON. No fluff.`;
     }
 
-    // Enhanced Gender Fix for Bengali/Muslim Names
-    // Facebook API often fails to return gender, so we infer it from common names.
-    const COMMON_MALE_NAMES = [
-        'Jubayer', 'Jubair', 'Zubayer', 'Zubair',
-        'Rahim', 'Karim', 'Sujon', 'Sajib', 'Sakib', 'Rakib', 
-        'Hasan', 'Hossain', 'Ahmed', 'Ali', 'Khan', 'Sheikh', 
-        'Alam', 'Islam', 'Uddin', 'Rahman', 'Mamun', 'Masud',
-        'Fahim', 'Tanvir', 'Tanim', 'Rasel', 'Rubel', 'Sohel',
-        'Kamal', 'Jamal', 'Babul', 'Kabul', 'Shafik', 'Rafiq',
-        'Mizan', 'Milon', 'Biplob', 'Bipul', 'Shimul', 'Polash',
-        'Sagor', 'Akash', 'Batash', 'Rony', 'Jony', 'Raju',
-        'Sabbir', 'Mehedi', 'Mahmud', 'Sultan', 'Badol', 'Sumon'
-    ];
-
-    const nameLower = senderName ? senderName.toLowerCase() : '';
-
-    if (nameLower && (
-        nameLower.startsWith('md') || 
-        nameLower.startsWith('mohammad') || 
-        nameLower.startsWith('muhammed') || 
-        nameLower.includes('mr.') ||
-        COMMON_MALE_NAMES.some(n => nameLower.includes(n.toLowerCase()))
-    )) {
-        senderGender = 'male';
-    }
+    // --- GENDER LOGIC: SIMPLIFIED (User Request) ---
+    // We rely purely on Facebook's data or the AI's own inference capabilities.
+    // No hardcoded lists or complex JS logic. 
+    // If the user wants specific behavior, they can add it to their Custom Prompt (Ctx).
+    // -----------------------------------------------
 
     // Construct the System Message (n8n style) - OPTIMIZED FOR TOKENS
     const n8nSystemPrompt = `Role: Bot ${pageConfig.bot_name || 'Assistant'} for ${senderName}.
 Ctx: ${basePrompt}
 ${personaInstruction}
 Rules:
-1. Reply in BENGALI. Keep answers extremely CONCISE and SHORT (maximum 1-2 sentences unless detailed explanation is absolutely necessary).
-2. GENDER & ADDRESSING: User Name: '${senderName}'. User Gender: '${senderGender || 'Unknown'}'.
-   - If Gender is 'male' -> Address as 'Sir' or 'Bhaiya'.
-   - If Gender is 'female' -> Address as 'Apu' or 'Ma'am'.
-   - If Gender is 'Unknown' -> Address as 'Prio Grahok' or use formal/neutral language (e.g., 'Ji, bolun'). DO NOT GUESS gender if unsure. NEVER address a Male user as 'Apu'.
-3. IMAGE HANDLING & TOO MANY ATTACHMENTS: If the user sends images (and Vision Analysis is provided), use it to identify the product. However, if you see a [System Note] saying "User sent >10 images" or "User sent a video", this means the content was too heavy to analyze. IN THIS CASE, you MUST rely on the Ad Context (if available) or ask the user to specify which product they want. Do NOT say "I cannot see images". Say "Since there are many products in this post, could you please tell me which one you liked?"
-4. AD CONTEXT: If you see '[System Note: User clicked on an AD...]', use the 'Ref' or 'Ad ID' to identify which product the user is interested in. If the user asks "Price?" or "Details?" (or sends many images without text), assume they are asking about THAT specific product from the Ad.
-5. STRICT DOMAIN CONTROL: You are a specialized assistant for this business. You MUST ONLY answer questions related to the business/products described in the 'Ctx'. If the user asks about UNRELATED topics (e.g. health, politics, personal advice, religion) that are NOT in the context, you MUST return null for the 'reply' field. Do not try to be helpful for unrelated topics.
-6. PHONE VALIDATION: If user provides a phone number, it MUST be a valid 11-digit number (for Bangladesh) or valid international format. If invalid (e.g. less than 11 digits), ask for the correct number again. DO NOT confirm order or extract 'order_details' until a valid number is provided.
-7. SENDING IMAGES: If the user explicitly asks for a photo/image (e.g. "sobi dao", "pic dao"), and you have the product image URL in your 'Ctx', you MUST include the image URL in your reply. Use format: "[Image: Product Name | URL]". You HAVE permission to send images. Never say "I cannot upload images".
+1. Reply in BENGALI. Keep answers extremely CONCISE and SHORT.
+2. ADDRESSING: Name: '${senderName}'. Gender: '${senderGender || 'Unknown'}'.
+   - Male -> 'Sir'/'Bhaiya'. Female -> 'Apu'/'Ma'am'.
+   - If unknown/unsure, use neutral 'Prio Grahok'.
+3. IMAGE HANDLING: If you see [System Note] "User sent >10 images" or "video", rely on Ad Context or ask user.
+4. AD CONTEXT: If '[System Note: User clicked on an AD...]' exists, use it to identify the product.
+5. STRICT DOMAIN CONTROL: Answer ONLY about business/products in 'Ctx'. Ignore unrelated topics (politics, health, etc).
+6. PHONE VALIDATION: If user gives phone, ensure it's valid (11-digit BD).
+7. SENDING IMAGES: If user asks for pics and you have URL in 'Ctx', send it as "[Image: Name | URL]".
 8. Output RAW JSON:
 {
   "reply": "Bengali text"|null,

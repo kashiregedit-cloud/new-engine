@@ -17,6 +17,11 @@ export interface MessengerContextType {
   setCurrentPage: (page: MessengerPage | null) => void;
   refreshPages: () => Promise<void>;
   loading: boolean;
+  // Team Features
+  isTeamMember: boolean;
+  teamOwnerEmail: string | null;
+  viewMode: 'personal' | 'team';
+  switchViewMode: (mode: 'personal' | 'team') => void;
 }
 
 const MessengerContext = createContext<MessengerContextType | undefined>(undefined);
@@ -25,6 +30,18 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
   const [pages, setPages] = useState<MessengerPage[]>([]);
   const [currentPage, setCurrentPage] = useState<MessengerPage | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Team State
+  const [isTeamMember, setIsTeamMember] = useState(false);
+  const [teamOwnerEmail, setTeamOwnerEmail] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'personal' | 'team'>(() => {
+    return (localStorage.getItem('messenger_view_mode') as 'personal' | 'team') || 'personal';
+  });
+
+  const switchViewMode = (mode: 'personal' | 'team') => {
+    setViewMode(mode);
+    localStorage.setItem('messenger_view_mode', mode);
+  };
 
   const refreshPages = React.useCallback(async () => {
     setLoading(true);
@@ -35,17 +52,29 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      let targetEmail = user.email;
-      
-      // Check Team Membership
+      // Check Team Membership first
       const { data: teamData } = await (supabase
           .from('team_members') as any)
           .select('owner_email')
           .eq('member_email', user.email)
-          .single();
+          .maybeSingle();
       
-      if (teamData) {
-          targetEmail = teamData.owner_email;
+      const isMember = !!teamData;
+      const ownerEmail = teamData?.owner_email || null;
+
+      setIsTeamMember(isMember);
+      setTeamOwnerEmail(ownerEmail);
+
+      // Determine target email based on viewMode
+      let targetEmail = user.email;
+      
+      // If in team mode AND is a member, use owner email
+      // Also auto-switch to personal if not a member anymore
+      if (viewMode === 'team' && isMember && ownerEmail) {
+          targetEmail = ownerEmail;
+      } else if (viewMode === 'team' && !isMember) {
+          // Fallback if removed from team but still in team mode
+          targetEmail = user.email;
       }
 
       // 1. Fetch Pages
@@ -107,7 +136,7 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [viewMode]);
 
   const updateActivePage = (page: MessengerPage | null) => {
     setCurrentPage(page);
@@ -137,7 +166,11 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
         currentPage, 
         setCurrentPage: updateActivePage, 
         refreshPages, 
-        loading 
+        loading,
+        isTeamMember,
+        teamOwnerEmail,
+        viewMode,
+        switchViewMode
     }}>
       {children}
     </MessengerContext.Provider>

@@ -19,10 +19,13 @@ import {
     Trash2, 
     CreditCard, 
     Gift,
-    Sparkles
+    Sparkles,
+    Users
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { BACKEND_URL } from "@/config";
+import { useMessenger } from "@/context/MessengerContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // --- Types & Interfaces ---
 
@@ -68,11 +71,18 @@ const COUPON_TRIALS: Record<string, number> = {
 
 export default function MessengerIntegrationPage() {
     const navigate = useNavigate();
+    const { 
+        refreshPages, 
+        pages: contextPages, 
+        isTeamMember, 
+        teamOwnerEmail, 
+        viewMode, 
+        switchViewMode 
+    } = useMessenger();
     
     // --- State ---
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
-    const [pages, setPages] = useState<PageData[]>([]);
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
@@ -94,21 +104,14 @@ export default function MessengerIntegrationPage() {
     // --- Effects ---
 
     useEffect(() => {
-        // Get user email and check for Team Membership
+        // Get user email
         const getUser = async () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (user?.email) {
-                setUserId(user.id); // Store UUID
-                
-                const { data: teamData } = await (supabase
-                    .from('team_members') as any)
-                    .select('owner_email')
-                    .eq('member_email', user.email)
-                    .single();
-                
-                if (teamData) {
-                    setUserEmail(teamData.owner_email);
-                    toast.info(`Team Mode: Managing ${teamData.owner_email}'s account`);
+                setUserId(user.id);
+                // Determine effective email based on viewMode
+                if (viewMode === 'team' && isTeamMember && teamOwnerEmail) {
+                    setUserEmail(teamOwnerEmail);
                 } else {
                     setUserEmail(user.email);
                 }
@@ -148,6 +151,9 @@ export default function MessengerIntegrationPage() {
         }
     }, [userEmail]);
 
+    // Use pages from context instead of local fetch
+    const pages = contextPages as PageData[];
+
     // --- Helper Functions ---
 
     const copyWebhook = () => {
@@ -159,53 +165,9 @@ export default function MessengerIntegrationPage() {
     };
 
     const fetchPages = async () => {
-        if (!userEmail) return;
-        
-        try {
-            // 1. Fetch user's own pages
-            const { data: userPages, error } = await supabase
-                .from('page_access_token_message')
-                .select('*')
-                .eq('email', userEmail);
-            
-            if (error) throw error;
-            
-            let finalPages: PageData[] = userPages || [];
-
-            // 2. Fetch currently active page if not in the list (Shared Access Mode)
-            const activeId = localStorage.getItem("active_fb_page_id");
-            if (activeId) {
-                const isAlreadyInList = finalPages.some((p) => p.page_id === activeId);
-                if (!isAlreadyInList) {
-                    const { data: activePageData } = await supabase
-                        .from('page_access_token_message')
-                        .select('*')
-                        .eq('page_id', activeId)
-                        .maybeSingle();
-                    
-                    if (activePageData) {
-                        // Validate ownership before injecting (Security Fix)
-                        // Cast to any to avoid "Property 'email' does not exist on type 'never'" error
-                        const pageToCheck = activePageData as any;
-                        
-                        if (pageToCheck.email === userEmail) {
-                            finalPages = [pageToCheck, ...finalPages];
-                        } else {
-                            // If the cached page doesn't belong to the current user (or their team owner), 
-                            // ignore it and clear the invalid cache.
-                            localStorage.removeItem("active_fb_page_id");
-                        }
-                    }
-                }
-            }
-
-            setPages(finalPages);
-        } catch (error) {
-            console.error("Error fetching pages:", error);
-            toast.error("Failed to load Facebook pages");
-        } finally {
-            setLoading(false);
-        }
+        // Delegated to MessengerContext
+        await refreshPages();
+        setLoading(false);
     };
 
     const subscribeAppToPage = (pageId: string, accessToken: string) => {
@@ -697,7 +659,27 @@ export default function MessengerIntegrationPage() {
                         Manage your connected Facebook pages and their automation settings.
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    {isTeamMember && (
+                        <div className="flex items-center gap-2 bg-muted p-2 rounded-lg border mr-2">
+                            <Users className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">Workspace:</span>
+                            <Select 
+                                value={viewMode} 
+                                onValueChange={(val: 'personal' | 'team') => switchViewMode(val)}
+                            >
+                                <SelectTrigger className="w-[180px] h-8 bg-background">
+                                    <SelectValue placeholder="Select Workspace" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="personal">My Workspace</SelectItem>
+                                    <SelectItem value="team">
+                                        Team ({teamOwnerEmail?.split('@')[0]})
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
                     <Button variant="outline" onClick={() => setIsManualSetupOpen(true)}>
                         <Settings className="mr-2 h-4 w-4" />
                         Open Manual Setup
@@ -712,120 +694,62 @@ export default function MessengerIntegrationPage() {
             <Dialog open={isManualSetupOpen} onOpenChange={setIsManualSetupOpen}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>Manual Integration Setup</DialogTitle>
+                        <DialogTitle>Manual Page Connection</DialogTitle>
                         <DialogDescription>
-                            Configure your webhook and connect your page manually.
+                            Use this if the automatic Facebook Login button doesn't work. You'll need your Page ID and Access Token.
                         </DialogDescription>
                     </DialogHeader>
-                    
-                    <div className="grid gap-6 py-4">
-                        {/* Section 1: Professional Webhook Configuration */}
-                        <div className="space-y-4 border rounded-lg p-4 bg-secondary/10">
-                            <div className="flex items-center gap-2">
-                                <div className="bg-primary/10 p-1.5 rounded-md">
-                                    <Database className="h-4 w-4 text-primary" />
-                                </div>
-                                <h3 className="font-semibold text-sm">Professional Webhook Configuration</h3>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label className="text-xs font-medium">Callback URL</Label>
-                                    <div className="relative">
-                                        <Input readOnly value="https://webhook.salesmanchatbot.online/webhook" className="pr-8" />
-                                        <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="absolute right-1 top-1 h-7 w-7"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText("https://webhook.salesmanchatbot.online/webhook");
-                                                toast.success("URL Copied!");
-                                            }}
-                                        >
-                                            <Copy className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label className="text-xs font-medium">Verify Token</Label>
-                                    <div className="relative">
-                                        <Input readOnly value="123456" className="pr-8" />
-                                        <Button
-                                            size="icon"
-                                            variant="ghost"
-                                            className="absolute right-1 top-1 h-7 w-7"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText("123456");
-                                                toast.success("Token Copied!");
-                                            }}
-                                        >
-                                            <Copy className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                * Enter these details in your Facebook App Developer Portal under <strong>Webhooks &gt; Page</strong>.
-                            </p>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Page Name</Label>
+                            <Input 
+                                placeholder="My Business Page" 
+                                value={directPageName}
+                                onChange={(e) => setDirectPageName(e.target.value)}
+                            />
                         </div>
-
-                        {/* Section 2: Page Connection Fields */}
-                        <div className="space-y-4">
-                            <div className="grid gap-2">
-                                <Label htmlFor="pageName">Page Name (Reference)</Label>
-                                <Input 
-                                    id="pageName" 
-                                    placeholder="e.g. My Business Page" 
-                                    value={directPageName}
-                                    onChange={(e) => setDirectPageName(e.target.value)}
-                                />
-                            </div>
-                            <div className="grid gap-2">
-                                <Label htmlFor="directPageId">Page ID</Label>
-                                <Input 
-                                    id="directPageId" 
-                                    placeholder="e.g. 10001234567890" 
-                                    value={directPageId}
-                                    onChange={(e) => setDirectPageId(e.target.value)}
-                                />
-                            </div>
-                            <div className="grid gap-2">
-                                <Label htmlFor="accessToken">Page Access Token</Label>
-                                <Input 
-                                    id="accessToken" 
-                                    type="password"
-                                    placeholder="EAA..." 
-                                    value={directAccessToken}
-                                    onChange={(e) => setDirectAccessToken(e.target.value)}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Ensure this token has <code>pages_messaging</code> permission.
-                                </p>
-                            </div>
-                            <Button onClick={handleDirectConnect} disabled={directLoading} className="w-full">
-                                {directLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                                Connect Page
-                            </Button>
+                        <div className="space-y-2">
+                            <Label>Page ID</Label>
+                            <Input 
+                                placeholder="123456789012345" 
+                                value={directPageId}
+                                onChange={(e) => setDirectPageId(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Page Access Token</Label>
+                            <Input 
+                                type="password"
+                                placeholder="EAA..." 
+                                value={directAccessToken}
+                                onChange={(e) => setDirectAccessToken(e.target.value)}
+                            />
                         </div>
                     </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsManualSetupOpen(false)}>Cancel</Button>
+                        <Button onClick={handleDirectConnect} disabled={directLoading}>
+                            {directLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Connect Page"}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Connected Pages ({pages.length})</CardTitle>
-                    <CardDescription>List of Facebook pages integrated with the bot.</CardDescription>
+                    <CardTitle>Connected Pages</CardTitle>
+                    <CardDescription>
+                        Pages you have connected to the bot.
+                    </CardDescription>
                 </CardHeader>
                 <CardContent>
                     {loading ? (
                         <div className="flex justify-center py-8">
-                            <Loader2 className="animate-spin h-8 w-8 text-primary" />
+                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                         </div>
                     ) : pages.length === 0 ? (
-                        <div className="text-center py-10 text-muted-foreground">
-                            <Database className="mx-auto h-12 w-12 opacity-20 mb-3" />
-                            <p>No pages found.</p>
+                        <div className="text-center py-8 text-muted-foreground">
+                            No pages connected yet. Click "Connect with Facebook" to get started.
                         </div>
                     ) : (
                         <Table>
@@ -833,34 +757,43 @@ export default function MessengerIntegrationPage() {
                                 <TableRow>
                                     <TableHead>Page Name</TableHead>
                                     <TableHead>Page ID</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Plan</TableHead>
                                     <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {pages.map((page) => (
                                     <TableRow key={page.page_id}>
-                                        <TableCell className="font-medium">{page.name}</TableCell>
+                                        <TableCell className="font-medium">
+                                            <div className="flex items-center gap-2">
+                                                <Facebook className="h-4 w-4 text-blue-600" />
+                                                {page.name}
+                                            </div>
+                                        </TableCell>
                                         <TableCell className="font-mono text-xs">{page.page_id}</TableCell>
-                                        <TableCell className="text-right space-x-2">
-                                            {page.subscription_status === 'invalid_token' && (
-                                                <div className="inline-flex items-center text-red-500 font-bold text-xs mr-3 bg-red-50 px-2 py-1 rounded">
-                                                    <AlertCircle className="w-3 h-3 mr-1" /> Token Invalid
-                                                </div>
-                                            )}
-                                            {page.subscription_status === 'active' || page.subscription_status === 'trial' ? (
-                                                <Button variant="outline" size="sm" onClick={() => handleManage(page)}>
-                                                    <Settings className="mr-2 h-4 w-4" />
+                                        <TableCell>
+                                            {page.subscription_status === 'active' && <span className="text-green-600 flex items-center gap-1"><Check className="h-3 w-3" /> Active</span>}
+                                            {page.subscription_status === 'trial' && <span className="text-blue-600 flex items-center gap-1"><Gift className="h-3 w-3" /> Trial</span>}
+                                            {page.subscription_status === 'pending_payment' && <span className="text-orange-600 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Pending</span>}
+                                            {!['active', 'trial', 'pending_payment'].includes(page.subscription_status || '') && <span className="text-gray-500">Inactive</span>}
+                                        </TableCell>
+                                        <TableCell>
+                                            <span className="capitalize">{page.subscription_plan || 'Free'}</span>
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Button variant="outline" size="sm" onClick={() => copyWebhook()}>
+                                                    <Copy className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="default" size="sm" onClick={() => handleManage(page)}>
+                                                    <Database className="mr-2 h-4 w-4" />
                                                     Manage
                                                 </Button>
-                                            ) : (
-                                                <Button variant="default" size="sm" className="bg-purple-600 hover:bg-purple-700" onClick={() => openSubscriptionModal(page)}>
-                                                    <CreditCard className="mr-2 h-4 w-4" />
-                                                    {page.subscription_status === 'pending_payment' ? 'Pending' : 'Subscribe'}
+                                                <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
+                                                    <Trash2 className="h-4 w-4" />
                                                 </Button>
-                                            )}
-                                            <Button variant="destructive" size="sm" onClick={() => handleRemovePage(page)}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -870,82 +803,51 @@ export default function MessengerIntegrationPage() {
                 </CardContent>
             </Card>
 
-            {/* Subscription Modal */}
             <Dialog open={isSubscriptionOpen} onOpenChange={setIsSubscriptionOpen}>
-                <DialogContent className="sm:max-w-[425px]">
+                <DialogContent className="sm:max-w-[500px]">
                     <DialogHeader>
-                        <DialogTitle>Subscribe to Activate {selectedPageForSub?.name}</DialogTitle>
+                        <DialogTitle>Activate Subscription</DialogTitle>
                         <DialogDescription>
-                            Choose a subscription plan to enable chatbot automation for this page.
+                            Select a plan for <strong>{selectedPageForSub?.name}</strong> to enable automation.
                         </DialogDescription>
                     </DialogHeader>
                     
                     <div className="grid gap-4 py-4">
-                        <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan} className="grid gap-3">
+                        <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan} className="grid grid-cols-3 gap-4">
                             {Object.entries(PLANS).map(([key, plan]) => (
                                 <div key={key}>
                                     <RadioGroupItem value={key} id={key} className="peer sr-only" />
                                     <Label
                                         htmlFor={key}
-                                        className="flex items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                                        className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary peer-data-[state=checked]:text-primary cursor-pointer"
                                     >
-                                        <div className="flex items-center gap-2">
-                                            <div className="bg-primary/10 p-2 rounded-full">
-                                                <Sparkles className="w-4 h-4 text-primary" />
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="font-semibold">{plan.label}</span>
-                                                <span className="text-xs text-muted-foreground">{plan.duration_days} Days Access</span>
-                                            </div>
-                                        </div>
-                                        <div className="font-bold text-lg">৳{plan.price}</div>
+                                        <span className="text-sm font-semibold">{plan.label}</span>
+                                        <span className="text-xl font-bold mt-1">৳{plan.price}</span>
                                     </Label>
                                 </div>
                             ))}
                         </RadioGroup>
 
-                        <div className="space-y-2 pt-2 border-t">
-                            <Label htmlFor="coupon">Have a coupon?</Label>
+                        <div className="space-y-2 mt-4">
+                            <Label>Coupon Code (Optional)</Label>
                             <div className="flex gap-2">
                                 <Input 
-                                    id="coupon" 
-                                    placeholder="Enter code (e.g. TRIAL7)" 
-                                    value={couponCode} 
-                                    onChange={(e) => setCouponCode(e.target.value)} 
+                                    placeholder="Enter code" 
+                                    value={couponCode}
+                                    onChange={(e) => setCouponCode(e.target.value)}
                                 />
-                                {couponCode && COUPON_TRIALS[couponCode.toUpperCase()] && (
-                                    <div className="flex items-center text-green-600 text-sm">
-                                        <Check className="w-4 h-4 mr-1" />
-                                        Valid
-                                    </div>
-                                )}
                             </div>
-                            <p className="text-xs text-muted-foreground">Use code <b>TRIAL7</b> for 7 days free.</p>
+                            <p className="text-xs text-muted-foreground">
+                                Use <strong>TRIAL7</strong> for 7 days free trial.
+                            </p>
                         </div>
                     </div>
 
                     <DialogFooter>
-                        <Button onClick={handleSubscribe} disabled={isProcessingPayment} className="w-full">
-                            {isProcessingPayment ? (
-                                <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Processing...
-                                </>
-                            ) : (
-                                <>
-                                    {couponCode && COUPON_TRIALS[couponCode.toUpperCase()] ? (
-                                        <>
-                                            <Gift className="mr-2 h-4 w-4" />
-                                            Activate Free Trial
-                                        </>
-                                    ) : (
-                                        <>
-                                            <CreditCard className="mr-2 h-4 w-4" />
-                                            Pay Now
-                                        </>
-                                    )}
-                                </>
-                            )}
+                        <Button variant="outline" onClick={() => setIsSubscriptionOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSubscribe} disabled={isProcessingPayment}>
+                            {isProcessingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" />}
+                            {couponCode ? "Activate Trial" : "Pay & Activate"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
