@@ -267,6 +267,7 @@ module.exports = {
     sendSeen,
     getMessages,
     getSessions,
+    getSession,
     createSession,
     deleteSession,
     startSession,

@@ -271,7 +271,18 @@ router.post('/session/pairing-code', async (req, res) => {
             }
         }
 
-        // 3. Request Code with Retry (Directly, instead of waiting for SCAN_QR status)
+        // 3. Wait for Session Readiness (SCAN_QR)
+        console.log(`[WhatsApp] Waiting for session '${sessionName}' to be ready...`);
+        for (let i = 0; i < 10; i++) {
+            const sessionInfo = await whatsappService.getSession(sessionName);
+            if (sessionInfo && sessionInfo.status === 'SCAN_QR') {
+                console.log(`[WhatsApp] Session '${sessionName}' is ready (SCAN_QR).`);
+                break;
+            }
+            await new Promise(r => setTimeout(r, 1000));
+        }
+
+        // 4. Request Code with Retry (Directly, instead of waiting for SCAN_QR status)
         let pairingCode = null;
         let attempts = 0;
         const maxAttempts = 15;
