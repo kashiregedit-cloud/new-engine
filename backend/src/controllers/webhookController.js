@@ -743,6 +743,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                  // Regex is global, exec() advances 'lastIndex'. So it's safe not to replace.
                  console.log(`[Image Extraction] Ignored non-image labeled link: ${url}`);
              }
+        }
         
         // Cleanup leftover [Image] artifacts (User Issue)
         replyText = replyText.replace(/\[Image.*?\]/gi, '').trim();

@@ -720,8 +720,21 @@ async function getAllActivePages() {
         }
     }
 
-    // 3. Filter: Subscription Status Only (Removed Credit Check for Free Policy)
-    const allowedPageIds = pages.map(p => p.page_id);
+    // 3. Filter: Subscription Status + Credit Check
+    const allowedPageIds = pages.filter(p => {
+        // If status is NOT active, skip
+        if (p.subscription_status !== 'active_trial' && p.subscription_status !== 'active_paid') {
+             return false;
+        }
+        
+        // If user has credits, allow
+        const credits = userCredits[p.user_id] || 0;
+        if (credits > 0) return true;
+        
+        // Log skipped page
+        // console.log(`[DB] Page ${p.page_id} skipped (No Credits: ${credits})`);
+        return false;
+    }).map(p => p.page_id);
 
     return allowedPageIds;
 }
