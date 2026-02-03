@@ -126,41 +126,38 @@ router.post('/session/create', async (req, res) => {
 
             console.log(`[WhatsApp] Auto-Pairing requested for '${finalName}' with phone '${formattedPhone}'`);
 
-            // Wait for SCAN_QR_CODE status specifically
-            let readyForPairing = false;
+            // Retry getting Pairing Code directly (more reliable than status checking)
             let pairingAttempts = 0;
-            while (!readyForPairing && pairingAttempts < 10) {
-                const sessions = await whatsappService.getSessions(true);
-                const s = sessions.find(s => s.name === finalName);
-                if (s && (s.status === 'SCAN_QR_CODE' || s.status === 'SCAN_QR')) {
-                    readyForPairing = true;
-                } else {
-                    await new Promise(r => setTimeout(r, 1000));
+            const maxPairingAttempts = 15;
+            
+            while (!pairingCode && pairingAttempts < maxPairingAttempts) {
+                try {
+                    // Try to fetch pairing code
+                    pairingCode = await whatsappService.getPairingCode(finalName, formattedPhone);
+                    console.log(`[WhatsApp] Pairing Code Generated: ${pairingCode}`);
+                    break; // Success!
+                } catch (e) {
                     pairingAttempts++;
+                    console.log(`[WhatsApp] Pairing Code not ready yet (Attempt ${pairingAttempts}/${maxPairingAttempts}). Waiting...`);
+                    // Wait 2 seconds before retry
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             }
 
-            if (readyForPairing) {
-                try {
-                    pairingCode = await whatsappService.getPairingCode(finalName, formattedPhone);
-                    console.log(`[WhatsApp] Pairing Code Generated: ${pairingCode}`);
-                } catch (e) {
-                    console.error("Auto-Pairing Failed:", e.message);
-                }
-            } else {
-                console.warn(`[WhatsApp] Session '${finalName}' did not reach SCAN_QR_CODE in time for pairing.`);
+            if (!pairingCode) {
+                console.warn(`[WhatsApp] Failed to get Pairing Code after ${maxPairingAttempts} attempts.`);
             }
         }
 
         // ALWAYS fetch QR Code as well (User requested both)
         try {
-            // If we didn't wait for pairing, wait a bit for initialization
+            // If we didn't wait for pairing (no phone number), wait a bit for initialization
             if (!phoneNumber) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
             qr = await whatsappService.getScreenshot(finalName);
         } catch (error) {
-            console.warn(`[WhatsApp] Failed to fetch QR code during creation: ${error.message}`);
+            console.warn(`[WhatsApp] Failed to fetch QR code: ${error.message}`);
         }
 
         // Save QR to DB for frontend polling
@@ -265,38 +262,37 @@ router.post('/session/pairing-code', async (req, res) => {
                 // 3. Start Session (Fresh Start)
                 console.log(`[WhatsApp] Starting session '${sessionName}'...`);
                 await whatsappService.startSession(sessionName);
+                
+                // Wait a bit for startup
+                await new Promise(r => setTimeout(r, 3000));
             } catch (err) {
                 console.error(`[WhatsApp] Reset failed:`, err.message);
                 // Continue to polling, hoping it started
             }
-            
-            // Poll for SCAN_QR_CODE
-            let attempts = 0;
-            const maxAttempts = 30; // Increased to 30 seconds for full restart
-            let ready = false;
+        }
 
-            while (!ready && attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 1000));
-                allSessions = await whatsappService.getSessions(true);
-                session = allSessions.find(s => s.name === sessionName);
-                
-                if (session && (session.status === 'SCAN_QR_CODE' || session.status === 'SCAN_QR')) {
-                    ready = true;
-                }
+        // 3. Request Code with Retry (Directly, instead of waiting for SCAN_QR status)
+        let pairingCode = null;
+        let attempts = 0;
+        const maxAttempts = 15;
+
+        while (!pairingCode && attempts < maxAttempts) {
+            try {
+                pairingCode = await whatsappService.getPairingCode(sessionName, formattedPhone);
+                console.log(`[WhatsApp] Pairing Code Generated: ${pairingCode}`);
+                break;
+            } catch (e) {
                 attempts++;
-            }
-
-            if (!ready) {
-                return res.status(500).json({ error: "Session failed to enter SCAN_QR_CODE mode. Please try again." });
+                console.log(`[WhatsApp] Pairing Code not ready yet (Attempt ${attempts}/${maxAttempts}). Waiting...`);
+                await new Promise(r => setTimeout(r, 2000));
             }
         }
 
-        // 3. Request Code
-        // Add a small delay to ensure WAHA is fully ready to accept auth code request
-        await new Promise(r => setTimeout(r, 2000));
-
-        const code = await whatsappService.getPairingCode(sessionName, formattedPhone);
-        res.json({ success: true, code: code });
+        if (pairingCode) {
+             res.json({ success: true, code: pairingCode });
+        } else {
+             throw new Error("Failed to generate Pairing Code. Please check if the session is running.");
+        }
     } catch (err) {
         console.error("Pairing Code Error:", err);
         
