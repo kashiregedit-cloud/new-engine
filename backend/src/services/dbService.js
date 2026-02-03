@@ -720,15 +720,8 @@ async function getAllActivePages() {
         }
     }
 
-    // 3. Filter: Must have Credit > 0
-    const allowedPageIds = pages.filter(p => {
-        const pageCredit = Number(p.message_credit || 0);
-        const userCredit = Number(userCredits[p.user_id] || 0);
-
-        // Allow if EITHER has credit > 0
-        // (This covers both Legacy Page Credits and Centralized User Credits)
-        return pageCredit > 0 || userCredit > 0;
-    }).map(p => p.page_id);
+    // 3. Filter: Subscription Status Only (Removed Credit Check for Free Policy)
+    const allowedPageIds = pages.map(p => p.page_id);
 
     return allowedPageIds;
 }

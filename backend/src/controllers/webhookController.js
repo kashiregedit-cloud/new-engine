@@ -570,7 +570,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         
         // --- INJECT FORMATTING INSTRUCTION (User Request: "n8n style split" & "Carousel Titles") ---
         if (pagePrompts && pagePrompts.text_prompt) {
-             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. Include the IMAGE LINK for EVERY item/plan described.\n4. **STRICT IMAGE FORMAT**: You MUST output images using this EXACT format:\n   IMAGE: Plan Name | https://your-image-url.com\n   (Example: "IMAGE: 🌟 Basic Plan | https://i.imgur.com/xyz.jpg")\n5. DO NOT use [Image] placeholders. ONLY use the 'IMAGE: Title | URL' format.`;
+             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. If explaining multiple items/plans, keep each section SHORT (max 500 chars).\n2. Use clear spacing between sections.\n3. Include the IMAGE LINK for EVERY item/plan described.\n4. **STRICT IMAGE FORMAT**: You MUST output images using this EXACT format:\n   IMAGE: Plan Name | https://your-image-url.com\n   (Example: "IMAGE: 🌟 Basic Plan | https://i.imgur.com/xyz.jpg")\n   **CRITICAL**: The URL MUST be a direct image link (ending in .jpg, .png, .webp). Do NOT use product page URLs (e.g., myshop.com/products/123).\n5. DO NOT use [Image] placeholders. ONLY use the 'IMAGE: Title | URL' format.`;
         }
         // -----------------------------------------------------------------------
 
@@ -667,9 +667,21 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 url = `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
             }
 
-            if (!extractedImages.some(img => img.url === url)) {
-                extractedImages.push({ url: url, title: title });
+            // --- VALIDATION: Skip invalid URLs (like product pages without image extensions) ---
+            const isImageExtension = /\.(jpg|jpeg|png|gif|webp|bmp|tiff)(\?.*)?$/i.test(url);
+            const isKnownImageHost = /drive\.google\.com|i\.imgur\.com|scontent|fbcdn|cdn|aws|storage|cloudfront/i.test(url);
+
+            if (isImageExtension || isKnownImageHost) {
+                if (!extractedImages.some(img => img.url === url)) {
+                    extractedImages.push({ url: url, title: title });
+                }
+            } else {
+                console.log(`[Image Extraction] Skipped non-image URL: ${url}`);
+                // If it's a product link, maybe we want to keep it in the text? 
+                // But the AI was instructed to put it in IMAGE: format. 
+                // Let's assume the Prompt Fix will reduce this, and here we just prevent the Crash.
             }
+
             replyText = replyText.replace(fullMatch, '').trim();
         }
 
@@ -714,11 +726,23 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
              // Remove trailing punctuation
              url = url.replace(/[,.]$/, '');
 
-             if (!extractedImages.some(img => img.url === url)) {
-                extractedImages.push({ url: url, title: 'View Link' });
-            }
-            replyText = replyText.replace(fullMatch, '').trim();
-        }
+             // --- VALIDATION: Skip invalid URLs ---
+             const isImageExtension = /\.(jpg|jpeg|png|gif|webp|bmp|tiff)(\?.*)?$/i.test(url);
+             const isKnownImageHost = /drive\.google\.com|i\.imgur\.com|scontent|fbcdn|cdn|aws|storage|cloudfront/i.test(url);
+
+             if (isImageExtension || isKnownImageHost) {
+                 if (!extractedImages.some(img => img.url === url)) {
+                    extractedImages.push({ url: url, title: 'View Link' });
+                }
+                replyText = replyText.replace(fullMatch, '').trim();
+             } else {
+                 // If NOT an image, do NOT remove it from text!
+                 // Keep it so the user can click the link.
+                 // We only remove it if we successfully extracted it as an image attachment.
+                 // But wait, if we don't remove it, the loop might be infinite if regex is not global or if we don't advance?
+                 // Regex is global, exec() advances 'lastIndex'. So it's safe not to replace.
+                 console.log(`[Image Extraction] Ignored non-image labeled link: ${url}`);
+             }
         
         // Cleanup leftover [Image] artifacts (User Issue)
         replyText = replyText.replace(/\[Image.*?\]/gi, '').trim();

@@ -91,8 +91,14 @@ router.post('/session/create', async (req, res) => {
                         console.log(`[WhatsApp] Session '${finalName}' is STOPPED. Starting...`);
                         await whatsappService.startSession(finalName);
                     } else if (session.status === 'STARTING' || session.status === 'SCAN_QR_CODE' || session.status === 'SCAN_QR' || session.status === 'WORKING') {
-                        sessionReady = true;
-                        console.log(`[WhatsApp] Session '${finalName}' is active/starting.`);
+                        // If Pairing Code requested, we strictly need SCAN_QR status (or WORKING if re-pairing)
+                        if (phoneNumber && session.status !== 'SCAN_QR' && session.status !== 'SCAN_QR_CODE' && session.status !== 'WORKING') {
+                             console.log(`[WhatsApp] Waiting for SCAN_QR status for Pairing Code (Current: ${session.status})...`);
+                             sessionReady = false; // Keep waiting
+                        } else {
+                            sessionReady = true;
+                            console.log(`[WhatsApp] Session '${finalName}' is active/starting.`);
+                        }
                     } else {
                         console.log(`[WhatsApp] Session '${finalName}' status: ${session.status}. Waiting...`);
                     }
@@ -128,7 +134,7 @@ router.post('/session/create', async (req, res) => {
 
             // Retry getting Pairing Code directly (more reliable than status checking)
             let pairingAttempts = 0;
-            const maxPairingAttempts = 15;
+            const maxPairingAttempts = 30; // Increased to 30 attempts (approx 30-45 seconds)
             
             while (!pairingCode && pairingAttempts < maxPairingAttempts) {
                 try {
@@ -138,9 +144,12 @@ router.post('/session/create', async (req, res) => {
                     break; // Success!
                 } catch (e) {
                     pairingAttempts++;
-                    console.log(`[WhatsApp] Pairing Code not ready yet (Attempt ${pairingAttempts}/${maxPairingAttempts}). Waiting...`);
-                    // Wait 2 seconds before retry
-                    await new Promise(r => setTimeout(r, 2000));
+                    const is404 = e.response && e.response.status === 404;
+                    const errorMsg = is404 ? "Endpoint not ready (404)" : e.message;
+                    console.log(`[WhatsApp] Pairing Code not ready yet (Attempt ${pairingAttempts}/${maxPairingAttempts}). Error: ${errorMsg}. Waiting...`);
+                    
+                    // Wait 1.5 seconds before retry
+                    await new Promise(r => setTimeout(r, 1500));
                 }
             }
 
