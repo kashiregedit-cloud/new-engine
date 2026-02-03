@@ -37,7 +37,7 @@ router.post('/session/create', async (req, res) => {
         // User requested specific configuration for n8n and robustness
         const backendWebhookUrl = `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`;
         
-        // Combine user's n8n webhook with our backend webhook
+        // Only use the Backend Webhook as requested
         const wahaConfig = config || {
             metadata: {},
             debug: false,
@@ -49,16 +49,6 @@ router.post('/session/create', async (req, res) => {
                 }
             },
             webhooks: [
-                {
-                    url: "https://n8n.salesmanchatbot.online/webhook/webhook",
-                    events: ["message", "session.status"],
-                    retries: {
-                        delaySeconds: 2,
-                        attempts: 15,
-                        policy: "linear"
-                    },
-                    customHeaders: null
-                },
                 {
                     url: backendWebhookUrl,
                     events: ["message", "message.any", "state.change"],
@@ -153,10 +143,40 @@ router.post('/session/delete', async (req, res) => {
     try {
         const { sessionName, name } = req.body; // Support both
         const target = sessionName || name;
+        
+        // Try to stop session first to avoid "session busy" errors
+        try {
+            await whatsappService.stopSession(target);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for stop
+        } catch (stopErr) {
+            console.warn(`[WhatsApp] Could not stop session '${target}' before delete:`, stopErr.message);
+        }
+
         await whatsappService.deleteSession(target);
+        
+        // Also remove from DB
+        await dbService.deleteWhatsAppEntry(target);
+        
         res.json({ success: true });
     } catch (err) {
         console.error("Delete Session Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get Pairing Code (Solution for Single Device)
+router.post('/session/pairing-code', async (req, res) => {
+    try {
+        const { sessionName, phoneNumber } = req.body;
+        
+        if (!sessionName || !phoneNumber) {
+            return res.status(400).json({ error: "Missing sessionName or phoneNumber" });
+        }
+
+        const code = await whatsappService.getPairingCode(sessionName, phoneNumber);
+        res.json({ success: true, code: code });
+    } catch (err) {
+        console.error("Pairing Code Error:", err);
         res.status(500).json({ error: err.message });
     }
 });

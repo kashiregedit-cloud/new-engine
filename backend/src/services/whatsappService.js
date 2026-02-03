@@ -220,6 +220,23 @@ async function getScreenshot(sessionName) {
     }
 }
 
+/**
+ * Get Pairing Code (Link with Phone Number)
+ * @param {string} sessionName 
+ * @param {string} phoneNumber 
+ */
+async function getPairingCode(sessionName, phoneNumber) {
+    try {
+        const response = await apiClient.get(`/api/sessions/${sessionName}/pairing-code`, {
+            params: { phoneNumber: phoneNumber }
+        });
+        return response.data.code;
+    } catch (error) {
+        console.error(`[WhatsApp] Get Pairing Code Error:`, error.message);
+        throw error;
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImage,
@@ -232,5 +249,6 @@ module.exports = {
     deleteSession,
     startSession,
     stopSession,
-    getScreenshot
+    getScreenshot,
+    getPairingCode
 };
