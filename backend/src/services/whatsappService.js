@@ -227,12 +227,21 @@ async function getScreenshot(sessionName) {
  */
 async function getPairingCode(sessionName, phoneNumber) {
     try {
-        const response = await apiClient.get(`/api/sessions/${sessionName}/pairing-code`, {
-            params: { phoneNumber: phoneNumber }
+        // Correct endpoint for NOWEB engine based on documentation
+        // POST /api/{session}/auth/request-code
+        const response = await apiClient.post(`/api/${sessionName}/auth/request-code`, {
+            phoneNumber: phoneNumber,
+            method: "" // Empty method as per instruction
         });
         return response.data.code;
     } catch (error) {
         console.error(`[WhatsApp] Get Pairing Code Error:`, error.message);
+        
+        // If 404, maybe try the previous method as fallback (optional, but sticking to new instruction first)
+        if (error.response && error.response.status === 404) {
+             console.error(`[WhatsApp] 404 Error: Endpoint not found. Ensure session is running and engine supports this.`);
+        }
+        
         throw error;
     }
 }
