@@ -184,40 +184,38 @@ router.post('/session/pairing-code', async (req, res) => {
         console.log(`[WhatsApp] Pairing Code Request for '${sessionName}'. Status: ${session.status}`);
 
         // 2. Handle Status
-        if (session.status === 'WORKING') {
-            console.log(`[WhatsApp] Session '${sessionName}' is WORKING. Logging out to enable pairing...`);
-            try {
-                await whatsappService.logoutSession(sessionName);
-                // Wait for status update
-                await new Promise(r => setTimeout(r, 2000));
-            } catch (logoutErr) {
-                console.warn(`[WhatsApp] Logout failed for '${sessionName}':`, logoutErr.message);
-                // Proceed anyway, maybe it stopped or we can force restart
-            }
+        // Special Handling for 'WORKING' or 'FAILED' sessions to force a fresh start
+        if (session.status === 'WORKING' || session.status === 'FAILED' || session.status === 'STOPPED') {
+            console.log(`[WhatsApp] Session '${sessionName}' is ${session.status}. Resetting for pairing code...`);
             
-            // Re-fetch status
-            allSessions = await whatsappService.getSessions(true);
-            session = allSessions.find(s => s.name === sessionName);
-        }
-
-        if (session && (session.status === 'STOPPED' || session.status === 'FAILED' || session.status === 'WORKING')) {
-            console.log(`[WhatsApp] Session '${sessionName}' is ${session.status}. Restarting for pairing code...`);
             try {
-                // If it's still WORKING (logout failed), we try stop then start
-                if (session.status === 'WORKING') {
-                     await whatsappService.stopSession(sessionName);
-                     await new Promise(r => setTimeout(r, 1000));
+                // 1. Force Logout (Clear Auth Data to fix Connection Failure)
+                try {
+                    await whatsappService.logoutSession(sessionName);
+                    await new Promise(r => setTimeout(r, 2000)); // Wait for logout
+                } catch (logoutErr) {
+                    console.warn(`[WhatsApp] Logout failed (non-fatal):`, logoutErr.message);
+                }
+
+                // 2. Stop Session (Ensure it's fully stopped)
+                try {
+                    await whatsappService.stopSession(sessionName);
+                    await new Promise(r => setTimeout(r, 1000));
+                } catch (stopErr) {
+                    // Ignore if already stopped
                 }
                 
+                // 3. Start Session (Fresh Start)
+                console.log(`[WhatsApp] Starting session '${sessionName}'...`);
                 await whatsappService.startSession(sessionName);
-            } catch (startErr) {
-                console.error(`[WhatsApp] Failed to restart session:`, startErr.message);
-                // Continue to polling, maybe it started anyway
+            } catch (err) {
+                console.error(`[WhatsApp] Reset failed:`, err.message);
+                // Continue to polling, hoping it started
             }
             
             // Poll for SCAN_QR_CODE
             let attempts = 0;
-            const maxAttempts = 20; // Increased to 20 seconds
+            const maxAttempts = 30; // Increased to 30 seconds for full restart
             let ready = false;
 
             while (!ready && attempts < maxAttempts) {
