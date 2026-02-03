@@ -694,10 +694,10 @@ async function checkLockStatus(pageId, senderId) {
 // 14. Get All Active Page IDs (Cache Warmup)
 async function getAllActivePages() {
     // Used for Gatekeeper / Allowed List cache
-    // Strategy: Page must be Active/Trial AND have Message Credits (Page-level or User-level)
+    // Strategy: Page must be Active/Trial AND (Have Credit OR Have Own API)
     const { data: pages, error } = await supabase
         .from('page_access_token_message')
-        .select('page_id, user_id, message_credit, subscription_status')
+        .select('page_id, user_id, message_credit, subscription_status, api_key, cheap_engine')
         .or('subscription_status.eq.active,subscription_status.eq.trial,subscription_status.eq.active_trial,subscription_status.eq.active_paid');
         
     if (error) {
@@ -736,6 +736,17 @@ async function getAllActivePages() {
         // Check Shared Credits (Primary & Only)
         const sharedCredits = userCredits[p.user_id] || 0;
         
+        // Logic:
+        // 1. If Own API Key is present (and cheap_engine is FALSE), allow access (BYPASS Credit Check).
+        // 2. If using System API (cheap_engine is TRUE or api_key is empty), require Credit > 0.
+        
+        const hasOwnKey = p.api_key && p.api_key.length > 5 && p.cheap_engine === false;
+        
+        if (hasOwnKey) {
+            // Own API users are always active if subscription is active
+            return true;
+        }
+        
         // Strict Rule: No page-level credit check.
         if (sharedCredits > 0) return true;
         
@@ -756,6 +767,18 @@ async function markPageTokenInvalid(pageId) {
         .eq('page_id', pageId);
         
     if (error) console.error(`Error marking page ${pageId} invalid:`, error);
+
+    // Insert System Alert into fb_chats
+    await saveFbChat({
+        page_id: pageId,
+        sender_id: pageId, // System is sender
+        recipient_id: pageId, // Self
+        message_id: `sys_err_${Date.now()}`,
+        text: "⚠️ SYSTEM ALERT: Facebook Page Token Expired. Please Reconnect Page in Dashboard.",
+        timestamp: new Date(),
+        status: 'error',
+        reply_by: 'bot'
+    });
 }
 
 // 20. Update WhatsApp Entry (e.g. status, QR code)

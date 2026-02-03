@@ -199,6 +199,13 @@ router.post('/session/delete', async (req, res) => {
         
         // Try to stop session first to avoid "session busy" errors
         try {
+            await whatsappService.logoutSession(target); // Try logout first (Best Practice for WAHA)
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (e) { 
+            // Ignore logout error (might be already logged out)
+        }
+
+        try {
             await whatsappService.stopSession(target);
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for stop
         } catch (stopErr) {

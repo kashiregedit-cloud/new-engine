@@ -60,39 +60,45 @@ const handleWebhook = async (req, res) => {
              if (allowedPagesCache.size === 0) await refreshAllowedPages();
 
              if (!allowedPagesCache.has(pageId)) {
-                 // Double check DB before hard blocking (in case of new signup not in cache yet)
-                 const isActuallyActive = await dbService.getPageConfig(pageId);
-                 const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
-                 
-                 if (isActuallyActive && validStatuses.includes(isActuallyActive.subscription_status)) {
-                     allowedPagesCache.add(pageId); // Add to cache
-                 } else {
-                     console.warn(`[Gatekeeper] BLOCKED unauthorized event for Page ID: ${pageId}`);
+                // Double check DB before hard blocking (in case of new signup not in cache yet)
+                const isActuallyActive = await dbService.getPageConfig(pageId);
+                const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
+                
+                // Strict Check: Status AND (Credit OR Own API)
+                // Note: getPageConfig now returns shared 'message_credit' from user_configs
+                const hasCredit = (isActuallyActive && isActuallyActive.message_credit > 0);
+                const hasOwnKey = (isActuallyActive && isActuallyActive.api_key && isActuallyActive.api_key.length > 5 && isActuallyActive.cheap_engine === false);
+                const isConfigured = (isActuallyActive && validStatuses.includes(isActuallyActive.subscription_status));
+
+                if (isConfigured && (hasCredit || hasOwnKey)) {
+                    allowedPagesCache.add(pageId); // Add to cache
+                } else {
+                    console.warn(`[Gatekeeper] BLOCKED unauthorized event for Page ID: ${pageId}. Status: ${isActuallyActive?.subscription_status}, Credit: ${isActuallyActive?.message_credit}, OwnAPI: ${hasOwnKey}`);
 
                     // --- LOG BLOCK EVENT FOR FRONTEND VISIBILITY ---
                     try {
                         if (body.entry) {
-                            for (const entry of body.entry) {
-                                if (entry.messaging) {
-                                    for (const msg of entry.messaging) {
-                                        if (msg.sender && msg.sender.id) {
-                                            const txt = msg.message?.text || '[Media/Action]';
-                                            // Log to DB so it appears in conversation
-                                            await dbService.saveFbChat({
-                                                page_id: pageId,
-                                                sender_id: msg.sender.id,
-                                                recipient_id: pageId,
-                                                message_id: msg.message?.mid || `blk_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                                                text: `[BLOCKED] ${txt} (Inactive Subscription)`,
-                                                timestamp: new Date(),
-                                                status: 'blocked',
-                                                reply_by: 'user'
-                                            });
-                                        }
-                                    }
+                    for (const entry of body.entry) {
+                        if (entry.messaging) {
+                            for (const msg of entry.messaging) {
+                                if (msg.sender && msg.sender.id) {
+                                    const txt = msg.message?.text || '[Media/Action]';
+                                    // Log to DB so it appears in conversation
+                                    await dbService.saveFbChat({
+                                        page_id: pageId,
+                                        sender_id: msg.sender.id,
+                                        recipient_id: pageId,
+                                        message_id: msg.message?.mid || `blk_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                                        text: `[BLOCKED] ${txt} (Reason: ${isActuallyActive?.subscription_status || 'Unknown'})`,
+                                        timestamp: new Date(),
+                                        status: 'blocked',
+                                        reply_by: 'user'
+                                    });
                                 }
                             }
                         }
+                    }
+                }
                     } catch (e) {
                         console.error('[Gatekeeper] Error logging block:', e);
                     }
