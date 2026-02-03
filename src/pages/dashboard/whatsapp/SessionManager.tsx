@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw, Server, Zap, Smartphone } from "lucide-react";
+import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw, Server, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/config";
 import { supabase } from "@/integrations/supabase/client";
@@ -46,49 +46,8 @@ export default function SessionManager() {
   const [selectedEngine, setSelectedEngine] = useState<"WEBJS" | "NOWEB">("WEBJS");
   const [selectedPlan, setSelectedPlan] = useState("30");
 
-  // Pairing Code States
-  const [pairingMode, setPairingMode] = useState<'qr' | 'code'>('qr');
-  const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
-  const [countryCode, setCountryCode] = useState("+880");
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  
   // Create Session States
-  const [createCountryCode, setCreateCountryCode] = useState("+880");
-  const [createPhoneNumber, setCreatePhoneNumber] = useState("");
-  const [loadingPairingCode, setLoadingPairingCode] = useState(false);
-
-  const handleGetPairingCode = async (sessionName: string) => {
-      if (!pairingPhoneNumber) {
-          toast.error("Please enter a phone number");
-          return;
-      }
-
-      const cleanPhone = pairingPhoneNumber.replace(/^0+/, "");
-      const fullPhone = countryCode.replace("+", "") + cleanPhone;
-      
-      setLoadingPairingCode(true);
-      try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const res = await fetch(`${BACKEND_URL}/whatsapp/session/pairing-code`, {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
-              },
-              body: JSON.stringify({ sessionName, phoneNumber: fullPhone })
-          });
-          
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Failed to get code");
-          
-          setPairingCode(data.code);
-          toast.success("Pairing code generated!");
-      } catch (error: any) {
-          toast.error(error.message);
-      } finally {
-          setLoadingPairingCode(false);
-      }
-  };
+  // const [createCountryCode, setCreateCountryCode] = useState("+880"); // Removed
 
   const fetchBalance = useCallback(async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -122,10 +81,10 @@ export default function SessionManager() {
   useEffect(() => {
     let interval: NodeJS.Timeout;
     // We poll if:
-    // 1. We are in pairing mode 'qr' AND viewing a session
+    // 1. We are viewing a session
     // 2. The QR code is missing OR we just want to keep it fresh
     // 3. The session is NOT working (no need to poll if connected)
-    if (viewingSessionQr && pairingMode === 'qr') {
+    if (viewingSessionQr) {
       const fetchQr = async () => {
           try {
               const res = await fetch(`${BACKEND_URL}/whatsapp/session/qr/${viewingSessionQr}`);
@@ -142,7 +101,7 @@ export default function SessionManager() {
       interval = setInterval(fetchQr, 3000); // Poll every 3s
     }
     return () => clearInterval(interval);
-  }, [viewingSessionQr, pairingMode]);
+  }, [viewingSessionQr]);
 
   // Calculate Price
   const getPrice = () => {
@@ -202,8 +161,7 @@ export default function SessionManager() {
         userEmail: user.email,
         userId: user.id,
         planDays: parseInt(selectedPlan), // Ensure number
-        engine: selectedEngine,
-        phoneNumber: createPhoneNumber ? `${createCountryCode}${createPhoneNumber}` : undefined
+        engine: selectedEngine
       };
 
       console.log("Creating session with payload:", payload);
@@ -234,22 +192,11 @@ export default function SessionManager() {
       fetchBalance(); 
       setShowCreateModal(false);
       setNewSessionName("");
-      setCreatePhoneNumber("");
       
       // Handle QR Code if present
       if (data.qr_code) {
           setQrCodeUrl(data.qr_code);
-      }
-
-      // Handle Pairing Code if present
-      if (data.pairing_code) {
-          setPairingCode(data.pairing_code);
-          setPairingMode('code');
           setViewingSessionQr(finalSessionName);
-          toast.success(`Pairing Code Generated: ${data.pairing_code}`);
-      } else if (data.qr_code) {
-          setViewingSessionQr(finalSessionName);
-          setPairingMode('qr');
       } else {
           fetchQr(finalSessionName);
       }
@@ -266,9 +213,6 @@ export default function SessionManager() {
   const fetchQr = async (sessionName: string, retries = 10) => {
     try {
       setViewingSessionQr(sessionName);
-      setPairingMode('qr'); // Reset to QR default
-      setPairingCode(null);
-      setPairingPhoneNumber("");
       
       const { data } = await supabase
         .from('whatsapp_message_database')
@@ -501,125 +445,18 @@ export default function SessionManager() {
                   </Button>
               </div>
 
-              {/* QR / Pairing Display Area */}
+              {/* QR Display Area */}
               {viewingSessionQr === session.name && session.status !== 'WORKING' && (
                 <div className="mt-3 flex flex-col items-center p-4 rounded-xl bg-white border-2 border-slate-800 shadow-inner animate-in fade-in zoom-in duration-300">
-                    
-                    {/* Toggle */}
-                    <div className="flex w-full mb-4 bg-slate-100 rounded-lg p-1">
-                        <button 
-                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${pairingMode === 'qr' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                            onClick={() => setPairingMode('qr')}
-                        >
-                            Scan QR
-                        </button>
-                        <button 
-                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${pairingMode === 'code' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                            onClick={() => setPairingMode('code')}
-                        >
-                            Phone Number
-                        </button>
-                    </div>
-
-                    {pairingMode === 'qr' ? (
-                        qrCodeUrl ? (
-                            <>
-                                <img src={qrCodeUrl} alt="QR Code" className="w-40 h-40 object-contain mix-blend-multiply" />
-                                <p className="text-[10px] text-slate-500 mt-2 font-medium uppercase tracking-widest">Scan with WhatsApp</p>
-                            </>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-40 w-40">
-                                <Loader2 className="h-8 w-8 text-slate-400 animate-spin" />
-                                <p className="text-xs text-slate-500 mt-2">Loading QR...</p>
-                            </div>
-                        )
+                    {qrCodeUrl ? (
+                        <>
+                            <img src={qrCodeUrl} alt="QR Code" className="w-40 h-40 object-contain mix-blend-multiply" />
+                            <p className="text-[10px] text-slate-500 mt-2 font-medium uppercase tracking-widest">Scan with WhatsApp</p>
+                        </>
                     ) : (
-                        <div className="w-full space-y-3">
-                            {!pairingCode ? (
-                                <>
-                                    <div className="space-y-1">
-                                        <Label className="text-xs text-slate-600">Phone Number</Label>
-                                        <div className="flex gap-2">
-                                            <Select value={countryCode} onValueChange={setCountryCode}>
-                                                <SelectTrigger className="w-[110px] h-8 text-xs bg-slate-50 border-slate-200 text-slate-900">
-                                                    <SelectValue placeholder="Code" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="+880">🇧🇩 +880</SelectItem>
-                                                    <SelectItem value="+1">🇺🇸 +1</SelectItem>
-                                                    <SelectItem value="+44">🇬🇧 +44</SelectItem>
-                                                    <SelectItem value="+91">🇮🇳 +91</SelectItem>
-                                                    <SelectItem value="+966">🇸🇦 +966</SelectItem>
-                                                    <SelectItem value="+971">🇦🇪 +971</SelectItem>
-                                                    <SelectItem value="+60">🇲🇾 +60</SelectItem>
-                                                    <SelectItem value="+65">🇸🇬 +65</SelectItem>
-                                                    <SelectItem value="+61">🇦🇺 +61</SelectItem>
-                                                    <SelectItem value="+39">🇮🇹 +39</SelectItem>
-                                                    <SelectItem value="+33">🇫🇷 +33</SelectItem>
-                                                    <SelectItem value="+49">🇩🇪 +49</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                            <Input 
-                                                placeholder="1700000000" 
-                                                value={pairingPhoneNumber}
-                                                onChange={(e) => setPairingPhoneNumber(e.target.value)}
-                                                className="flex-1 h-8 text-xs bg-slate-50 border-slate-200 text-slate-900"
-                                            />
-                                        </div>
-                                    </div>
-                                    <Button 
-                                        size="sm" 
-                                        className="w-full h-8 text-xs" 
-                                        onClick={() => handleGetPairingCode(session.name)}
-                                        disabled={loadingPairingCode}
-                                    >
-                                        {loadingPairingCode ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Smartphone className="mr-2 h-3 w-3" />}
-                                        Get Pairing Code
-                                    </Button>
-                                </>
-                            ) : (
-                                <div className="flex flex-col items-center text-center space-y-3 animate-in fade-in zoom-in duration-300">
-                                    <div className="bg-green-50 p-3 rounded-lg border border-green-100 w-full">
-                                        <p className="text-xs text-green-800 mb-1 font-semibold">Instructions:</p>
-                                        <ol className="text-[10px] text-green-700 text-left list-decimal pl-4 space-y-0.5">
-                                            <li>Open WhatsApp on your phone</li>
-                                            <li>Go to <b>Settings &gt; Linked Devices</b></li>
-                                            <li>Tap <b>Link a Device</b></li>
-                                            <li>Tap <b>Link with phone number</b></li>
-                                            <li>Enter the code below</li>
-                                        </ol>
-                                    </div>
-
-                                    <div className="w-full">
-                                        <p className="text-xs text-slate-500 mb-1">Pairing Code:</p>
-                                        <div className="relative">
-                                            <div className="text-2xl font-mono font-bold tracking-[0.2em] bg-slate-100 px-4 py-3 rounded-lg border-2 border-slate-200 text-slate-800 select-all text-center">
-                                                {pairingCode}
-                                            </div>
-                                            <Button
-                                                size="icon"
-                                                variant="ghost"
-                                                className="absolute right-1 top-1 h-8 w-8 text-slate-400 hover:text-green-600"
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(pairingCode!);
-                                                    toast.success("Code copied!");
-                                                }}
-                                            >
-                                                <QrCode className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </div>
-
-                                    <Button 
-                                        variant="outline" 
-                                        size="sm" 
-                                        className="h-7 text-[10px] text-slate-400 border-slate-200 hover:bg-slate-50"
-                                        onClick={() => setPairingCode(null)}
-                                    >
-                                        Try different number
-                                    </Button>
-                                </div>
-                            )}
+                        <div className="flex flex-col items-center justify-center h-40 w-40">
+                            <Loader2 className="h-8 w-8 text-slate-400 animate-spin" />
+                            <p className="text-xs text-slate-500 mt-2">Loading QR...</p>
                         </div>
                     )}
                 </div>
@@ -702,33 +539,6 @@ export default function SessionManager() {
                     onChange={(e) => setNewSessionName(e.target.value)}
                     className="h-11 bg-slate-900 border-slate-800 focus:border-green-500 focus:ring-green-500/20 rounded-lg text-white placeholder:text-slate-600"
                 />
-            </div>
-
-            {/* Phone Number (Optional) */}
-            <div className="space-y-2">
-                <Label className="text-base font-semibold text-slate-200">Phone Number (Optional for Pairing Code)</Label>
-                <div className="flex gap-2">
-                     <Select value={createCountryCode} onValueChange={setCreateCountryCode}>
-                        <SelectTrigger className="w-[110px] bg-slate-900 border-slate-800 text-slate-200">
-                            <SelectValue placeholder="Code" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="+880">🇧🇩 +880</SelectItem>
-                            <SelectItem value="+1">🇺🇸 +1</SelectItem>
-                            <SelectItem value="+44">🇬🇧 +44</SelectItem>
-                            <SelectItem value="+91">🇮🇳 +91</SelectItem>
-                            <SelectItem value="+971">🇦🇪 +971</SelectItem>
-                            <SelectItem value="+966">🇸🇦 +966</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Input 
-                        placeholder="1700000000" 
-                        value={createPhoneNumber}
-                        onChange={(e) => setCreatePhoneNumber(e.target.value)}
-                        className="flex-1 bg-slate-900 border-slate-800 focus:border-green-500 focus:ring-green-500/20 rounded-lg text-white placeholder:text-slate-600"
-                    />
-                </div>
-                <p className="text-xs text-slate-500">Enter number to get Pairing Code immediately, or leave empty for QR.</p>
             </div>
 
             {/* Total Price */}
