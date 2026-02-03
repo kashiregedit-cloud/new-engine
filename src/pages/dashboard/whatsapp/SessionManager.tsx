@@ -51,6 +51,10 @@ export default function SessionManager() {
   const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
   const [countryCode, setCountryCode] = useState("+880");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  
+  // Create Session States
+  const [createCountryCode, setCreateCountryCode] = useState("+880");
+  const [createPhoneNumber, setCreatePhoneNumber] = useState("");
   const [loadingPairingCode, setLoadingPairingCode] = useState(false);
 
   const handleGetPairingCode = async (sessionName: string) => {
@@ -198,7 +202,8 @@ export default function SessionManager() {
         userEmail: user.email,
         userId: user.id,
         planDays: parseInt(selectedPlan), // Ensure number
-        engine: selectedEngine
+        engine: selectedEngine,
+        phoneNumber: createPhoneNumber ? `${createCountryCode}${createPhoneNumber}` : undefined
       };
 
       console.log("Creating session with payload:", payload);
@@ -215,7 +220,7 @@ export default function SessionManager() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create session');
       
-      toast.success("Session created! Fetching QR Code...");
+      toast.success("Session created!");
       
       // Auto-connect database
       if (data.wp_db_id) {
@@ -229,10 +234,22 @@ export default function SessionManager() {
       fetchBalance(); 
       setShowCreateModal(false);
       setNewSessionName("");
+      setCreatePhoneNumber("");
       
+      // Handle QR Code if present
       if (data.qr_code) {
           setQrCodeUrl(data.qr_code);
+      }
+
+      // Handle Pairing Code if present
+      if (data.pairing_code) {
+          setPairingCode(data.pairing_code);
+          setPairingMode('code');
           setViewingSessionQr(finalSessionName);
+          toast.success(`Pairing Code Generated: ${data.pairing_code}`);
+      } else if (data.qr_code) {
+          setViewingSessionQr(finalSessionName);
+          setPairingMode('qr');
       } else {
           fetchQr(finalSessionName);
       }
@@ -685,6 +702,33 @@ export default function SessionManager() {
                     onChange={(e) => setNewSessionName(e.target.value)}
                     className="h-11 bg-slate-900 border-slate-800 focus:border-green-500 focus:ring-green-500/20 rounded-lg text-white placeholder:text-slate-600"
                 />
+            </div>
+
+            {/* Phone Number (Optional) */}
+            <div className="space-y-2">
+                <Label className="text-base font-semibold text-slate-200">Phone Number (Optional for Pairing Code)</Label>
+                <div className="flex gap-2">
+                     <Select value={createCountryCode} onValueChange={setCreateCountryCode}>
+                        <SelectTrigger className="w-[110px] bg-slate-900 border-slate-800 text-slate-200">
+                            <SelectValue placeholder="Code" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="+880">🇧🇩 +880</SelectItem>
+                            <SelectItem value="+1">🇺🇸 +1</SelectItem>
+                            <SelectItem value="+44">🇬🇧 +44</SelectItem>
+                            <SelectItem value="+91">🇮🇳 +91</SelectItem>
+                            <SelectItem value="+971">🇦🇪 +971</SelectItem>
+                            <SelectItem value="+966">🇸🇦 +966</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Input 
+                        placeholder="1700000000" 
+                        value={createPhoneNumber}
+                        onChange={(e) => setCreatePhoneNumber(e.target.value)}
+                        className="flex-1 bg-slate-900 border-slate-800 focus:border-green-500 focus:ring-green-500/20 rounded-lg text-white placeholder:text-slate-600"
+                    />
+                </div>
+                <p className="text-xs text-slate-500">Enter number to get Pairing Code immediately, or leave empty for QR.</p>
             </div>
 
             {/* Total Price */}

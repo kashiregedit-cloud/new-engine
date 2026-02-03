@@ -17,8 +17,8 @@ router.get('/sessions', async (req, res) => {
 // Create Session
 router.post('/session/create', async (req, res) => {
     try {
-        const { name, sessionName, config, engine } = req.body;
-        const finalName = name || sessionName;
+        const { name, sessionName, config, engine, phoneNumber } = req.body;
+        const finalName = (sessionName || name || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
         
         const authHeader = req.headers.authorization;
         
@@ -34,10 +34,10 @@ router.post('/session/create', async (req, res) => {
         }
         
         // Construct WAHA Config
-        // User requested specific configuration for n8n and robustness
-        const backendWebhookUrl = `${process.env.BACKEND_URL || 'https://webhook.salesmanchatbot.online'}/whatsapp/webhook`;
-        
-        // Only use the Backend Webhook as requested
+        const backendWebhookUrl = process.env.BACKEND_URL 
+            ? `${process.env.BACKEND_URL}/whatsapp/webhook`
+            : "https://webhook.salesmanchatbot.online/whatsapp/webhook";
+
         const wahaConfig = config || {
             metadata: {},
             debug: false,
@@ -90,7 +90,7 @@ router.post('/session/create', async (req, res) => {
                     if (session.status === 'STOPPED') {
                         console.log(`[WhatsApp] Session '${finalName}' is STOPPED. Starting...`);
                         await whatsappService.startSession(finalName);
-                    } else if (session.status === 'STARTING' || session.status === 'SCAN_QR' || session.status === 'WORKING') {
+                    } else if (session.status === 'STARTING' || session.status === 'SCAN_QR_CODE' || session.status === 'SCAN_QR' || session.status === 'WORKING') {
                         sessionReady = true;
                         console.log(`[WhatsApp] Session '${finalName}' is active/starting.`);
                     } else {
@@ -109,13 +109,59 @@ router.post('/session/create', async (req, res) => {
         }
         
         // 3. Insert into whatsapp_message_database
-        
-        // 2. Insert into whatsapp_message_database
         const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id);
         
-        // 3. Fetch QR Code (Wait a bit for WAHA to initialize)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const qr = await whatsappService.getScreenshot(finalName);
+        let qr = null;
+        let pairingCode = null;
+
+        // 4. Handle Pairing Code or QR
+        if (phoneNumber) {
+            // Format Phone
+            let formattedPhone = phoneNumber.replace(/\D/g, '');
+            if (formattedPhone.startsWith('01')) {
+                formattedPhone = '880' + formattedPhone.substring(1);
+            } else if (formattedPhone.startsWith('1') && formattedPhone.length === 10) {
+                formattedPhone = '880' + formattedPhone;
+            }
+
+            console.log(`[WhatsApp] Auto-Pairing requested for '${finalName}' with phone '${formattedPhone}'`);
+
+            // Wait for SCAN_QR_CODE status specifically
+            let readyForPairing = false;
+            let pairingAttempts = 0;
+            while (!readyForPairing && pairingAttempts < 10) {
+                const sessions = await whatsappService.getSessions(true);
+                const s = sessions.find(s => s.name === finalName);
+                if (s && (s.status === 'SCAN_QR_CODE' || s.status === 'SCAN_QR')) {
+                    readyForPairing = true;
+                } else {
+                    await new Promise(r => setTimeout(r, 1000));
+                    pairingAttempts++;
+                }
+            }
+
+            if (readyForPairing) {
+                try {
+                    pairingCode = await whatsappService.getPairingCode(finalName, formattedPhone);
+                    console.log(`[WhatsApp] Pairing Code Generated: ${pairingCode}`);
+                } catch (e) {
+                    console.error("Auto-Pairing Failed:", e.message);
+                }
+            } else {
+                console.warn(`[WhatsApp] Session '${finalName}' did not reach SCAN_QR_CODE in time for pairing.`);
+            }
+        }
+
+        // ALWAYS fetch QR Code as well (User requested both)
+        try {
+            // If we didn't wait for pairing, wait a bit for initialization
+            if (!phoneNumber) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            qr = await whatsappService.getScreenshot(finalName);
+        } catch (error) {
+            console.warn(`[WhatsApp] Failed to fetch QR code during creation: ${error.message}`);
+        }
 
         // Save QR to DB for frontend polling
         if (qr) {
@@ -129,7 +175,8 @@ router.post('/session/create', async (req, res) => {
             success: true, 
             id: dbEntry.id,
             session_name: finalName,
-            qr_code: qr 
+            qr_code: qr,
+            pairing_code: pairingCode
         });
         
     } catch (err) {
