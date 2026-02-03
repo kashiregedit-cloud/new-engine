@@ -68,6 +68,12 @@ router.post('/session/create', async (req, res) => {
 
         // 1. Create Session in WAHA
         await whatsappService.createSession({ name: finalName, config: wahaConfig });
+        console.log(`[WhatsApp] Session '${finalName}' created in WAHA. Starting session...`);
+
+        // Start Session in WAHA (CRITICAL STEP)
+        // Even if created, it might be in STOPPED state. We must explicitly start it.
+        await whatsappService.startSession(finalName);
+        console.log(`[WhatsApp] Session '${finalName}' started. Waiting for QR code generation...`);
         
         // 2. Insert into whatsapp_message_database
         const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id);
