@@ -37,6 +37,7 @@ router.post('/session/create', async (req, res) => {
         // User requested specific configuration for n8n and robustness
         const backendWebhookUrl = `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`;
         
+        // Combine user's n8n webhook with our backend webhook
         const wahaConfig = config || {
             metadata: {},
             debug: false,
@@ -48,6 +49,16 @@ router.post('/session/create', async (req, res) => {
                 }
             },
             webhooks: [
+                {
+                    url: "https://n8n.salesmanchatbot.online/webhook/webhook",
+                    events: ["message", "session.status"],
+                    retries: {
+                        delaySeconds: 2,
+                        attempts: 15,
+                        policy: "linear"
+                    },
+                    customHeaders: null
+                },
                 {
                     url: backendWebhookUrl,
                     events: ["message", "message.any", "state.change"],
