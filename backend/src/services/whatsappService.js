@@ -252,6 +252,21 @@ async function getScreenshot(sessionName) {
  * @param {string} phoneNumber 
  */
 async function getPairingCode(sessionName, phoneNumber) {
+    // Poll for SCAN_QR status before requesting code (Max 30s)
+    let retries = 20;
+    while (retries > 0) {
+        try {
+            const sessionInfo = await getSession(sessionName);
+            if (sessionInfo && sessionInfo.status === 'SCAN_QR') {
+                break; // Ready!
+            }
+        } catch (e) {
+            // Ignore error during polling
+        }
+        await new Promise(r => setTimeout(r, 1500));
+        retries--;
+    }
+
     try {
         // Correct endpoint for NOWEB engine based on documentation
         // POST /api/{session}/auth/request-code

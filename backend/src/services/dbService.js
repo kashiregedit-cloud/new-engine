@@ -26,19 +26,10 @@ async function getPageConfig(pageId) {
           .single();
       
       if (userData) {
-          // Priority: Shared Credit > Page Credit (Fallback)
-          if ((userData.message_credit || 0) > 0) {
-              data.message_credit = userData.message_credit;
-              data.credit_source = 'shared_user_balance';
-          } else if ((data.message_credit || 0) > 0) {
-              // Fallback to page credit if shared is empty
-              // Keep data.message_credit as is
-              data.credit_source = 'page_balance_fallback';
-          } else {
-              // Both empty
-              data.message_credit = 0;
-              data.credit_source = 'shared_user_balance_empty';
-          }
+          // Priority: Shared Credit ONLY
+          // User instruction: "page er nijesso credit bolte kisu takbe na"
+          data.message_credit = userData.message_credit || 0;
+          data.credit_source = 'shared_user_balance';
       }
   }
   
@@ -173,29 +164,10 @@ async function deductCredit(pageId, currentCredit) {
         console.error("Error in manual user credit deduction:", err);
     }
 
-    // 3. Fallback to Legacy Page-Specific Credit (If RPC not setup and User credit empty/failed)
-    // Restore fallback to ensure pages with individual credits work if shared credit fails
-    try {
-         const { data: pageData } = await supabase
-            .from('page_access_token_message')
-            .select('message_credit')
-            .eq('page_id', pageId)
-            .single();
-            
-         if (pageData && pageData.message_credit > 0) {
-             const { error: updateError } = await supabase
-                .from('page_access_token_message')
-                .update({ message_credit: pageData.message_credit - 1 })
-                .eq('page_id', pageId);
-                
-             if (!updateError) {
-                 console.log(`[Credit] Deducted 1 credit from Page ${pageId} (Legacy/Fallback)`);
-                 return true;
-             }
-         }
-    } catch (e) {
-        console.error("Error in legacy credit deduction:", e);
-    }
+    // 3. Fallback to Legacy Page-Specific Credit
+    // REMOVED STRICTLY as per user instruction: "page er nijesso credit bolte kisu takbe na"
+    // Credits must come ONLY from user_configs (Shared Pool).
+    console.warn(`[Credit] Page ${pageId} has no shared credits (User ${pageData?.user_id}). Legacy page credit is DISABLED.`);
     
     return false;
 }
@@ -761,16 +733,14 @@ async function getAllActivePages() {
              return false;
         }
         
-        // Check Shared Credits (Primary)
+        // Check Shared Credits (Primary & Only)
         const sharedCredits = userCredits[p.user_id] || 0;
         
-        // Check Page-Level Credits (Fallback/Legacy)
-        const pageCredits = p.message_credit || 0;
-
-        if (sharedCredits > 0 || pageCredits > 0) return true;
+        // Strict Rule: No page-level credit check.
+        if (sharedCredits > 0) return true;
         
         // Log skipped page
-        // console.log(`[DB] Page ${p.page_id} skipped (No Credits. Shared: ${sharedCredits}, Page: ${pageCredits})`);
+        // console.log(`[DB] Page ${p.page_id} skipped (No Shared Credits: ${sharedCredits})`);
         return false;
     }).map(p => p.page_id);
 
