@@ -152,6 +152,19 @@ async function getSessions(all = false) {
 }
 
 /**
+ * Get Single Session Info (WAHA)
+ */
+async function getSession(sessionName) {
+    try {
+        const response = await apiClient.get(`/api/sessions/${sessionName}`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Get Session Error:`, error.message);
+        return null;
+    }
+}
+
+/**
  * Create New Session (WAHA)
  */
 async function createSession(payload) {
