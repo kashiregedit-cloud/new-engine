@@ -26,7 +26,7 @@ if (fs.existsSync(frontendPath)) {
     app.use(express.static(frontendPath));
 
     // Catch-all handler for React Router
-    app.get('*', (req, res) => {
+    app.get(/(.*)/, (req, res) => {
         // Skip API routes that might have been missed
         if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path.startsWith('/whatsapp')) {
              return res.status(404).json({ error: 'Not Found' });

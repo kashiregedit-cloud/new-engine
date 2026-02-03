@@ -71,9 +71,9 @@ export default function ProfilePage() {
 
     // WA Sessions
     const { data: waData } = await supabase
-      .from('whatsapp_sessions')
+      .from('whatsapp_message_database')
       .select('session_name, status')
-      .eq('user_email', user.email);
+      .eq('user_id', user.id);
     setAvailableWaSessions(waData || []);
     
     setResourceLoading(false);

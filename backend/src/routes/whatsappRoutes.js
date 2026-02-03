@@ -34,17 +34,36 @@ router.post('/session/create', async (req, res) => {
         }
         
         // Construct WAHA Config
-        // Frontend sends 'engine' and 'planDays' but WAHA needs 'config' object
-        // We construct a basic config here if not provided
+        // User requested specific configuration for n8n and robustness
+        const backendWebhookUrl = `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`;
+        
         const wahaConfig = config || {
             engine: engine || "WEBJS", 
-            // Add default webhooks if needed, pointing to OUR backend
+            metadata: {},
+            debug: false,
+            noweb: {
+                markOnline: true,
+                store: {
+                    enabled: true,
+                    fullSync: false
+                }
+            },
             webhooks: [
                 {
-                    url: `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`,
-                    events: ["message", "message.any", "state.change"]
+                    url: backendWebhookUrl,
+                    events: ["message", "message.any", "state.change"],
+                    retries: {
+                        delaySeconds: 2,
+                        attempts: 15,
+                        policy: "linear"
+                    },
+                    customHeaders: null
                 }
-            ]
+            ],
+            client: {
+                deviceName: "salesmanchatbot.online || wp : +880195687140.",
+                browserName: "IE"
+            }
         };
 
         // 1. Create Session in WAHA
@@ -118,6 +137,10 @@ router.post('/session/restart', async (req, res) => {
     try {
         const { sessionName } = req.body;
         try { await whatsappService.stopSession(sessionName); } catch (e) {}
+        
+        // Wait 2 seconds before starting to ensure cleanup
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
         await whatsappService.startSession(sessionName);
         
         // Wait and fetch QR

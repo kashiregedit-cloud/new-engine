@@ -86,10 +86,18 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       let formattedSessions: WahaSession[] = [];
 
       // 3. Filter by target email from Supabase
+      // Note: We switched to whatsapp_message_database which uses user_id
+      // For now, we assume user_id matches the authenticated user.
+      // TODO: Handle Team View owner_id resolution if needed.
+      
+      let targetUserId = user.id;
+      // If team mode and owner email is different, we would need owner's ID.
+      // For now, let's try to find if we can filter by session_name directly or just use current user.
+      
       const { data: mySessions } = await supabase
-          .from('whatsapp_sessions')
+          .from('whatsapp_message_database')
           .select('session_name')
-          .eq('user_email', targetEmail)
+          .eq('user_id', targetUserId)
           .returns<{ session_name: string | null }[]>();
         
       let allowedNames = mySessions?.map(s => s.session_name) || [];

@@ -164,12 +164,12 @@ export default function SessionManager() {
     }
   };
 
-  const fetchQr = async (sessionName: string, retries = 3) => {
+  const fetchQr = async (sessionName: string, retries = 10) => {
     try {
       setViewingSessionQr(sessionName);
       
       const { data } = await supabase
-        .from('whatsapp_sessions')
+        .from('whatsapp_message_database')
         .select('qr_code')
         .eq('session_name', sessionName)
         .single();
@@ -189,23 +189,26 @@ export default function SessionManager() {
       });
       
       if (res.ok) {
-        const blob = await res.blob();
-        if (blob.size > 0) {
-            setQrCodeUrl(URL.createObjectURL(blob));
+        const data = await res.json();
+        if (data.qr_code) {
+            setQrCodeUrl(data.qr_code);
+        } else {
+             if (retries > 0) {
+                setTimeout(() => fetchQr(sessionName, retries - 1), 3000);
+             }
         }
       } else {
         if (retries > 0) {
-            setTimeout(() => fetchQr(sessionName, retries - 1), 2000);
+            setTimeout(() => fetchQr(sessionName, retries - 1), 3000);
             return;
         }
         toast.error("QR Code not available yet");
       }
     } catch (e) {
-      if (retries > 0) {
-          setTimeout(() => fetchQr(sessionName, retries - 1), 2000);
-          return;
-      }
-      console.error(e);
+        console.error(e);
+        if (retries > 0) {
+            setTimeout(() => fetchQr(sessionName, retries - 1), 3000);
+        }
     }
   };
 

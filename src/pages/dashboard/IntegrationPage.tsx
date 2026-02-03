@@ -138,6 +138,28 @@ export default function IntegrationPage() {
     }
   }, [sessions, qrSession]);
 
+  // Poll for QR code specifically if it's missing in the active dialog
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (qrSession && !qrSession.qr_code && qrSession.status !== 'WORKING') {
+      const fetchQr = async () => {
+          try {
+              const res = await fetch(`${BACKEND_URL}/whatsapp/session/qr/${qrSession.session_name}`);
+              const data = await res.json();
+              if (data.qr_code) {
+                  setQrSession(prev => prev ? { ...prev, qr_code: data.qr_code } : null);
+              }
+          } catch (e) {
+              console.error("Error polling QR:", e);
+          }
+      };
+      
+      fetchQr(); // Initial call
+      interval = setInterval(fetchQr, 3000); // Poll every 3s
+    }
+    return () => clearInterval(interval);
+  }, [qrSession?.session_name, qrSession?.qr_code, qrSession?.status]);
+
   // Poll for updates when QR dialog is open
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -209,10 +231,8 @@ export default function IntegrationPage() {
       };
       setSessions(prev => [newSession, ...prev]);
 
-      // Immediately show QR from response if available, even if DB fetch might fail/delay
-      if (data.qr_code) {
-          setQrSession(newSession);
-      }
+      // Immediately show QR from response if available, or show loader
+      setQrSession(newSession);
 
       fetchSessions();
       fetchBalance(); // Update balance after deduction
