@@ -38,7 +38,6 @@ router.post('/session/create', async (req, res) => {
         const backendWebhookUrl = `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`;
         
         const wahaConfig = config || {
-            engine: engine || "WEBJS", 
             metadata: {},
             debug: false,
             noweb: {
@@ -67,21 +66,48 @@ router.post('/session/create', async (req, res) => {
         };
 
         // 1. Create Session in WAHA
+        console.log(`[WhatsApp] Creating session '${finalName}'...`);
         await whatsappService.createSession({ name: finalName, config: wahaConfig });
-        console.log(`[WhatsApp] Session '${finalName}' created in WAHA. Waiting before start...`);
 
-        // Wait 2 seconds to ensure WAHA registers the session
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 2. Wait for Session to appear and Start it
+        let sessionReady = false;
+        let attempts = 0;
+        const maxAttempts = 20; // 20 seconds timeout
 
-        // Start Session in WAHA (CRITICAL STEP)
-        // Even if created, it might be in STOPPED state. We must explicitly start it.
-        try {
-            await whatsappService.startSession(finalName);
-            console.log(`[WhatsApp] Session '${finalName}' started. Waiting for QR code generation...`);
-        } catch (startError) {
-            console.warn(`[WhatsApp] Start session failed (might be already started or slow):`, startError.message);
-            // Continue anyway, maybe it auto-started?
+        while (!sessionReady && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
+            
+            try {
+                // Check if session exists and its status
+                const allSessions = await whatsappService.getSessions(true);
+                const session = allSessions.find(s => s.name === finalName);
+
+                if (session) {
+                    console.log(`[WhatsApp] Session '${finalName}' found. Status: ${session.status}`);
+                    
+                    if (session.status === 'STOPPED') {
+                        console.log(`[WhatsApp] Session '${finalName}' is STOPPED. Starting...`);
+                        await whatsappService.startSession(finalName);
+                    } else if (session.status === 'STARTING' || session.status === 'SCAN_QR' || session.status === 'WORKING') {
+                        sessionReady = true;
+                        console.log(`[WhatsApp] Session '${finalName}' is active/starting.`);
+                    } else {
+                        console.log(`[WhatsApp] Session '${finalName}' status: ${session.status}. Waiting...`);
+                    }
+                } else {
+                    console.log(`[WhatsApp] Session '${finalName}' not found yet. Attempt ${attempts}/${maxAttempts}`);
+                }
+            } catch (err) {
+                console.warn(`[WhatsApp] Error checking session status: ${err.message}`);
+            }
         }
+
+        if (!sessionReady) {
+            console.warn(`[WhatsApp] Session '${finalName}' creation/start timed out, but proceeding to DB save.`);
+        }
+        
+        // 3. Insert into whatsapp_message_database
         
         // 2. Insert into whatsapp_message_database
         const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id);
