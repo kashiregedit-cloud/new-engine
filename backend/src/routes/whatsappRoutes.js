@@ -185,16 +185,39 @@ router.post('/session/pairing-code', async (req, res) => {
 
         // 2. Handle Status
         if (session.status === 'WORKING') {
-            return res.status(400).json({ error: "Session is already active/working." });
+            console.log(`[WhatsApp] Session '${sessionName}' is WORKING. Logging out to enable pairing...`);
+            try {
+                await whatsappService.logoutSession(sessionName);
+                // Wait for status update
+                await new Promise(r => setTimeout(r, 2000));
+            } catch (logoutErr) {
+                console.warn(`[WhatsApp] Logout failed for '${sessionName}':`, logoutErr.message);
+                // Proceed anyway, maybe it stopped or we can force restart
+            }
+            
+            // Re-fetch status
+            allSessions = await whatsappService.getSessions(true);
+            session = allSessions.find(s => s.name === sessionName);
         }
 
-        if (session.status === 'STOPPED' || session.status === 'FAILED') {
+        if (session && (session.status === 'STOPPED' || session.status === 'FAILED' || session.status === 'WORKING')) {
             console.log(`[WhatsApp] Session '${sessionName}' is ${session.status}. Restarting for pairing code...`);
-            await whatsappService.startSession(sessionName);
+            try {
+                // If it's still WORKING (logout failed), we try stop then start
+                if (session.status === 'WORKING') {
+                     await whatsappService.stopSession(sessionName);
+                     await new Promise(r => setTimeout(r, 1000));
+                }
+                
+                await whatsappService.startSession(sessionName);
+            } catch (startErr) {
+                console.error(`[WhatsApp] Failed to restart session:`, startErr.message);
+                // Continue to polling, maybe it started anyway
+            }
             
             // Poll for SCAN_QR_CODE
             let attempts = 0;
-            const maxAttempts = 15; // 15 seconds
+            const maxAttempts = 20; // Increased to 20 seconds
             let ready = false;
 
             while (!ready && attempts < maxAttempts) {

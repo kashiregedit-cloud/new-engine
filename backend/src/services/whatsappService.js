@@ -204,6 +204,19 @@ async function stopSession(sessionName) {
 }
 
 /**
+ * Logout Session (WAHA)
+ */
+async function logoutSession(sessionName) {
+    try {
+        const response = await apiClient.post(`/api/sessions/${sessionName}/logout`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Logout Session Error:`, error.message);
+        throw error;
+    }
+}
+
+/**
  * Get Session Screenshot (QR)
  */
 async function getScreenshot(sessionName) {
@@ -258,6 +271,7 @@ module.exports = {
     deleteSession,
     startSession,
     stopSession,
+    logoutSession,
     getScreenshot,
     getPairingCode
 };
