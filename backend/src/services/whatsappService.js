@@ -151,6 +151,75 @@ async function getSessions(all = false) {
     }
 }
 
+/**
+ * Create New Session (WAHA)
+ */
+async function createSession(payload) {
+    try {
+        const response = await apiClient.post('/api/sessions', payload);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Create Session Error:`, error.message);
+        throw error;
+    }
+}
+
+/**
+ * Delete Session (WAHA)
+ */
+async function deleteSession(sessionName) {
+    try {
+        const response = await apiClient.delete(`/api/sessions/${sessionName}`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Delete Session Error:`, error.message);
+        throw error;
+    }
+}
+
+/**
+ * Start Session (WAHA)
+ */
+async function startSession(sessionName) {
+    try {
+        const response = await apiClient.post(`/api/sessions/${sessionName}/start`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Start Session Error:`, error.message);
+        throw error;
+    }
+}
+
+/**
+ * Stop Session (WAHA)
+ */
+async function stopSession(sessionName) {
+    try {
+        const response = await apiClient.post(`/api/sessions/${sessionName}/stop`);
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Stop Session Error:`, error.message);
+        throw error;
+    }
+}
+
+/**
+ * Get Session Screenshot (QR)
+ */
+async function getScreenshot(sessionName) {
+    try {
+        const response = await apiClient.get(`/api/screenshot?session=${sessionName}`, {
+            responseType: 'arraybuffer' 
+        });
+        // Convert to base64 data URL
+        const base64 = Buffer.from(response.data, 'binary').toString('base64');
+        return `data:image/png;base64,${base64}`;
+    } catch (error) {
+        console.error(`[WhatsApp] Get Screenshot Error:`, error.message);
+        return null;
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImage,
@@ -158,5 +227,10 @@ module.exports = {
     stopTyping,
     sendSeen,
     getMessages,
-    getSessions
+    getSessions,
+    createSession,
+    deleteSession,
+    startSession,
+    stopSession,
+    getScreenshot
 };

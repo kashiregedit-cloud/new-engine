@@ -121,7 +121,7 @@ export default function SessionManager() {
 
       console.log("Creating session with payload:", payload);
 
-      const res = await fetch(`${BACKEND_URL}/session/create`, {
+      const res = await fetch(`${BACKEND_URL}/whatsapp/session/create`, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
@@ -182,7 +182,7 @@ export default function SessionManager() {
       }
 
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`${BACKEND_URL}/session/qr/${sessionName}?t=${Date.now()}`, {
+      const res = await fetch(`${BACKEND_URL}/whatsapp/session/qr/${sessionName}?t=${Date.now()}`, {
           headers: {
               'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
           }
@@ -229,7 +229,7 @@ export default function SessionManager() {
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch(`${BACKEND_URL}/session/${action}`, {
+      const res = await fetch(`${BACKEND_URL}/whatsapp/session/${action}`, {
         method: action === 'delete' ? 'DELETE' : 'POST',
         headers: { 
             'Content-Type': 'application/json',

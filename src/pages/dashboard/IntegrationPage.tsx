@@ -181,9 +181,9 @@ export default function IntegrationPage() {
         userId: user.id,
         planDays: selectedPlan // Send plan days to backend
       };
-      console.log("Sending payload to /session/create:", payload);
+      console.log("Sending payload to /whatsapp/session/create:", payload);
 
-      const res = await fetch(`${BACKEND_URL}/session/create`, {
+      const res = await fetch(`${BACKEND_URL}/whatsapp/session/create`, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
@@ -287,7 +287,7 @@ export default function IntegrationPage() {
       setSessions(prev => prev.filter(s => s.session_name !== sessionName));
       
       try {
-        await fetch(`${BACKEND_URL}/session/${action}`, {
+        await fetch(`${BACKEND_URL}/whatsapp/session/${action}`, {
           method: 'POST',
           headers: { 
               'Content-Type': 'application/json',
@@ -308,7 +308,7 @@ export default function IntegrationPage() {
          setRestartingId(sessionName);
       }
       
-      const res = await fetch(`${BACKEND_URL}/session/${action}`, {
+      const res = await fetch(`${BACKEND_URL}/whatsapp/session/${action}`, {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',

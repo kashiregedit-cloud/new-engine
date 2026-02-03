@@ -79,7 +79,7 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       }
 
       // 2. Fetch all from WAHA via Backend
-      const res = await fetch(`${BACKEND_URL}/sessions`);
+      const res = await fetch(`${BACKEND_URL}/whatsapp/sessions`);
       const wahaSessions = await res.json();
       const allSessions: WahaSession[] = Array.isArray(wahaSessions) ? wahaSessions : [];
 

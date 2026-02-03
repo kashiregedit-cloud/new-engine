@@ -269,6 +269,249 @@ async function getMessageById(messageId) {
     return fbData ? fbData.text : null;
 }
 
+// 12. Create WhatsApp Entry (whatsapp_message_database)
+async function createWhatsAppEntry(sessionName, userId) {
+    // Check if it already exists
+    const { data: existing } = await supabase
+        .from('whatsapp_message_database')
+        .select('*')
+        .eq('session_name', sessionName)
+        .maybeSingle();
+
+    if (existing) return existing;
+
+    const { data, error } = await supabase
+        .from('whatsapp_message_database')
+        .insert({
+            session_name: sessionName,
+            user_id: userId,
+            active: true
+        })
+        .select()
+        .single();
+
+    if (error) {
+        console.error("Error creating WhatsApp DB entry:", error);
+        throw error;
+    }
+    return data;
+}
+
+// --- WhatsApp Specific Functions ---
+
+// 13. Get WhatsApp Config & Prompts
+async function getWhatsAppConfig(sessionName) {
+    const { data, error } = await supabase
+        .from('whatsapp_message_database')
+        .select('*')
+        .eq('session_name', sessionName)
+        .maybeSingle();
+
+    if (error) {
+        console.error(`Error fetching config for session ${sessionName}:`, error);
+        return null;
+    }
+
+    if (!data) return null;
+
+    // Credit Logic (Shared with User)
+    if (data.user_id) {
+        const { data: userData } = await supabase
+            .from('user_configs')
+            .select('message_credit')
+            .eq('user_id', data.user_id)
+            .single();
+        
+        if (userData) {
+            data.message_credit = userData.message_credit;
+        }
+    }
+    
+    // Default credit if fetch failed (should handle gracefully)
+    if (data.message_credit === undefined) data.message_credit = 0;
+
+    return data;
+}
+
+// 14. Save WhatsApp Chat
+async function saveWhatsAppChat(data) {
+    // data: { session_name, sender_id, recipient_id, message_id, text, timestamp, status, reply_by }
+    const { error } = await supabase
+        .from('whatsapp_chats')
+        .upsert(data, { onConflict: 'message_id' });
+
+    if (error) {
+        console.error("Error saving to whatsapp_chats:", error);
+    }
+}
+
+// 15. Get WhatsApp Chat History
+async function getWhatsAppChatHistory(sessionName, senderId, limit = 20) {
+    const { data, error } = await supabase
+        .from('whatsapp_chats')
+        .select('*')
+        .eq('session_name', sessionName)
+        .or(`sender_id.eq.${senderId},recipient_id.eq.${senderId}`)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error("Error getting whatsapp_chats history:", error);
+        return [];
+    }
+    return data.reverse();
+}
+
+// 16. Check WhatsApp Duplicate
+async function checkWhatsAppDuplicate(messageId) {
+    if (!messageId) return false;
+
+    const { data } = await supabase
+        .from('whatsapp_debounce')
+        .select('id')
+        .eq('message_id', messageId)
+        .maybeSingle();
+
+    if (data) return true;
+
+    await supabase.from('whatsapp_debounce').insert({ message_id: messageId });
+    return false;
+}
+
+// 17. Save WhatsApp Order Tracking
+async function saveWhatsAppOrderTracking(orderData) {
+    const { session_name, sender_id, product_name, number, location, product_quantity, price } = orderData;
+    
+    console.log(`[WA Order] Attempting to save order for ${sender_id}...`);
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    
+    const { data: recentOrders, error: checkError } = await supabase
+        .from('whatsapp_order_tracking')
+        .select('*')
+        .eq('number', number)
+        .gte('created_at', twentyFourHoursAgo)
+        .order('id', { ascending: false });
+
+    if (checkError) console.error("[WA Order] Error checking duplicates:", checkError.message);
+    
+    let existingOrder = null;
+
+    if (recentOrders && recentOrders.length > 0) {
+        const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const currentProd = normalize(product_name);
+        
+        existingOrder = recentOrders.find(o => {
+            const existingProd = normalize(o.product_name);
+            const isMatch = existingProd.includes(currentProd) || currentProd.includes(existingProd);
+            const isPending = !o.status || o.status === 'pending';
+            return isMatch && isPending;
+        });
+    }
+
+    if (existingOrder) {
+        console.log(`[WA Order] Found existing PENDING order (ID: ${existingOrder.id}). Updating...`);
+        
+        const updatePayload = {};
+        if (location && location !== existingOrder.location) updatePayload.location = location;
+        if (product_quantity && product_quantity !== existingOrder.product_quantity) updatePayload.product_quantity = product_quantity;
+        if (price && price !== existingOrder.price) updatePayload.price = price;
+        
+        if (Object.keys(updatePayload).length > 0) {
+            await supabase
+                .from('whatsapp_order_tracking')
+                .update(updatePayload)
+                .eq('id', existingOrder.id);
+        }
+        return null;
+    }
+
+    const { data, error } = await supabase
+        .from('whatsapp_order_tracking')
+        .insert([{
+            session_name,
+            sender_id,
+            product_name,
+            number,
+            location,
+            product_quantity,
+            price
+        }])
+        .select();
+
+    if (error) {
+        console.error("[WA Order] Failed to save order:", error.message);
+        return null;
+    }
+    
+    return data[0];
+}
+
+// 18. Deduct WhatsApp Credit (Shared User Balance)
+async function deductWhatsAppCredit(sessionName, amount = 1) {
+    // 1. Get User ID from Session
+    const { data: sessionData, error: sessionError } = await supabase
+        .from('whatsapp_message_database')
+        .select('user_id')
+        .eq('session_name', sessionName)
+        .single();
+
+    if (sessionError || !sessionData || !sessionData.user_id) {
+        console.error(`[WA Credit] Session ${sessionName} not linked to user or not found.`);
+        return false;
+    }
+
+    const userId = sessionData.user_id;
+
+    // 2. Get User Credit
+    const { data: userConfig, error: userError } = await supabase
+        .from('user_configs')
+        .select('message_credit, email') // Assuming email might be here or we fetch from auth.users (but auth.users not accessible directly usually, relying on user_configs)
+        // actually user_configs might not have email. page_access_token_message had it.
+        // We can skip email logging for now or try to fetch it if stored.
+        .eq('user_id', userId)
+        .single();
+
+    if (userError || !userConfig) {
+        console.error(`[WA Credit] User config not found for ${userId}.`);
+        return false;
+    }
+
+    if (userConfig.message_credit < amount) {
+        console.warn(`[WA Credit] Insufficient credits for User ${userId}. Balance: ${userConfig.message_credit}`);
+        return false;
+    }
+
+    // 3. Deduct
+    const { error: updateError } = await supabase
+        .from('user_configs')
+        .update({ message_credit: userConfig.message_credit - amount })
+        .eq('user_id', userId);
+
+    if (updateError) {
+        console.error(`[WA Credit] Update failed: ${updateError.message}`);
+        return false;
+    }
+
+    console.log(`[WA Credit] Deducted ${amount} credit from User ${userId}`);
+    return true;
+}
+
+// 19. Save WhatsApp Contact (Lead)
+async function saveWhatsAppContact(data) {
+    // data: { session_name, phone_number, name }
+    const { error } = await supabase
+        .from('whatsapp_contacts')
+        .upsert({
+            session_name: data.session_name,
+            phone_number: data.phone_number,
+            name: data.name,
+            last_interaction: new Date().toISOString()
+        }, { onConflict: 'session_name, phone_number' });
+
+    if (error) console.error("Error saving WA contact:", error.message);
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -283,7 +526,15 @@ module.exports = {
     checkN8nDebounce,
     saveFbComment,
     logMessage,
-    getMessageById
+    getMessageById,
+    createWhatsAppEntry,
+    getWhatsAppConfig,
+    saveWhatsAppChat,
+    getWhatsAppChatHistory,
+    checkWhatsAppDuplicate,
+    saveWhatsAppOrderTracking,
+    deductWhatsAppCredit,
+    saveWhatsAppContact
 };
 
 // 11. Save Comment (n8n compatible)

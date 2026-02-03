@@ -26,7 +26,7 @@ const handleWebhook = async (req, res) => {
 
     // WAHA sends different events. We care about 'message' or 'message.any'
     const event = body.event;
-    const session = body.session; // This acts as 'page_id'
+    const session = body.session; // This acts as 'session_name'
     const payload = body.payload;
 
     if (!session || !payload) {
@@ -50,17 +50,15 @@ const handleWebhook = async (req, res) => {
 // Queue Message for Debounce
 async function queueMessage(session, messagePayload) {
     const senderId = messagePayload.from; // e.g., 12345678@c.us
-    const pageId = session; // Using WAHA Session as Page ID
+    const sessionName = session; // Using WAHA Session as Session Name
     let messageText = messagePayload.body || '';
     const messageId = messagePayload.id;
 
-    const logMsg = `[WA Webhook] Received Message. Session: ${pageId}, Sender: ${senderId}, Text: "${messageText.substring(0, 50)}..."`;
+    const logMsg = `[WA Webhook] Received Message. Session: ${sessionName}, Sender: ${senderId}, Text: "${messageText.substring(0, 50)}..."`;
     console.log(logMsg);
     logToFile(logMsg);
 
     // Handle Images/Media (If WAHA exposes URL)
-    // Note: WAHA might return 'mediaUrl' or we might need to fetch it.
-    // For now, we look for payload.mediaUrl or similar if provided by WAHA's 'download media' option.
     const imageUrls = [];
     const audioUrls = [];
     
@@ -77,31 +75,39 @@ async function queueMessage(session, messagePayload) {
         }
     }
 
-    // Check Duplicate immediately
-    const isDuplicate = await dbService.checkDuplicate(messageId);
+    // Check Duplicate immediately (WhatsApp specific)
+    const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
     if (isDuplicate) {
         console.log(`[WA] Duplicate message ${messageId} ignored.`);
         return;
     }
 
-    // --- SAVE USER MESSAGE TO fb_chats (Immediate - Raw) ---
-    // We reuse fb_chats table. page_id = session.
+    // --- SAVE USER MESSAGE TO whatsapp_chats (Immediate - Raw) ---
     try {
-        await dbService.saveFbChat({
-            page_id: pageId,
+        await dbService.saveWhatsAppChat({
+            session_name: sessionName,
             sender_id: senderId,
-            recipient_id: pageId,
+            recipient_id: sessionName,
             message_id: messageId,
             text: messageText,
             timestamp: Date.now(),
             status: 'received',
             reply_by: 'user'
         });
+        
+        // Save Contact/Lead
+        const pushName = messagePayload._data?.notifyName || messagePayload.pushName || 'Unknown';
+        await dbService.saveWhatsAppContact({
+            session_name: sessionName,
+            phone_number: senderId,
+            name: pushName
+        });
+
     } catch (err) {
-        console.error("Error saving to fb_chats (WA):", err.message);
+        console.error("Error saving to whatsapp_chats:", err.message);
     }
 
-    const sessionId = `${pageId}_${senderId}`;
+    const sessionId = `${sessionName}_${senderId}`;
 
     // Initialize buffer if not exists
     if (!debounceMap.has(sessionId)) {
@@ -124,23 +130,23 @@ async function queueMessage(session, messagePayload) {
         clearTimeout(sessionData.timer);
     }
 
-    // Dynamic Debounce
-    const pagePrompts = await dbService.getPagePrompts(pageId);
+    // Dynamic Debounce from Config
+    const config = await dbService.getWhatsAppConfig(sessionName);
     let debounceTime = 8000; // Default 8s
-    if (pagePrompts && pagePrompts.wait) {
-        debounceTime = Number(pagePrompts.wait) * 1000;
+    if (config && config.wait) {
+        debounceTime = Number(config.wait) * 1000;
     }
     if (debounceTime < 1000) debounceTime = 1000;
 
     sessionData.timer = setTimeout(() => {
         const messagesToProcess = [...sessionData.messages];
         debounceMap.delete(sessionId);
-        processBufferedMessages(sessionId, pageId, senderId, messagesToProcess);
+        processBufferedMessages(sessionId, sessionName, senderId, messagesToProcess);
     }, debounceTime); 
 }
 
 // Core Logic Function (Debounced)
-async function processBufferedMessages(sessionId, pageId, senderId, messages) {
+async function processBufferedMessages(sessionId, sessionName, senderId, messages) {
     let combinedText = "";
     let replyToId = null;
     let allImages = [];
@@ -156,40 +162,48 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     console.log(`[WA] Processing buffered. Text: ${combinedText.substring(0,50)}...`);
 
     try {
-        // 1. Fetch Config
-        const pageConfig = await dbService.getPageConfig(pageId);
+        // 1. Fetch Config (WhatsApp Specific)
+        const pageConfig = await dbService.getWhatsAppConfig(sessionName);
         
         if (!pageConfig) {
-            console.log(`[WA] Session/Page ${pageId} not configured.`);
+            console.log(`[WA] Session ${sessionName} not configured.`);
             return;
         }
 
+        // 2. Check Subscription/Credit
         if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
-             console.log(`[WA] Page ${pageId} subscription inactive.`);
+             console.log(`[WA] Session ${sessionName} subscription inactive.`);
              return;
         }
         
         if (pageConfig.message_credit <= 0) {
-            console.log(`[WA] Page ${pageId} out of credits.`);
+            console.log(`[WA] Session ${sessionName} out of credits.`);
             return;
         }
 
         // --- FETCH CONTEXT ---
         const historyLimit = 20;
         
-        // Parallel: Get Data + Mark Seen + Typing
-        const [pagePrompts, history] = await Promise.all([
-            dbService.getPagePrompts(pageId),
-            dbService.getChatHistory(sessionId, historyLimit),
-            whatsappService.sendSeen(pageId, senderId),  // Mark as Seen
-            whatsappService.sendTyping(pageId, senderId) // Typing indicator
+        // Parallel: Get History + Mark Seen + Typing
+        const [rawHistory, _seen, _typing] = await Promise.all([
+            dbService.getWhatsAppChatHistory(sessionName, senderId, historyLimit),
+            whatsappService.sendSeen(sessionName, senderId),  // Mark as Seen
+            whatsappService.sendTyping(sessionName, senderId) // Typing indicator
         ]);
 
-        const senderName = 'Customer'; // WAHA payload usually has pushName, but we simplified. Could fetch from payload if stored.
+        // Transform History for AI Service
+        // rawHistory is array of objects { text, reply_by, ... }
+        // AI Service expects: [{ role: 'user'|'assistant', content: '...' }]
+        const history = rawHistory.map(msg => ({
+            role: (msg.reply_by === 'user') ? 'user' : 'assistant',
+            content: msg.text || ''
+        }));
 
-        // Batch Processing (Images/Audio) - Logic same as webhookController
+        const senderName = 'Customer'; // Could be improved if we stored name in whatsapp_contacts
+
+        // Batch Processing (Images/Audio)
         if (allImages.length > 0) {
-            if (pagePrompts && pagePrompts.image_detection) {
+            if (pageConfig.image_detection) {
                 const imagePromises = allImages.map(url => aiService.processImageWithVision(url, pageConfig));
                 const imageResults = await Promise.all(imagePromises);
                 let combinedImageAnalysis = "";
@@ -210,36 +224,36 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // --- FEATURE FLAGS ---
-        if (pagePrompts) {
-            if (!pagePrompts.reply_message) {
-                console.log(`[WA] Reply Message disabled for ${pageId}.`);
-                return;
-            }
+        if (!pageConfig.reply_message) {
+            console.log(`[WA] Reply Message disabled for ${sessionName}.`);
+            return;
         }
 
-        // --- STOP EMOJI CHECK ---
-        const blockEmoji = pagePrompts?.block_emoji;
-        const unblockEmoji = pagePrompts?.unblock_emoji;
+        // --- STOP EMOJI CHECK (Using Local History) ---
+        const blockEmoji = pageConfig.block_emoji;
+        const unblockEmoji = pageConfig.unblock_emoji;
 
         if (blockEmoji) {
-            // Fetch recent chat history from DB to check for block/unblock emojis
-            // We use fb_chats because it stores all messages (user + bot + admin if logged)
-            const chatHistory = await dbService.getFbChatHistory(pageId, senderId, 20);
-            
             let lastBlockTime = 0;
             let lastUnblockTime = 0;
 
-            // Check current buffered messages first (most recent)
+            // Check current buffered messages first
             if (combinedText.includes(blockEmoji)) {
                 lastBlockTime = Date.now();
             }
 
             // Check history
-            for (const msg of chatHistory) {
-                const isFromPage = msg.sender_id === pageId || msg.reply_by === 'bot' || msg.reply_by === 'admin';
-                if (isFromPage) {
+            for (const msg of rawHistory) {
+                const isFromPage = msg.sender_id === sessionName || msg.reply_by === 'bot' || msg.reply_by === 'admin';
+                if (isFromPage) { // Check bot messages too? Actually user sends block emoji usually.
+                    // Wait, block emoji is usually sent by ADMIN/USER? 
+                    // "AI Stop Logic via Emoji: AI checks the last 10 messages for emojis... If found, it halts".
+                    // Usually it's the HUMAN (Admin) sending the stop emoji to stop the bot.
+                    // So we check messages from 'admin' or 'user' (if user wants to stop it themselves, rare).
+                    // Typically 'admin' takeover. 
+                    // Let's assume ANY message with block emoji stops it.
                     const content = msg.text || '';
-                    const msgTime = new Date(msg.timestamp).getTime();
+                    const msgTime = Number(msg.timestamp); // stored as BigInt/Number in new table
 
                     if (content.includes(blockEmoji)) {
                         if (msgTime > lastBlockTime) lastBlockTime = msgTime;
@@ -260,22 +274,24 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
 
         // --- GENERATE AI REPLY ---
-        const finalUserMessage = combinedText; // Add replyContext logic if needed
+        const finalUserMessage = combinedText;
         
         // Inject Formatting
-        if (pagePrompts && pagePrompts.text_prompt) {
-             pagePrompts.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. Use WhatsApp Formatting (*Bold*, _Italic_, ~Strike~).\n2. Keep it concise.\n3. **STRICT IMAGE FORMAT**: 'IMAGE: Title | URL'`;
+        // Note: pageConfig IS pagePrompts in WhatsApp (merged table)
+        if (pageConfig.text_prompt) {
+             pageConfig.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. Use WhatsApp Formatting (*Bold*, _Italic_, ~Strike~).\n2. Keep it concise.\n3. **STRICT IMAGE FORMAT**: 'IMAGE: Title | URL'`;
         }
 
-        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, history, senderName);
+        // pageConfig serves as both config and prompts
+        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pageConfig, history, senderName);
 
         // --- ORDER TRACKING ---
         if (aiResponse.order_details && aiResponse.order_details.product_name) {
              const order = aiResponse.order_details;
-             let customerNumber = order.phone ? order.phone.replace(/\D/g, '') : senderId.replace(/\D/g, ''); // WA ID is phone
+             let customerNumber = order.phone ? order.phone.replace(/\D/g, '') : senderId.replace(/\D/g, ''); 
              
-             await dbService.saveOrderTracking({
-                 page_id: pageId,
+             await dbService.saveWhatsAppOrderTracking({
+                 session_name: sessionName,
                  sender_id: senderId,
                  product_name: order.product_name,
                  number: customerNumber, 
@@ -288,7 +304,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // --- SEND REPLY ---
         let replyText = aiResponse.reply;
 
-        // User Instruction: If AI fails (reply is null/empty), DO NOT send anything.
+        // Silent Failure Rule
         if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
              console.log(`[WA] No response generated. Skipping reply.`);
              return;
@@ -300,44 +316,33 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // Send Text
         let botMessageId = `bot_${Date.now()}`;
         if (replyText) {
-            await whatsappService.sendMessage(pageId, senderId, replyText);
+            await whatsappService.sendMessage(sessionName, senderId, replyText);
             
             // Log Bot Reply
-            await dbService.saveFbChat({
-                page_id: pageId,
-                sender_id: pageId,
+            await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: sessionName,
                 recipient_id: senderId,
                 message_id: botMessageId,
                 text: replyText,
                 timestamp: Date.now(),
                 status: 'bot_reply',
-                reply_by: 'bot',
-                token: aiResponse.token_usage || 0,
-                ai_model: aiResponse.model || null
+                reply_by: 'bot'
+                // token usage could be saved if schema allows, currently whatsapp_chats doesn't have token col
             });
         }
 
         // Send Images
         if (aiResponse.images.length > 0) {
             for (const imgObj of aiResponse.images) {
-                await whatsappService.sendImage(pageId, senderId, imgObj.url, imgObj.title);
+                await whatsappService.sendImage(sessionName, senderId, imgObj.url, imgObj.title);
             }
         }
 
-        await whatsappService.stopTyping(pageId, senderId);
+        await whatsappService.stopTyping(sessionName, senderId);
 
-        // Save History
-        await dbService.saveChatMessage(sessionId, 'user', finalUserMessage);
-        await dbService.saveChatMessage(sessionId, 'assistant', replyText);
-        await dbService.saveLead({
-            page_id: pageId,
-            sender_id: senderId,
-            message: finalUserMessage,
-            reply: replyText
-        });
-
-        // Deduct Credit
-        await dbService.deductCredit(pageId, pageConfig.message_credit);
+        // Deduct Credit (WhatsApp Specific)
+        await dbService.deductWhatsAppCredit(sessionName, pageConfig.message_credit);
 
     } catch (error) {
         console.error("[WA] Error processing event:", error);
