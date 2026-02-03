@@ -94,6 +94,41 @@ export default function SessionManager() {
     fetchBalance();
   }, [fetchBalance]);
 
+  // Poll for updates when QR dialog is open
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (viewingSessionQr) {
+      interval = setInterval(refreshSessions, 3000); // Poll every 3s
+    }
+    return () => clearInterval(interval);
+  }, [viewingSessionQr, refreshSessions]);
+
+  // Poll for QR code specifically if it's missing in the active dialog
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    // We poll if:
+    // 1. We are in pairing mode 'qr' AND viewing a session
+    // 2. The QR code is missing OR we just want to keep it fresh
+    // 3. The session is NOT working (no need to poll if connected)
+    if (viewingSessionQr && pairingMode === 'qr') {
+      const fetchQr = async () => {
+          try {
+              const res = await fetch(`${BACKEND_URL}/whatsapp/session/qr/${viewingSessionQr}`);
+              const data = await res.json();
+              if (data.qr_code) {
+                  setQrCodeUrl(data.qr_code);
+              }
+          } catch (e) {
+              console.error("Error polling QR:", e);
+          }
+      };
+      
+      fetchQr(); // Initial call
+      interval = setInterval(fetchQr, 3000); // Poll every 3s
+    }
+    return () => clearInterval(interval);
+  }, [viewingSessionQr, pairingMode]);
+
   // Calculate Price
   const getPrice = () => {
     // Determine price based on selected engine and plan
