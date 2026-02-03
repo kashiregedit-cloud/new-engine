@@ -61,7 +61,7 @@ router.post('/session/create', async (req, res) => {
                 }
             ],
             client: {
-                deviceName: "salesmanchatbot.online || wp : +880195687140.",
+                deviceName: "salesmanchatbot.online || wp : +8801956871403.",
                 browserName: "Chrome"
             }
         };
