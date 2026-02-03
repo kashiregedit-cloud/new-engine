@@ -61,8 +61,8 @@ router.post('/session/create', async (req, res) => {
                 }
             ],
             client: {
-                deviceName: "salesmanchatbot.online || wp : +880195687140.",
-                browserName: "IE"
+                deviceName: "Salesman Bot",
+                browserName: "Chrome"
             }
         };
 
@@ -192,7 +192,7 @@ router.post('/session/create', async (req, res) => {
 });
 
 // Delete Session
-router.post('/session/delete', async (req, res) => {
+router.delete('/session/delete', async (req, res) => {
     try {
         const { sessionName, name } = req.body; // Support both
         const target = sessionName || name;
