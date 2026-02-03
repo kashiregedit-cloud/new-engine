@@ -173,11 +173,62 @@ router.post('/session/pairing-code', async (req, res) => {
             return res.status(400).json({ error: "Missing sessionName or phoneNumber" });
         }
 
+        // 1. Check Session Status
+        let allSessions = await whatsappService.getSessions(true);
+        let session = allSessions.find(s => s.name === sessionName);
+
+        if (!session) {
+            return res.status(404).json({ error: `Session '${sessionName}' not found.` });
+        }
+
+        console.log(`[WhatsApp] Pairing Code Request for '${sessionName}'. Status: ${session.status}`);
+
+        // 2. Handle Status
+        if (session.status === 'WORKING') {
+            return res.status(400).json({ error: "Session is already active/working." });
+        }
+
+        if (session.status === 'STOPPED' || session.status === 'FAILED') {
+            console.log(`[WhatsApp] Session '${sessionName}' is ${session.status}. Restarting for pairing code...`);
+            await whatsappService.startSession(sessionName);
+            
+            // Poll for SCAN_QR_CODE
+            let attempts = 0;
+            const maxAttempts = 15; // 15 seconds
+            let ready = false;
+
+            while (!ready && attempts < maxAttempts) {
+                await new Promise(r => setTimeout(r, 1000));
+                allSessions = await whatsappService.getSessions(true);
+                session = allSessions.find(s => s.name === sessionName);
+                
+                if (session && (session.status === 'SCAN_QR_CODE' || session.status === 'SCAN_QR')) {
+                    ready = true;
+                }
+                attempts++;
+            }
+
+            if (!ready) {
+                return res.status(500).json({ error: "Session failed to enter SCAN_QR_CODE mode. Please try again." });
+            }
+        }
+
+        // 3. Request Code
+        // Add a small delay to ensure WAHA is fully ready to accept auth code request
+        await new Promise(r => setTimeout(r, 2000));
+
         const code = await whatsappService.getPairingCode(sessionName, phoneNumber);
         res.json({ success: true, code: code });
     } catch (err) {
         console.error("Pairing Code Error:", err);
-        res.status(500).json({ error: err.message });
+        
+        // Enhance error message for user
+        let msg = err.message;
+        if (err.response && err.response.data && err.response.data.message) {
+            msg = err.response.data.message;
+        }
+        
+        res.status(500).json({ error: msg });
     }
 });
 
