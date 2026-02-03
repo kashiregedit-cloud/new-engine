@@ -512,30 +512,7 @@ async function saveWhatsAppContact(data) {
     if (error) console.error("Error saving WA contact:", error.message);
 }
 
-module.exports = {
-    supabase,
-    getPageConfig,
-    getPagePrompts,
-    saveLead,
-    checkDuplicate,
-    deductCredit,
-    getChatHistory,
-    saveChatMessage,
-    saveFbChat,
-    getFbChatHistory,
-    checkN8nDebounce,
-    saveFbComment,
-    logMessage,
-    getMessageById,
-    createWhatsAppEntry,
-    getWhatsAppConfig,
-    saveWhatsAppChat,
-    getWhatsAppChatHistory,
-    checkWhatsAppDuplicate,
-    saveWhatsAppOrderTracking,
-    deductWhatsAppCredit,
-    saveWhatsAppContact
-};
+
 
 // 11. Save Comment (n8n compatible)
 async function saveFbComment(data) {
@@ -781,5 +758,13 @@ module.exports = {
     saveOrderTracking,
     checkLockStatus,
     getAllActivePages,
-    markPageTokenInvalid
+    markPageTokenInvalid,
+    createWhatsAppEntry,
+    getWhatsAppConfig,
+    saveWhatsAppChat,
+    getWhatsAppChatHistory,
+    checkWhatsAppDuplicate,
+    saveWhatsAppOrderTracking,
+    deductWhatsAppCredit,
+    saveWhatsAppContact
 };
