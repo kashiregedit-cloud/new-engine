@@ -19,6 +19,13 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function SessionManager() {
   const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();
@@ -42,6 +49,7 @@ export default function SessionManager() {
   // Pairing Code States
   const [pairingMode, setPairingMode] = useState<'qr' | 'code'>('qr');
   const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
+  const [countryCode, setCountryCode] = useState("+880");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [loadingPairingCode, setLoadingPairingCode] = useState(false);
 
@@ -50,6 +58,9 @@ export default function SessionManager() {
           toast.error("Please enter a phone number");
           return;
       }
+
+      const cleanPhone = pairingPhoneNumber.replace(/^0+/, "");
+      const fullPhone = countryCode.replace("+", "") + cleanPhone;
       
       setLoadingPairingCode(true);
       try {
@@ -60,7 +71,7 @@ export default function SessionManager() {
                   'Content-Type': 'application/json',
                   'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
               },
-              body: JSON.stringify({ sessionName, phoneNumber: pairingPhoneNumber })
+              body: JSON.stringify({ sessionName, phoneNumber: fullPhone })
           });
           
           const data = await res.json();
@@ -511,12 +522,33 @@ export default function SessionManager() {
                                 <>
                                     <div className="space-y-1">
                                         <Label className="text-xs text-slate-600">Phone Number</Label>
-                                        <Input 
-                                            placeholder="+8801700000000" 
-                                            value={pairingPhoneNumber}
-                                            onChange={(e) => setPairingPhoneNumber(e.target.value)}
-                                            className="h-8 text-xs bg-slate-50 border-slate-200 text-slate-900"
-                                        />
+                                        <div className="flex gap-2">
+                                            <Select value={countryCode} onValueChange={setCountryCode}>
+                                                <SelectTrigger className="w-[110px] h-8 text-xs bg-slate-50 border-slate-200 text-slate-900">
+                                                    <SelectValue placeholder="Code" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="+880">🇧🇩 +880</SelectItem>
+                                                    <SelectItem value="+1">🇺🇸 +1</SelectItem>
+                                                    <SelectItem value="+44">🇬🇧 +44</SelectItem>
+                                                    <SelectItem value="+91">🇮🇳 +91</SelectItem>
+                                                    <SelectItem value="+966">🇸🇦 +966</SelectItem>
+                                                    <SelectItem value="+971">🇦🇪 +971</SelectItem>
+                                                    <SelectItem value="+60">🇲🇾 +60</SelectItem>
+                                                    <SelectItem value="+65">🇸🇬 +65</SelectItem>
+                                                    <SelectItem value="+61">🇦🇺 +61</SelectItem>
+                                                    <SelectItem value="+39">🇮🇹 +39</SelectItem>
+                                                    <SelectItem value="+33">🇫🇷 +33</SelectItem>
+                                                    <SelectItem value="+49">🇩🇪 +49</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <Input 
+                                                placeholder="1700000000" 
+                                                value={pairingPhoneNumber}
+                                                onChange={(e) => setPairingPhoneNumber(e.target.value)}
+                                                className="flex-1 h-8 text-xs bg-slate-50 border-slate-200 text-slate-900"
+                                            />
+                                        </div>
                                     </div>
                                     <Button 
                                         size="sm" 
@@ -529,15 +561,42 @@ export default function SessionManager() {
                                     </Button>
                                 </>
                             ) : (
-                                <div className="flex flex-col items-center text-center">
-                                    <p className="text-xs text-slate-500 mb-2">Enter this code on your phone:</p>
-                                    <div className="text-2xl font-mono font-bold tracking-widest bg-slate-100 px-4 py-2 rounded border border-slate-200 text-slate-800 select-all">
-                                        {pairingCode}
+                                <div className="flex flex-col items-center text-center space-y-3 animate-in fade-in zoom-in duration-300">
+                                    <div className="bg-green-50 p-3 rounded-lg border border-green-100 w-full">
+                                        <p className="text-xs text-green-800 mb-1 font-semibold">Instructions:</p>
+                                        <ol className="text-[10px] text-green-700 text-left list-decimal pl-4 space-y-0.5">
+                                            <li>Open WhatsApp on your phone</li>
+                                            <li>Go to <b>Settings &gt; Linked Devices</b></li>
+                                            <li>Tap <b>Link a Device</b></li>
+                                            <li>Tap <b>Link with phone number</b></li>
+                                            <li>Enter the code below</li>
+                                        </ol>
                                     </div>
+
+                                    <div className="w-full">
+                                        <p className="text-xs text-slate-500 mb-1">Pairing Code:</p>
+                                        <div className="relative">
+                                            <div className="text-2xl font-mono font-bold tracking-[0.2em] bg-slate-100 px-4 py-3 rounded-lg border-2 border-slate-200 text-slate-800 select-all text-center">
+                                                {pairingCode}
+                                            </div>
+                                            <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="absolute right-1 top-1 h-8 w-8 text-slate-400 hover:text-green-600"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(pairingCode!);
+                                                    toast.success("Code copied!");
+                                                }}
+                                            >
+                                                <QrCode className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </div>
+
                                     <Button 
-                                        variant="ghost" 
+                                        variant="outline" 
                                         size="sm" 
-                                        className="mt-2 h-6 text-[10px] text-slate-400"
+                                        className="h-7 text-[10px] text-slate-400 border-slate-200 hover:bg-slate-50"
                                         onClick={() => setPairingCode(null)}
                                     >
                                         Try different number

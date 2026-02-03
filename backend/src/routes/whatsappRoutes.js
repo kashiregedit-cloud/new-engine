@@ -173,6 +173,16 @@ router.post('/session/pairing-code', async (req, res) => {
             return res.status(400).json({ error: "Missing sessionName or phoneNumber" });
         }
 
+        // Format Phone Number (Auto-fix for BD)
+        let formattedPhone = phoneNumber.replace(/\D/g, '');
+        if (formattedPhone.startsWith('01')) {
+            formattedPhone = '880' + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith('1') && formattedPhone.length === 10) {
+            formattedPhone = '880' + formattedPhone;
+        }
+        
+        console.log(`[WhatsApp] Pairing Code Request for '${sessionName}' with phone '${formattedPhone}'`);
+
         // 1. Check Session Status
         let allSessions = await whatsappService.getSessions(true);
         let session = allSessions.find(s => s.name === sessionName);
@@ -238,7 +248,7 @@ router.post('/session/pairing-code', async (req, res) => {
         // Add a small delay to ensure WAHA is fully ready to accept auth code request
         await new Promise(r => setTimeout(r, 2000));
 
-        const code = await whatsappService.getPairingCode(sessionName, phoneNumber);
+        const code = await whatsappService.getPairingCode(sessionName, formattedPhone);
         res.json({ success: true, code: code });
     } catch (err) {
         console.error("Pairing Code Error:", err);
