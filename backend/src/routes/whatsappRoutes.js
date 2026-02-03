@@ -53,10 +53,24 @@ router.post('/session/create', async (req, res) => {
         // 2. Insert into whatsapp_message_database
         const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id);
         
-        // 3. Fetch QR Code (optional, but good to trigger)
-        // const qr = await whatsappService.getScreenshot(finalName);
+        // 3. Fetch QR Code (Wait a bit for WAHA to initialize)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const qr = await whatsappService.getScreenshot(finalName);
 
-        res.json({ success: true, wp_db_id: dbEntry.id, qr_code: null });
+        // Save QR to DB for frontend polling
+        if (qr) {
+             await dbService.updateWhatsAppEntry(dbEntry.id, { 
+                 qr_code: qr,
+                 status: 'scanned' 
+             });
+        }
+
+        res.json({ 
+            success: true, 
+            id: dbEntry.id,
+            session_name: finalName,
+            qr_code: qr 
+        });
         
     } catch (err) {
         console.error("Create Session Error:", err);
@@ -105,7 +119,19 @@ router.post('/session/restart', async (req, res) => {
         const { sessionName } = req.body;
         try { await whatsappService.stopSession(sessionName); } catch (e) {}
         await whatsappService.startSession(sessionName);
-        res.json({ success: true });
+        
+        // Wait and fetch QR
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const qr = await whatsappService.getScreenshot(sessionName);
+
+        if (qr) {
+             await dbService.updateWhatsAppEntryByName(sessionName, { 
+                 qr_code: qr,
+                 status: 'scanned' 
+             });
+        }
+
+        res.json({ success: true, qr_code: qr });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

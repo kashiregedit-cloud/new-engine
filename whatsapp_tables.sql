@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_message_database (
     session_name TEXT NOT NULL UNIQUE, -- Acts as page_id
     user_id UUID REFERENCES auth.users(id),
     active BOOLEAN DEFAULT TRUE,
+    status TEXT DEFAULT 'created', -- 'created', 'scanned', 'WORKING', 'STOPPED'
+    qr_code TEXT, -- Base64 QR Code string
     text_prompt TEXT,
     image_prompt TEXT,
     wait INTEGER DEFAULT 8, -- Debounce wait time in seconds

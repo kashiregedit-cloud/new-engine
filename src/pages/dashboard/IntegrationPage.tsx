@@ -102,9 +102,9 @@ export default function IntegrationPage() {
        
        // Relaxed query: match user_id OR user_email (if user_id is missing/null in DB)
        const { data, error } = await supabase
-         .from('whatsapp_sessions')
+         .from('whatsapp_message_database')
          .select('*')
-         .or(`user_id.eq.${user.id},user_email.eq.${user.email}`)
+         .eq('user_id', user.id)
          .order('created_at', { ascending: false });
 
        if (error) throw error;

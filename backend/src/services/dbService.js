@@ -285,7 +285,11 @@ async function createWhatsAppEntry(sessionName, userId) {
         .insert({
             session_name: sessionName,
             user_id: userId,
-            active: true
+            active: true,
+            status: 'created',
+            reply_message: true,           // Auto-enable bot
+            subscription_status: 'active', // Auto-activate subscription
+            text_prompt: "You are a helpful assistant for this store. Reply in a friendly manner." // Default prompt
         })
         .select()
         .single();
@@ -740,6 +744,26 @@ async function markPageTokenInvalid(pageId) {
     if (error) console.error(`Error marking page ${pageId} invalid:`, error);
 }
 
+// 20. Update WhatsApp Entry (e.g. status, QR code)
+async function updateWhatsAppEntry(id, updates) {
+    const { error } = await supabase
+        .from('whatsapp_message_database')
+        .update(updates)
+        .eq('id', id);
+
+    if (error) console.error("Error updating WhatsApp entry:", error.message);
+}
+
+// 21. Update WhatsApp Entry By Name
+async function updateWhatsAppEntryByName(sessionName, updates) {
+    const { error } = await supabase
+        .from('whatsapp_message_database')
+        .update(updates)
+        .eq('session_name', sessionName);
+
+    if (error) console.error("Error updating WhatsApp entry by name:", error.message);
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -766,5 +790,7 @@ module.exports = {
     checkWhatsAppDuplicate,
     saveWhatsAppOrderTracking,
     deductWhatsAppCredit,
-    saveWhatsAppContact
+    saveWhatsAppContact,
+    updateWhatsAppEntry,
+    updateWhatsAppEntryByName
 };
