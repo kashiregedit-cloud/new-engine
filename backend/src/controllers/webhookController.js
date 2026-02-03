@@ -62,7 +62,9 @@ const handleWebhook = async (req, res) => {
              if (!allowedPagesCache.has(pageId)) {
                  // Double check DB before hard blocking (in case of new signup not in cache yet)
                  const isActuallyActive = await dbService.getPageConfig(pageId);
-                 if (isActuallyActive && (isActuallyActive.subscription_status === 'active' || isActuallyActive.subscription_status === 'trial')) {
+                 const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
+                 
+                 if (isActuallyActive && validStatuses.includes(isActuallyActive.subscription_status)) {
                      allowedPagesCache.add(pageId); // Add to cache
                  } else {
                      console.warn(`[Gatekeeper] BLOCKED unauthorized event for Page ID: ${pageId}`);
@@ -338,8 +340,10 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             return;
         }
 
-        if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
-             const logMsg = `Page ${pageId} subscription inactive.`;
+        // 2. Check Subscription Status (Active/Trial)
+        const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
+        if (!validStatuses.includes(pageConfig.subscription_status)) {
+             const logMsg = `Page ${pageId} subscription inactive (Status: ${pageConfig.subscription_status}).`;
              console.log(logMsg);
              logToFile(logMsg);
              return;

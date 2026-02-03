@@ -171,8 +171,9 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
 
         // 2. Check Subscription/Credit
-        if (pageConfig.subscription_status !== 'active' && pageConfig.subscription_status !== 'trial') {
-             console.log(`[WA] Session ${sessionName} subscription inactive.`);
+        const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
+        if (!validStatuses.includes(pageConfig.subscription_status)) {
+             console.log(`[WA] Session ${sessionName} subscription inactive (Status: ${pageConfig.subscription_status}).`);
              return;
         }
         

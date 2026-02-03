@@ -695,8 +695,8 @@ async function getAllActivePages() {
     // Strategy: Page must be Active/Trial AND have Message Credits (Page-level or User-level)
     const { data: pages, error } = await supabase
         .from('page_access_token_message')
-        .select('page_id, user_id, message_credit')
-        .or('subscription_status.eq.active,subscription_status.eq.trial');
+        .select('page_id, user_id, message_credit, subscription_status')
+        .or('subscription_status.eq.active,subscription_status.eq.trial,subscription_status.eq.active_trial,subscription_status.eq.active_paid');
         
     if (error) {
         console.error("Error fetching active pages:", error);
@@ -722,8 +722,12 @@ async function getAllActivePages() {
 
     // 3. Filter: Subscription Status + Credit Check
     const allowedPageIds = pages.filter(p => {
+        // Normalize Status
+        const status = p.subscription_status;
+        const isActive = ['active', 'trial', 'active_trial', 'active_paid'].includes(status);
+
         // If status is NOT active, skip
-        if (p.subscription_status !== 'active_trial' && p.subscription_status !== 'active_paid') {
+        if (!isActive) {
              return false;
         }
         
