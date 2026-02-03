@@ -68,7 +68,37 @@ const handleWebhook = async (req, res) => {
                      allowedPagesCache.add(pageId); // Add to cache
                  } else {
                      console.warn(`[Gatekeeper] BLOCKED unauthorized event for Page ID: ${pageId}`);
-                     return res.status(200).send('EVENT_RECEIVED'); // Return 200 to satisfy FB but drop packet
+
+                    // --- LOG BLOCK EVENT FOR FRONTEND VISIBILITY ---
+                    try {
+                        if (body.entry) {
+                            for (const entry of body.entry) {
+                                if (entry.messaging) {
+                                    for (const msg of entry.messaging) {
+                                        if (msg.sender && msg.sender.id) {
+                                            const txt = msg.message?.text || '[Media/Action]';
+                                            // Log to DB so it appears in conversation
+                                            await dbService.saveFbChat({
+                                                page_id: pageId,
+                                                sender_id: msg.sender.id,
+                                                recipient_id: pageId,
+                                                message_id: msg.message?.mid || `blk_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                                                text: `[BLOCKED] ${txt} (Inactive Subscription)`,
+                                                timestamp: new Date(),
+                                                status: 'blocked',
+                                                reply_by: 'user'
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[Gatekeeper] Error logging block:', e);
+                    }
+                    // -----------------------------------------------
+
+                    return res.status(200).send('EVENT_RECEIVED'); // Return 200 to satisfy FB but drop packet
                  }
              }
         }
@@ -337,6 +367,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const logMsg = `Page ${pageId} not configured.`;
             console.log(logMsg);
             logToFile(logMsg);
+            // Log System Error to DB for visibility
+            await dbService.saveFbChat({
+                page_id: pageId,
+                sender_id: pageId,
+                recipient_id: senderId,
+                message_id: `sys_${Date.now()}`,
+                text: `[SYSTEM ERROR] Page not configured in database.`,
+                timestamp: Date.now(),
+                status: 'system_error',
+                reply_by: 'system'
+            });
             return;
         }
 
@@ -346,6 +387,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
              const logMsg = `Page ${pageId} subscription inactive (Status: ${pageConfig.subscription_status}).`;
              console.log(logMsg);
              logToFile(logMsg);
+             // Log System Error to DB for visibility
+             await dbService.saveFbChat({
+                 page_id: pageId,
+                 sender_id: pageId,
+                 recipient_id: senderId,
+                 message_id: `sys_${Date.now()}`,
+                 text: `[SYSTEM ERROR] Inactive Subscription: ${pageConfig.subscription_status}. Reply Halted.`,
+                 timestamp: Date.now(),
+                 status: 'system_error',
+                 reply_by: 'system'
+             });
              return;
         }
         
@@ -359,6 +411,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                 const logMsg = `Page ${pageId} out of credits (Cheap Engine Active). (Source: ${pageConfig.credit_source || 'page_balance'})`;
                 console.log(logMsg);
                 logToFile(logMsg);
+                // Log System Error to DB for visibility
+                await dbService.saveFbChat({
+                    page_id: pageId,
+                    sender_id: pageId,
+                    recipient_id: senderId,
+                    message_id: `sys_${Date.now()}`,
+                    text: `[SYSTEM ERROR] Out of Credits. Reply Halted.`,
+                    timestamp: Date.now(),
+                    status: 'system_error',
+                    reply_by: 'system'
+                });
                 return; // STOP Processing
             }
         } else {
@@ -373,6 +436,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             const logMsg = `[Failure Lock] Conversation with ${senderId} is locked for 24h due to repeated failures.`;
             console.log(logMsg);
             logToFile(logMsg);
+            // Log to DB
+            await dbService.saveFbChat({
+                page_id: pageId,
+                sender_id: pageId,
+                recipient_id: senderId,
+                message_id: `sys_${Date.now()}`,
+                text: `[SYSTEM] Conversation Locked (Repeated Failures).`,
+                timestamp: Date.now(),
+                status: 'system_error',
+                reply_by: 'system'
+            });
             return;
         }
         // --------------------------
@@ -466,6 +540,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                     const logMsg = `[AI] Swipe Reply disabled (swipe_reply=false) for page ${pageId}. Ignoring.`;
                     console.log(logMsg);
                     logToFile(logMsg);
+                    // Log to DB
+                    await dbService.saveFbChat({
+                        page_id: pageId,
+                        sender_id: pageId,
+                        recipient_id: senderId,
+                        message_id: `sys_${Date.now()}`,
+                        text: `[SYSTEM] Swipe Reply Disabled in Settings.`,
+                        timestamp: Date.now(),
+                        status: 'system_info',
+                        reply_by: 'system'
+                    });
                     return;
                 }
             } else {
@@ -474,6 +559,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                     const logMsg = `[AI] Reply Message disabled (reply_message=false) for page ${pageId}. Ignoring.`;
                     console.log(logMsg);
                     logToFile(logMsg);
+                    // Log to DB
+                    await dbService.saveFbChat({
+                        page_id: pageId,
+                        sender_id: pageId,
+                        recipient_id: senderId,
+                        message_id: `sys_${Date.now()}`,
+                        text: `[SYSTEM] Reply Message Disabled in Settings.`,
+                        timestamp: Date.now(),
+                        status: 'system_info',
+                        reply_by: 'system'
+                    });
                     return;
                 }
             }
@@ -533,11 +629,22 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             
             if (lastBlockTime > 0) {
                  if (lastBlockTime > lastUnblockTime) {
-                      const logMsg = `[Stop Logic] Active Block Emoji (${blockEmoji}) detected from Page. AI Halted.`;
-                      console.log(logMsg);
-                      logToFile(logMsg);
-                      return;
-                 }
+                          const logMsg = `[Stop Logic] Active Block Emoji (${blockEmoji}) detected from Page. AI Halted.`;
+                          console.log(logMsg);
+                          logToFile(logMsg);
+                          // Log to DB
+                          await dbService.saveFbChat({
+                              page_id: pageId,
+                              sender_id: pageId,
+                              recipient_id: senderId,
+                              message_id: `sys_${Date.now()}`,
+                              text: `[SYSTEM] AI Halted by Stop Emoji (${blockEmoji}).`,
+                              timestamp: Date.now(),
+                              status: 'system_info',
+                              reply_by: 'system'
+                          });
+                          return;
+                     }
             }
         }
         // ---------------------------------------
