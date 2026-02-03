@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw, Server, Zap } from "lucide-react";
+import { Loader2, Plus, QrCode, Trash2, Play, Pause, RefreshCw, Server, Zap, Smartphone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/config";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,6 +38,42 @@ export default function SessionManager() {
   // Selection States
   const [selectedEngine, setSelectedEngine] = useState<"WEBJS" | "NOWEB">("WEBJS");
   const [selectedPlan, setSelectedPlan] = useState("30");
+
+  // Pairing Code States
+  const [pairingMode, setPairingMode] = useState<'qr' | 'code'>('qr');
+  const [pairingPhoneNumber, setPairingPhoneNumber] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [loadingPairingCode, setLoadingPairingCode] = useState(false);
+
+  const handleGetPairingCode = async (sessionName: string) => {
+      if (!pairingPhoneNumber) {
+          toast.error("Please enter a phone number");
+          return;
+      }
+      
+      setLoadingPairingCode(true);
+      try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const res = await fetch(`${BACKEND_URL}/whatsapp/session/pairing-code`, {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+              },
+              body: JSON.stringify({ sessionName, phoneNumber: pairingPhoneNumber })
+          });
+          
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to get code");
+          
+          setPairingCode(data.code);
+          toast.success("Pairing code generated!");
+      } catch (error: any) {
+          toast.error(error.message);
+      } finally {
+          setLoadingPairingCode(false);
+      }
+  };
 
   const fetchBalance = useCallback(async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -167,6 +203,9 @@ export default function SessionManager() {
   const fetchQr = async (sessionName: string, retries = 10) => {
     try {
       setViewingSessionQr(sessionName);
+      setPairingMode('qr'); // Reset to QR default
+      setPairingCode(null);
+      setPairingPhoneNumber("");
       
       const { data } = await supabase
         .from('whatsapp_message_database')
@@ -391,7 +430,7 @@ export default function SessionManager() {
                     disabled={session.status === 'WORKING'}
                   >
                     <QrCode className="mr-1.5 h-3.5 w-3.5" /> 
-                    {session.status === 'WORKING' ? 'Linked' : 'Scan QR'}
+                    {session.status === 'WORKING' ? 'Linked' : 'Connect'}
                   </Button>
 
                   <Button size="sm" variant="outline" className="h-9 w-10 px-0 border-slate-800/50 bg-slate-900/30 text-slate-400 hover:bg-red-950/20 hover:text-red-400 hover:border-red-500/20 transition-all" onClick={() => handleAction('delete', session.name)}>
@@ -399,11 +438,79 @@ export default function SessionManager() {
                   </Button>
               </div>
 
-              {/* QR Display Area */}
-              {viewingSessionQr === session.name && qrCodeUrl && session.status !== 'WORKING' && (
+              {/* QR / Pairing Display Area */}
+              {viewingSessionQr === session.name && session.status !== 'WORKING' && (
                 <div className="mt-3 flex flex-col items-center p-4 rounded-xl bg-white border-2 border-slate-800 shadow-inner animate-in fade-in zoom-in duration-300">
-                  <img src={qrCodeUrl} alt="QR Code" className="w-40 h-40 object-contain mix-blend-multiply" />
-                  <p className="text-[10px] text-slate-500 mt-2 font-medium uppercase tracking-widest">Scan with WhatsApp</p>
+                    
+                    {/* Toggle */}
+                    <div className="flex w-full mb-4 bg-slate-100 rounded-lg p-1">
+                        <button 
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${pairingMode === 'qr' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                            onClick={() => setPairingMode('qr')}
+                        >
+                            Scan QR
+                        </button>
+                        <button 
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${pairingMode === 'code' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                            onClick={() => setPairingMode('code')}
+                        >
+                            Phone Number
+                        </button>
+                    </div>
+
+                    {pairingMode === 'qr' ? (
+                        qrCodeUrl ? (
+                            <>
+                                <img src={qrCodeUrl} alt="QR Code" className="w-40 h-40 object-contain mix-blend-multiply" />
+                                <p className="text-[10px] text-slate-500 mt-2 font-medium uppercase tracking-widest">Scan with WhatsApp</p>
+                            </>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-40 w-40">
+                                <Loader2 className="h-8 w-8 text-slate-400 animate-spin" />
+                                <p className="text-xs text-slate-500 mt-2">Loading QR...</p>
+                            </div>
+                        )
+                    ) : (
+                        <div className="w-full space-y-3">
+                            {!pairingCode ? (
+                                <>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs text-slate-600">Phone Number</Label>
+                                        <Input 
+                                            placeholder="+8801700000000" 
+                                            value={pairingPhoneNumber}
+                                            onChange={(e) => setPairingPhoneNumber(e.target.value)}
+                                            className="h-8 text-xs bg-slate-50 border-slate-200 text-slate-900"
+                                        />
+                                    </div>
+                                    <Button 
+                                        size="sm" 
+                                        className="w-full h-8 text-xs" 
+                                        onClick={() => handleGetPairingCode(session.name)}
+                                        disabled={loadingPairingCode}
+                                    >
+                                        {loadingPairingCode ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Smartphone className="mr-2 h-3 w-3" />}
+                                        Get Pairing Code
+                                    </Button>
+                                </>
+                            ) : (
+                                <div className="flex flex-col items-center text-center">
+                                    <p className="text-xs text-slate-500 mb-2">Enter this code on your phone:</p>
+                                    <div className="text-2xl font-mono font-bold tracking-widest bg-slate-100 px-4 py-2 rounded border border-slate-200 text-slate-800 select-all">
+                                        {pairingCode}
+                                    </div>
+                                    <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        className="mt-2 h-6 text-[10px] text-slate-400"
+                                        onClick={() => setPairingCode(null)}
+                                    >
+                                        Try different number
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
               )}
             </CardContent>

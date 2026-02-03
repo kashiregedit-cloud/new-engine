@@ -35,7 +35,7 @@ router.post('/session/create', async (req, res) => {
         
         // Construct WAHA Config
         // User requested specific configuration for n8n and robustness
-        const backendWebhookUrl = `${process.env.BACKEND_URL || 'http://localhost:3001'}/whatsapp/webhook`;
+        const backendWebhookUrl = `${process.env.BACKEND_URL || 'https://webhook.salesmanchatbot.online'}/whatsapp/webhook`;
         
         // Only use the Backend Webhook as requested
         const wahaConfig = config || {
