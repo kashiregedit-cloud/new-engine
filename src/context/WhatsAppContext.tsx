@@ -88,7 +88,6 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       // 3. Filter by target email from Supabase
       // Note: We switched to whatsapp_message_database which uses user_id
       // For now, we assume user_id matches the authenticated user.
-      // TODO: Handle Team View owner_id resolution if needed.
       
       let targetUserId = user.id;
       // If team mode and owner email is different, we would need owner's ID.
@@ -96,22 +95,29 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       
       const { data: mySessions } = await supabase
           .from('whatsapp_message_database')
-          .select('session_name')
+          .select('id, session_name, expires_at')
           .eq('user_id', targetUserId)
-          .returns<{ session_name: string | null }[]>();
+          .returns<{ id: number; session_name: string; expires_at: string | null }[]>();
         
-      let allowedNames = mySessions?.map(s => s.session_name) || [];
+      const dbSessionMap = new Map(mySessions?.map(s => [s.session_name, s]) || []);
+      let allowedNames = Array.from(dbSessionMap.keys());
       
       // Filter by Team Permissions
       if (viewMode === 'team' && isMember && teamData?.permissions?.wa_sessions) {
           const allowedPermissions = teamData.permissions.wa_sessions;
           if (Array.isArray(allowedPermissions)) {
-             allowedNames = allowedNames.filter(name => name && allowedPermissions.includes(name));
+             allowedNames = allowedNames.filter(name => allowedPermissions.includes(name));
           }
       }
       
-      // Filter WAHA sessions to only show allowed ones
-      formattedSessions = allSessions.filter((s) => allowedNames.includes(s.name));
+      // Filter WAHA sessions to only show allowed ones and merge DB data
+      formattedSessions = allSessions
+          .filter((s) => allowedNames.includes(s.name))
+          .map(s => ({
+              ...s,
+              wp_db_id: dbSessionMap.get(s.name)?.id,
+              expires_at: dbSessionMap.get(s.name)?.expires_at
+          }));
       
       setSessions(formattedSessions);
       

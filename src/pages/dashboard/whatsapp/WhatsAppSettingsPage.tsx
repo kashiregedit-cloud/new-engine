@@ -118,9 +118,9 @@ export default function WhatsAppSettingsPage() {
 
   const fetchConfig = async (id: string, sId: string | null) => {
     try {
-      // 1. Fetch text_prompt from wp_message_database
+      // 1. Fetch text_prompt from whatsapp_message_database
       const { data: dbData, error: dbError } = await supabase
-        .from('wp_message_database')
+        .from('whatsapp_message_database')
         .select('*')
         .eq('id', parseInt(id))
         .single();
@@ -184,7 +184,7 @@ export default function WhatsAppSettingsPage() {
     setPromptSaving(true);
     try {
         const { error } = await (supabase
-            .from('wp_message_database') as any)
+            .from('whatsapp_message_database') as any)
             .update({ text_prompt: tempPrompt })
             .eq('id', parseInt(dbId));
 
@@ -255,9 +255,9 @@ export default function WhatsAppSettingsPage() {
     }
 
     try {
-      // 1. Update text_prompt in wp_message_database
+      // 1. Update text_prompt in whatsapp_message_database
       const { error: dbError } = await (supabase
-        .from('wp_message_database') as any)
+        .from('whatsapp_message_database') as any)
         .update({
             text_prompt: values.text_prompt
         })

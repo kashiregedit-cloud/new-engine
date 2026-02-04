@@ -211,7 +211,7 @@ router.post('/session/restart', async (req, res) => {
         const { sessionName } = req.body;
         console.log(`[WhatsApp] Restarting session '${sessionName}'...`);
         
-        // 1. Stop
+        // 1. Stop (Best Effort)
         try {
             await whatsappService.stopSession(sessionName);
         } catch (e) {
@@ -236,9 +236,14 @@ router.post('/session/stop', async (req, res) => {
         const { sessionName } = req.body;
         console.log(`[WhatsApp] Stopping session '${sessionName}'...`);
         
-        await whatsappService.stopSession(sessionName);
+        // 1. Try to Stop on WAHA (Best Effort)
+        try {
+            await whatsappService.stopSession(sessionName);
+        } catch (wahaError) {
+            console.warn(`[WhatsApp] WAHA Stop failed for '${sessionName}' (ignoring to update DB): ${wahaError.message}`);
+        }
         
-        // Update DB status immediately
+        // 2. Update DB status immediately (Force Update)
         await dbService.updateWhatsAppEntryByName(sessionName, { 
             status: 'STOPPED', 
             active: false 
@@ -298,25 +303,35 @@ router.delete('/session/delete', async (req, res) => {
         const { sessionName, name } = req.body; // Support both
         const target = sessionName || name;
         
-        // Try to stop session first to avoid "session busy" errors
+        console.log(`[WhatsApp] Deleting session '${target}'...`);
+
+        // 1. Try Logout (Best Effort)
         try {
-            await whatsappService.logoutSession(target); // Try logout first (Best Practice for WAHA)
+            await whatsappService.logoutSession(target);
             await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) { 
-            // Ignore logout error (might be already logged out)
+            console.warn(`[WhatsApp] Logout failed (ignoring): ${e.message}`);
         }
 
+        // 2. Try Stop (Best Effort)
         try {
             await whatsappService.stopSession(target);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for stop
+            await new Promise(resolve => setTimeout(resolve, 1000)); 
         } catch (stopErr) {
-            console.warn(`[WhatsApp] Could not stop session '${target}' before delete:`, stopErr.message);
+            console.warn(`[WhatsApp] Stop failed (ignoring): ${stopErr.message}`);
         }
 
-        await whatsappService.deleteSession(target);
+        // 3. Try Delete from WAHA (Best Effort)
+        try {
+            await whatsappService.deleteSession(target);
+        } catch (delErr) {
+            console.warn(`[WhatsApp] WAHA Delete failed for '${target}' (might be already gone): ${delErr.message}`);
+            // Do NOT throw here, proceed to DB delete
+        }
         
-        // Also remove from DB
+        // 4. Always Delete from DB
         await dbService.deleteWhatsAppEntry(target);
+        console.log(`[WhatsApp] DB Entry deleted for '${target}'.`);
         
         res.json({ success: true });
     } catch (err) {

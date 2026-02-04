@@ -22,6 +22,18 @@ export function SessionSelector() {
     const selected = sessions.find((s) => s.name === value);
     if (selected) {
       setCurrentSession(selected);
+      
+      // Auto-connect DB logic
+      const dbId = (selected as any).wp_db_id;
+      if (dbId) {
+          localStorage.setItem("active_wp_db_id", String(dbId));
+          window.dispatchEvent(new Event("db-connection-changed"));
+          // Optional: toast.success(`Switched to ${selected.name}`);
+      } else {
+          // If no DB ID found (unlikely if logic is correct), maybe clear it?
+          // localStorage.removeItem("active_wp_db_id");
+          // window.dispatchEvent(new Event("db-connection-changed"));
+      }
     }
   };
 

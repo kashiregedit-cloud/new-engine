@@ -37,8 +37,36 @@ const handleWebhook = async (req, res) => {
     res.send('OK');
 
     if (event === 'message' || event === 'message.any') {
-        // Ignore messages sent BY the bot (fromMe)
-        if (payload.fromMe) return;
+        // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
+        if (payload.fromMe) {
+            // Save Admin/Bot messages to DB for context & Human Handover logic
+            // We assume it's an Admin reply unless we can distinguish Bot vs Admin (WAHA doesn't easily distinguish self-bot vs phone-admin)
+            // But usually 'bot_reply' status is set when WE send it.
+            // If it comes via Webhook and we didn't just send it (hard to track exactly), it's likely Admin via Phone.
+            // Strategy: Save it. The Pre-Send check looks for 'sender_id === sessionName'.
+            
+            const messageId = payload.id;
+            const messageText = payload.body || '';
+            const sessionName = session;
+            
+            // Avoid saving if it's a message WE just sent (duplicate echo)
+            // But duplicate check handles message_id.
+            const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
+            if (!isDuplicate) {
+                 console.log(`[WA] Saving Admin/Bot message (fromMe): ${messageText.substring(0,30)}...`);
+                 await dbService.saveWhatsAppChat({
+                    session_name: sessionName,
+                    sender_id: sessionName, // Admin is the sender (Session Name)
+                    recipient_id: payload.to,
+                    message_id: messageId,
+                    text: messageText,
+                    timestamp: Date.now(),
+                    status: 'sent',
+                    reply_by: 'admin' // Assume Admin for now to trigger stop logic
+                });
+            }
+            return; // STOP Processing (Don't auto-reply to self)
+        }
 
         // Ignore Status Updates (broadcasts)
     if (payload.from === 'status@broadcast') return;
@@ -209,6 +237,17 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         
         if (!pageConfig) {
             console.log(`[WA] Session ${sessionName} not configured.`);
+            // Log System Error
+            await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: sessionName,
+                recipient_id: senderId,
+                message_id: `sys_${Date.now()}`,
+                text: `[SYSTEM ERROR] Session not configured.`,
+                timestamp: Date.now(),
+                status: 'system_error',
+                reply_by: 'system'
+            });
             return;
         }
 
@@ -216,6 +255,17 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
         if (!validStatuses.includes(pageConfig.subscription_status)) {
              console.log(`[WA] Session ${sessionName} subscription inactive (Status: ${pageConfig.subscription_status}).`);
+             // Log System Error
+             await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: sessionName,
+                recipient_id: senderId,
+                message_id: `sys_${Date.now()}`,
+                text: `[SYSTEM ERROR] Inactive Subscription: ${pageConfig.subscription_status}.`,
+                timestamp: Date.now(),
+                status: 'system_error',
+                reply_by: 'system'
+            });
              return;
         }
 
@@ -227,9 +277,38 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         } else {
              if (pageConfig.message_credit <= 0) {
                  console.log(`[WA] Session ${sessionName} blocked by Gatekeeper (No Credit & No Own API).`);
+                 // Log System Error
+                 await dbService.saveWhatsAppChat({
+                    session_name: sessionName,
+                    sender_id: sessionName,
+                    recipient_id: senderId,
+                    message_id: `sys_${Date.now()}`,
+                    text: `[SYSTEM ERROR] Out of Credits.`,
+                    timestamp: Date.now(),
+                    status: 'system_error',
+                    reply_by: 'system'
+                });
                  return;
              }
         }
+
+        // --- FAILURE LOCK CHECK ---
+        const isLocked = await dbService.checkWhatsAppLockStatus(sessionName, senderId);
+        if (isLocked) {
+            console.log(`[WA] Conversation with ${senderId} locked due to repeated failures.`);
+            await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: sessionName,
+                recipient_id: senderId,
+                message_id: `sys_${Date.now()}`,
+                text: `[SYSTEM] Conversation Locked (Repeated Failures).`,
+                timestamp: Date.now(),
+                status: 'system_error',
+                reply_by: 'system'
+            });
+            return;
+        }
+        // --------------------------
 
         // --- FETCH CONTEXT ---
         const historyLimit = 20;

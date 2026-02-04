@@ -42,7 +42,7 @@ export default function WhatsAppDatabasePage() {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('wp_message_database')
+        .from('whatsapp_message_database')
         .select('*')
         .eq('id', parseInt(id))
         .single();

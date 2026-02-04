@@ -911,6 +911,37 @@ async function deleteWhatsAppEntry(sessionName) {
     }
 }
 
+// 26. Check WhatsApp Lock Status
+async function checkWhatsAppLockStatus(sessionName, senderId) {
+    try {
+        const { data, error } = await supabase
+            .from('whatsapp_chats')
+            .select('status, timestamp')
+            .eq('session_name', sessionName)
+            .eq('recipient_id', senderId)
+            .eq('reply_by', 'bot')
+            .order('timestamp', { ascending: false })
+            .limit(4);
+
+        if (error || !data || data.length < 4) return false;
+
+        const allIgnored = data.every(msg => msg.status === 'ai_ignored');
+        if (!allIgnored) return false;
+
+        const lastIgnoredTime = Number(data[0].timestamp); 
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        
+        if (Date.now() - lastIgnoredTime < ONE_DAY_MS) {
+            return true;
+        }
+        
+        return false;
+    } catch (e) {
+        console.error("WA Lock Check Error:", e);
+        return false;
+    }
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -943,5 +974,6 @@ module.exports = {
     renewWhatsAppSession,
     getExpiredWhatsAppSessions,
     deductUserBalance,
-    deleteWhatsAppEntry
+    deleteWhatsAppEntry,
+    checkWhatsAppLockStatus
 };
