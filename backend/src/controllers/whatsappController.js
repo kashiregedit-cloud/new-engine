@@ -442,7 +442,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
              return;
         }
 
-        const replyText = aiResponse.text;
+        const replyText = aiResponse.reply || aiResponse.text;
         
         // 5. Send Reply
         console.log(`[WA] Sending Reply: "${replyText.substring(0, 50)}..."`);
