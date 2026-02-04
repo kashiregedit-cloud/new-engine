@@ -112,14 +112,12 @@ export default function SessionManager() {
   const getPrice = () => {
     // Determine price based on selected engine and plan
     if (selectedEngine === "WEBJS") {
-      if (selectedPlan === "1") return 50;  // 1 Day
       if (selectedPlan === "2") return 200; // Demo
       if (selectedPlan === "30") return 2000;
       if (selectedPlan === "60") return 3500;
       if (selectedPlan === "90") return 4000;
     } else {
       // NOWAB (NOWEB)
-      if (selectedPlan === "1") return 20;  // 1 Day
       if (selectedPlan === "2") return 100; // Demo
       if (selectedPlan === "30") return 500;
       if (selectedPlan === "60") return 900;
@@ -574,19 +572,17 @@ export default function SessionManager() {
             {/* Plan Selection */}
             <div className="space-y-3">
                 <Label className="text-base font-semibold text-slate-200">Select Duration</Label>
-                <div className="grid grid-cols-5 gap-3">
-                    {["1", "2", "30", "60", "90"].map((plan) => {
+                <div className="grid grid-cols-4 gap-3">
+                    {["2", "30", "60", "90"].map((plan) => {
                         const isSelected = selectedPlan === plan;
                         let price = 0;
                         if (selectedEngine === "WEBJS") {
-                             if (plan === "1") price = 50;
-                             else if (plan === "2") price = 200;
+                             if (plan === "2") price = 200;
                              else if (plan === "30") price = 2000;
                              else if (plan === "60") price = 3500;
                              else if (plan === "90") price = 4000;
                         } else {
-                             if (plan === "1") price = 20;
-                             else if (plan === "2") price = 100;
+                             if (plan === "2") price = 100;
                              else if (plan === "30") price = 500;
                              else if (plan === "60") price = 900;
                              else if (plan === "90") price = 1500;

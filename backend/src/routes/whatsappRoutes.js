@@ -34,20 +34,20 @@ router.get('/sessions', async (req, res) => {
         });
 
         // Also include sessions that are in DB but NOT in WAHA (e.g. stopped/expired)
-        // dbSessions.forEach(ds => {
-        //     if (!wahaSessions.find(ws => ws.name === ds.session_name)) {
-        //         mergedSessions.push({
-        //             name: ds.session_name,
-        //             status: 'STOPPED', // Assume stopped if not in WAHA
-        //             expires_at: ds.expires_at,
-        //             // ...
-        //         });
-        //     }
-        // });
-        // For now, let's stick to WAHA sessions as the source of truth for "active" sessions list, 
-        // but frontend might need to know about expired ones too. 
-        // User wants to see "expired" sessions? Maybe. 
-        // Let's just return merged list of WAHA sessions for now to avoid duplicates/confusion.
+        dbSessions.forEach(ds => {
+            if (!wahaSessions.find(ws => ws.name === ds.session_name)) {
+                mergedSessions.push({
+                    name: ds.session_name,
+                    status: 'STOPPED', // Assume stopped if not in WAHA
+                    config: {},
+                    me: null,
+                    expires_at: ds.expires_at,
+                    plan_days: ds.plan_days,
+                    subscription_status: ds.subscription_status || 'unknown',
+                    db_status: ds.status || 'unknown'
+                });
+            }
+        });
 
         res.json(mergedSessions);
     } catch (err) {
@@ -79,8 +79,8 @@ router.post('/session/create', async (req, res) => {
 
         // Pricing Logic
         const PRICING = {
-            'WEBJS': { 1: 50, 2: 200, 30: 2000, 60: 3500, 90: 4000 },
-            'NOWEB': { 1: 20, 2: 100, 30: 500, 60: 900, 90: 1500 }
+            'WEBJS': { 2: 200, 30: 2000, 60: 3500, 90: 4000 },
+            'NOWEB': { 2: 100, 30: 500, 60: 900, 90: 1500 }
         };
         
         // Fallback pricing if engine/duration not found
