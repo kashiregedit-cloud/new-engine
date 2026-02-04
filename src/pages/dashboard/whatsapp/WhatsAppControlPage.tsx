@@ -15,6 +15,7 @@ export default function WhatsAppControlPage() {
   const [verified, setVerified] = useState(true);
   const [expiryDays, setExpiryDays] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [config, setConfig] = useState({
     reply_message: false,
     swipe_reply: false,
@@ -34,6 +35,7 @@ export default function WhatsAppControlPage() {
     yesterdayCustomers: 0
   });
   const [recentChats, setRecentChats] = useState<any[]>([]);
+  const showLegacyMetrics = false;
 
   useEffect(() => {
     const checkConnection = () => {
@@ -73,6 +75,7 @@ export default function WhatsAppControlPage() {
         const row = data as any;
         setVerified(row.verified !== false); 
         setSessionName(row.session_name || null);
+        setAvailableColumns(Object.keys(row || {}));
         
         // Calculate Days Left
         if (row.expires_at) {
@@ -166,9 +169,15 @@ export default function WhatsAppControlPage() {
     if (!dbId) return;
     setSaving(true);
     try {
+      const updates: any = {};
+      Object.entries(config).forEach(([k, v]) => {
+        if (availableColumns.includes(k)) {
+          updates[k] = v;
+        }
+      });
       const { error } = await (supabase
         .from('whatsapp_message_database') as any)
-        .update(config)
+        .update(updates)
         .eq('id', parseInt(dbId));
 
       if (error) throw error;
@@ -264,63 +273,64 @@ export default function WhatsAppControlPage() {
           </Card>
         )}
 
-        {/* Metrics: Today vs Yesterday */}
-        <Card className="bg-card border-border shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><MessageSquareText className="h-4 w-4" /> Bot Replies</CardTitle>
-            <CardDescription>Today vs Yesterday</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Today</div>
-                <div className="text-2xl font-bold">{stats.todayBotReplies}</div>
-              </div>
-              <div className="space-y-1 text-right">
-                <div className="text-sm text-muted-foreground">Yesterday</div>
-                <div className="text-2xl font-bold">{stats.yesterdayBotReplies}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Bot className="h-4 w-4" /> Tokens Used</CardTitle>
-            <CardDescription>Today vs Yesterday</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Today</div>
-                <div className="text-2xl font-bold">{stats.todayTokens}</div>
-              </div>
-              <div className="space-y-1 text-right">
-                <div className="text-sm text-muted-foreground">Yesterday</div>
-                <div className="text-2xl font-bold">{stats.yesterdayTokens}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> Unique Customers</CardTitle>
-            <CardDescription>Today vs Yesterday</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <div className="text-sm text-muted-foreground">Today</div>
-                <div className="text-2xl font-bold">{stats.todayCustomers}</div>
-              </div>
-              <div className="space-y-1 text-right">
-                <div className="text-sm text-muted-foreground">Yesterday</div>
-                <div className="text-2xl font-bold">{stats.yesterdayCustomers}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {showLegacyMetrics && (
+          <>
+            <Card className="bg-card border-border shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><MessageSquareText className="h-4 w-4" /> Bot Replies</CardTitle>
+                <CardDescription>Today vs Yesterday</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Today</div>
+                    <div className="text-2xl font-bold">{stats.todayBotReplies}</div>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <div className="text-sm text-muted-foreground">Yesterday</div>
+                    <div className="text-2xl font-bold">{stats.yesterdayBotReplies}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-card border-border shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Bot className="h-4 w-4" /> Tokens Used</CardTitle>
+                <CardDescription>Today vs Yesterday</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Today</div>
+                    <div className="text-2xl font-bold">{stats.todayTokens}</div>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <div className="text-sm text-muted-foreground">Yesterday</div>
+                    <div className="text-2xl font-bold">{stats.yesterdayTokens}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-card border-border shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> Unique Customers</CardTitle>
+                <CardDescription>Today vs Yesterday</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">Today</div>
+                    <div className="text-2xl font-bold">{stats.todayCustomers}</div>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <div className="text-sm text-muted-foreground">Yesterday</div>
+                    <div className="text-2xl font-bold">{stats.yesterdayCustomers}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
         
         {/* Reply Message */}
         <Card className="bg-card border-border shadow-sm">
@@ -476,25 +486,42 @@ export default function WhatsAppControlPage() {
 
       </div>
 
-      {/* Recent Conversations */}
+      {/* Conversion Section (Compact) */}
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
-          <CardTitle>Recent Conversations</CardTitle>
-          <CardDescription>Last 20 messages with token usage</CardDescription>
+          <CardTitle>Conversion</CardTitle>
+          <CardDescription>Recent Conversations, Tokens Used, Bot Replies</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recentChats.map((c, idx) => (
-              <div key={idx} className="border rounded-md p-3">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{c.reply_by === 'bot' ? 'Bot' : 'User'}</span>
-                  <span>{new Date(Number(c.timestamp || 0)).toLocaleString()}</span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <div className="border rounded-md p-3">
+              <div className="text-xs text-muted-foreground">Bot Replies (Today/Yesterday)</div>
+              <div className="mt-1 text-lg font-bold">{stats.todayBotReplies} <span className="text-sm text-muted-foreground">/ {stats.yesterdayBotReplies}</span></div>
+            </div>
+            <div className="border rounded-md p-3">
+              <div className="text-xs text-muted-foreground">Tokens Used (Today/Yesterday)</div>
+              <div className="mt-1 text-lg font-bold">{stats.todayTokens} <span className="text-sm text-muted-foreground">/ {stats.yesterdayTokens}</span></div>
+            </div>
+            <div className="border rounded-md p-3">
+              <div className="text-xs text-muted-foreground">Customers (Today/Yesterday)</div>
+              <div className="mt-1 text-lg font-bold">{stats.todayCustomers} <span className="text-sm text-muted-foreground">/ {stats.yesterdayCustomers}</span></div>
+            </div>
+          </div>
+          <div className="border rounded-md">
+            <div className="px-3 py-2 text-sm font-semibold">Recent Conversations</div>
+            <div className="divide-y">
+              {recentChats.slice(0, 12).map((c, idx) => (
+                <div key={idx} className="px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{c.reply_by === 'bot' ? 'Bot' : 'User'}</span>
+                    <span>{new Date(Number(c.timestamp || 0)).toLocaleString()}</span>
+                  </div>
+                  <div className="mt-1 line-clamp-2">{c.text}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">Tokens: {c.token_usage || 0}</div>
                 </div>
-                <div className="mt-2 text-sm line-clamp-3">{c.text}</div>
-                <div className="mt-2 text-xs text-muted-foreground">Tokens: {c.token_usage || 0}</div>
-              </div>
-            ))}
-            {recentChats.length === 0 && <div className="text-sm text-muted-foreground">No messages yet.</div>}
+              ))}
+              {recentChats.length === 0 && <div className="px-3 py-3 text-sm text-muted-foreground">No messages yet.</div>}
+            </div>
           </div>
         </CardContent>
       </Card>
