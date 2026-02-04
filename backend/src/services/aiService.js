@@ -316,8 +316,9 @@ Rules:
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             // Get Rotated Key
-            const apiKey = await keyService.getNextKey(dynamicProvider);
-            if (!apiKey) throw new Error("No keys available for Cheap Engine.");
+            const keyData = await keyService.getSmartKey(dynamicProvider, dynamicModel || 'default');
+            if (!keyData || !keyData.key) throw new Error("No keys available for Cheap Engine.");
+            const apiKey = keyData.key;
 
             let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
             if (dynamicProvider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
@@ -371,8 +372,9 @@ async function processImageWithVision(imageUrl, config) {
         const mimeType = response.headers['content-type'] || 'image/jpeg';
 
         // 2. Use Gemini Flash (Multimodal) - It's fast and free/cheap
-        const apiKey = await keyService.getNextKey('google');
-        if (!apiKey) return "Image found but analysis unavailable.";
+        const keyData = await keyService.getSmartKey('google', 'gemini-1.5-flash');
+        if (!keyData || !keyData.key) return "Image found but analysis unavailable.";
+        const apiKey = keyData.key;
 
         const openai = new OpenAI({ 
             apiKey: apiKey, 
@@ -413,8 +415,9 @@ async function transcribeAudio(audioUrl, config) {
         });
         
         // 2. Use Groq Whisper (Fastest)
-        const apiKey = await keyService.getNextKey('groq');
-        if (!apiKey) return "[Audio Message]";
+        const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
+        if (!keyData || !keyData.key) return "[Audio Message]";
+        const apiKey = keyData.key;
 
         // OpenAI/Groq require FormData for file uploads
         const formData = new FormData();

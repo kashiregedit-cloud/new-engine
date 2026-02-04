@@ -384,7 +384,7 @@ export default function WhatsAppConversionPage() {
                     <TableCell>{new Date(msg.timestamp).toLocaleString()}</TableCell>
                     <TableCell className="font-mono text-xs">{msg.sender_id}</TableCell>
                     <TableCell 
-                        className={`max-w-[300px] cursor-pointer transition-all ${expandedMessageIds.has(msg.id || msg.message_id || 'unknown') ? 'whitespace-pre-wrap break-words' : 'truncate'}`} 
+                        className={`max-w-[300px] cursor-pointer transition-all text-blue-600 dark:text-blue-400 hover:underline ${expandedMessageIds.has(msg.id || msg.message_id || 'unknown') ? 'whitespace-pre-wrap break-words' : 'truncate'}`} 
                         title="Click to expand"
                         onClick={() => toggleExpand(msg.id || msg.message_id || 'unknown')}
                     >

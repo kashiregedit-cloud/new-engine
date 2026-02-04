@@ -421,7 +421,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
         // Fetch History (User + Assistant)
         // n8n workflow uses 'postgres_chat_memory'
-        const history = await dbService.getWhatsAppChatHistory(sessionName, senderId, 10);
+        // User Feedback: "Messenger uses fewer tokens". Reducing history limit from 10 to 6.
+        const history = await dbService.getWhatsAppChatHistory(sessionName, senderId, 6);
         
         // 4. Generate Response (AI)
         console.log(`[AI] Generating response for ${senderId} (Session: ${sessionName})...`);
