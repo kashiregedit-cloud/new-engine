@@ -99,8 +99,8 @@ const handleWebhook = async (req, res) => {
                  console.log(`[WA] Saving ADMIN message (fromMe): ${messageText.substring(0,30)}...`);
                  await dbService.saveWhatsAppChat({
                     session_name: sessionName,
-                    sender_id: sessionName, // Admin is the sender (Session Name)
-                    recipient_id: payload.to,
+                    sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
+                    recipient_id: payload.to, // User is the recipient
                     message_id: messageId,
                     text: messageText,
                     timestamp: Date.now(),
@@ -147,7 +147,7 @@ const handleWebhook = async (req, res) => {
             dbStatus = 'scan_qr_code';
             isActive = false;
         } else {
-            dbStatus = status.toLowerCase();
+            dbStatus = (status || 'unknown').toLowerCase();
         }
 
         try {
@@ -228,9 +228,12 @@ async function queueMessage(session, messagePayload) {
     }
 
     // Additional n8n-style filter: collapse trivial repeats (e.g., "hi" twice fast)
+    // EXCEPTION: Do NOT filter if media is present (User might send 5 photos in a row)
+    const hasMedia = imageUrls.length > 0 || audioUrls.length > 0;
     const normalized = (messageText || '').trim().toLowerCase();
     const lastUser = lastUserMessageMap.get(chatKey);
-    if (lastUser && lastUser.text === normalized && (Date.now() - lastUser.ts) < 5000) {
+    
+    if (!hasMedia && lastUser && lastUser.text === normalized && (Date.now() - lastUser.ts) < 5000) {
         console.log(`[WA] Ignoring repeated short message from ${chatKey}: "${normalized}"`);
         return;
     }
@@ -238,10 +241,10 @@ async function queueMessage(session, messagePayload) {
 
     // --- SAVE USER MESSAGE TO whatsapp_chats (Immediate - Raw) ---
     try {
-        await dbService.saveWhatsAppChat({
+            await dbService.saveWhatsAppChat({
             session_name: sessionName,
-            sender_id: senderId,
-            recipient_id: sessionName,
+            sender_id: senderId, // User is the sender (Phone Number)
+            recipient_id: messagePayload.to, // Page is the recipient (Page Number)
             message_id: messageId,
             text: messageText,
             timestamp: Date.now(),
@@ -268,7 +271,7 @@ async function queueMessage(session, messagePayload) {
 
     // Initialize buffer if not exists
     if (!debounceMap.has(sessionId)) {
-        debounceMap.set(sessionId, { messages: [], timer: null });
+        debounceMap.set(sessionId, { messages: [], timer: null, pageId: messagePayload.to });
     }
 
     const sessionData = debounceMap.get(sessionId);
@@ -297,13 +300,14 @@ async function queueMessage(session, messagePayload) {
 
     sessionData.timer = setTimeout(() => {
         const messagesToProcess = [...sessionData.messages];
+        const pageId = sessionData.pageId;
         debounceMap.delete(sessionId);
-        processBufferedMessages(sessionId, sessionName, senderId, messagesToProcess);
+        processBufferedMessages(sessionId, sessionName, senderId, messagesToProcess, pageId);
     }, debounceTime); 
 }
 
 // Core Logic Function (Debounced)
-async function processBufferedMessages(sessionId, sessionName, senderId, messages) {
+async function processBufferedMessages(sessionId, sessionName, senderId, messages, pageId = null) {
     let combinedText = "";
     let replyToId = null;
     let allImages = [];
@@ -375,6 +379,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         if (hasOwnKey) {
              console.log(`[WA] Session ${sessionName} using Own API. Gatekeeper ALLOW.`);
         } else {
+             // Use Centralized User Credit (n8n style shared pool)
+             // We pass 'sessionName' as pageId, but we need to ensure the DB service handles it
              if (pageConfig.message_credit <= 0) {
                  console.log(`[WA] Session ${sessionName} blocked by Gatekeeper (No Credit & No Own API).`);
                  // Log System Error
@@ -401,165 +407,57 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                 sender_id: sessionName,
                 recipient_id: senderId,
                 message_id: `sys_${Date.now()}`,
-                text: `[SYSTEM] Conversation Locked (Repeated Failures).`,
+                text: `[SYSTEM ERROR] Conversation Locked (Too many failures).`,
                 timestamp: Date.now(),
                 status: 'system_error',
                 reply_by: 'system'
             });
             return;
         }
-        // --------------------------
 
-        // --- FETCH CONTEXT ---
-        const historyLimit = 20;
+        // 3. Prepare AI Context (n8n Style)
+        // Ensure Page ID is correctly identified (Session Name = Page ID for WhatsApp)
+        const pageId = sessionName; 
+
+        // Fetch History (User + Assistant)
+        // n8n workflow uses 'postgres_chat_memory'
+        const history = await dbService.getWhatsAppChatHistory(sessionName, senderId, 10);
         
-        // Parallel: Get History + Mark Seen + Typing
-        const [rawHistory, _seen, _typing] = await Promise.all([
-            dbService.getWhatsAppChatHistory(sessionName, senderId, historyLimit),
-            whatsappService.sendSeen(sessionName, senderId),  // Mark as Seen
-            whatsappService.sendTyping(sessionName, senderId) // Typing indicator
-        ]);
+        // 4. Generate Response (AI)
+        console.log(`[AI] Generating response for ${senderId} (Session: ${sessionName})...`);
+        const aiResponse = await aiService.generateResponse({
+            pageId: pageId, 
+            userId: senderId,
+            userMessage: combinedText,
+            history: history,
+            imageUrls: allImages, // Pass accumulated images
+            audioUrls: allAudios, // Pass accumulated audios
+            config: pageConfig,
+            platform: 'whatsapp'
+        });
 
-        // Transform History for AI Service
-        // rawHistory is array of objects { text, reply_by, ... }
-        // AI Service expects: [{ role: 'user'|'assistant', content: '...' }]
-        const history = rawHistory.map(msg => ({
-            role: (msg.reply_by === 'user') ? 'user' : 'assistant',
-            content: msg.text || ''
-        }));
-
-        const senderName = 'Customer'; // Could be improved if we stored name in whatsapp_contacts
-
-        // Batch Processing (Images/Audio)
-        if (allImages.length > 0) {
-            if (pageConfig.image_detection) {
-                const imagePromises = allImages.map(url => aiService.processImageWithVision(url, pageConfig));
-                const imageResults = await Promise.all(imagePromises);
-                let combinedImageAnalysis = "";
-                imageResults.forEach((result, index) => {
-                    combinedImageAnalysis += `\n[Image ${index + 1} Analysis]: ${result}\n`;
-                });
-                combinedText += `\n\n[System: User sent ${allImages.length} images. Analysis follows:]${combinedImageAnalysis}`;
-            } else {
-                combinedText += `\n[User sent ${allImages.length} images]`;
-            }
-        }
-
-        if (allAudios.length > 0) {
-            const audioPromises = allAudios.map(url => aiService.transcribeAudio(url, pageConfig));
-            const audioResults = await Promise.all(audioPromises);
-            const combinedAudioTranscript = audioResults.join('\n');
-            combinedText += `\n\n[System: User sent ${allAudios.length} voice messages. Transcripts follow:]\n${combinedAudioTranscript}`;
-        }
-
-        // --- FEATURE FLAGS ---
-        if (!pageConfig.reply_message) {
-            console.log(`[WA] Reply Message disabled for ${sessionName}.`);
-            return;
-        }
-
-        // --- STOP EMOJI CHECK (Using Local History) ---
-        const blockEmoji = pageConfig.block_emoji;
-        const unblockEmoji = pageConfig.unblock_emoji;
-
-        if (blockEmoji) {
-            let lastBlockTime = 0;
-            let lastUnblockTime = 0;
-
-            // Check current buffered messages first
-            if (combinedText.includes(blockEmoji)) {
-                lastBlockTime = Date.now();
-            }
-
-            // Check history
-            for (const msg of rawHistory) {
-                const isFromPage = msg.sender_id === sessionName || msg.reply_by === 'bot' || msg.reply_by === 'admin';
-                if (isFromPage) { // Check bot messages too? Actually user sends block emoji usually.
-                    // Wait, block emoji is usually sent by ADMIN/USER? 
-                    // "AI Stop Logic via Emoji: AI checks the last 10 messages for emojis... If found, it halts".
-                    // Usually it's the HUMAN (Admin) sending the stop emoji to stop the bot.
-                    // So we check messages from 'admin' or 'user' (if user wants to stop it themselves, rare).
-                    // Typically 'admin' takeover. 
-                    // Let's assume ANY message with block emoji stops it.
-                    const content = msg.text || '';
-                    const msgTime = Number(msg.timestamp); // stored as BigInt/Number in new table
-
-                    if (content.includes(blockEmoji)) {
-                        if (msgTime > lastBlockTime) lastBlockTime = msgTime;
-                    }
-                    if (unblockEmoji && content.includes(unblockEmoji)) {
-                        if (msgTime > lastUnblockTime) lastUnblockTime = msgTime;
-                    }
-                }
-            }
-
-            if (lastBlockTime > 0) {
-                if (lastBlockTime > lastUnblockTime) {
-                    const logMsg = `[WA Stop Logic] Active Block Emoji (${blockEmoji}) detected. AI Halted.`;
-                    console.log(logMsg);
-                    return;
-                }
-            }
-        }
-
-        // --- GENERATE AI REPLY ---
-        const finalUserMessage = combinedText;
-        
-        // Inject Formatting
-        // Note: pageConfig IS pagePrompts in WhatsApp (merged table)
-        if (pageConfig.text_prompt) {
-             pageConfig.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. Use WhatsApp Formatting (*Bold*, _Italic_, ~Strike~).\n2. Keep it concise.\n3. If explaining multiple items/plans, keep each section SHORT.\n4. Include the IMAGE LINK for EVERY item/plan described.\n5. **STRICT IMAGE FORMAT**: You MUST output images using this EXACT format:\n   IMAGE: Plan Name | https://your-image-url.com\n   (Example: "IMAGE: 🌟 Basic Plan | https://i.imgur.com/xyz.jpg")\n   **CRITICAL**: The URL MUST be a direct image link (ending in .jpg, .png, .webp). Do NOT use product page URLs.\n6. DO NOT use [Image] placeholders. ONLY use the 'IMAGE: Title | URL' format.`;
-        }
-
-        // pageConfig serves as both config and prompts
-        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pageConfig, history, senderName);
-
-        // --- ORDER TRACKING ---
-        if (aiResponse.order_details && aiResponse.order_details.product_name) {
-             const order = aiResponse.order_details;
-             let customerNumber = order.phone ? order.phone.replace(/\D/g, '') : senderId.replace(/\D/g, ''); 
-             
-             await dbService.saveWhatsAppOrderTracking({
-                 session_name: sessionName,
-                 sender_id: senderId,
-                 product_name: order.product_name,
-                 number: customerNumber, 
-                 location: order.address,
-                 product_quantity: order.quantity,
-                 price: order.price
-             });
-        }
-
-        // --- PRE-SEND CHECK (Race Condition Fix) ---
-        // Check again if Admin replied while AI was generating
-        const freshHistory = await dbService.getWhatsAppChatHistory(sessionName, senderId, 1);
-        if (freshHistory && freshHistory.length > 0) {
-            const latest = freshHistory[0];
-            // If latest message is from US (sessionName) and NOT bot_reply, it's a human/admin reply
-            if (latest.sender_id === sessionName && latest.status !== 'bot_reply') {
-                console.log(`[WA] Admin replied while AI was generating. Stopping reply for ${sessionId}.`);
-                return;
-            }
-        }
-        // -------------------------------------------
-
-        // --- SEND REPLY ---
-        let replyText = aiResponse.reply;
-
-        // Silent Failure Rule
-        if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
-             console.log(`[WA] No response generated (Silent Failure). Skipping reply.`);
+        if (!aiResponse) {
+             console.log(`[WA] AI returned null (Silent Failure).`);
+             // Do NOT send error message to user (Silent Fail Rule)
              return;
         }
-        
-        // --- SMART IMAGE EXTRACTION & CLEANING ---
-        if (!aiResponse.images) aiResponse.images = [];
-        const extractedImages = [...aiResponse.images]; 
 
-        // 1. STRICT FORMAT: IMAGE: Title | URL
+        const replyText = aiResponse.text;
+        
+        // 5. Send Reply
+        console.log(`[WA] Sending Reply: "${replyText.substring(0, 50)}..."`);
+        
+        // Mark as Seen (User Experience)
+        await whatsappService.sendSeen(sessionName, senderId);
+
+        // Handle Strict Image Sending (IMAGE: Title | URL)
+        // Extracted images are removed from replyText
+        const extractedImages = [];
+        let finalReplyText = replyText;
+        
         const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s,]+)/gi;
         let strictMatch;
-        while ((strictMatch = strictImageRegex.exec(replyText)) !== null) {
+        while ((strictMatch = strictImageRegex.exec(finalReplyText)) !== null) {
             const fullMatch = strictMatch[0];
             const title = strictMatch[1].trim();
             let url = strictMatch[2].trim();
@@ -576,80 +474,55 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             }
             
             // Remove from text
-            replyText = replyText.replace(fullMatch, '').trim();
+            finalReplyText = finalReplyText.replace(fullMatch, '').trim();
         }
 
-        // 2. Google Drive Viewer Links (Standalone)
-        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s,]*)/gi;
-        let driveMatch;
-        while ((driveMatch = driveRegex.exec(replyText)) !== null) {
-             const fullMatch = driveMatch[0];
-             const fileId = driveMatch[2];
-             const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-             
-             if (!extractedImages.some(img => img.url === directUrl)) {
-                 extractedImages.push({ url: directUrl, title: 'Image' });
-             }
-             replyText = replyText.replace(fullMatch, '').trim();
-        }
-        
-        // Update aiResponse with cleaned text and extracted images
-        aiResponse.images = extractedImages;
-
-        // Send Text
-        let botMessageId = `bot_${Date.now()}`;
-        // Duplicate reply guard (10s window)
-        const guardKey = `${sessionName}_${senderId}`;
-        const normReply = (replyText || '').trim().toLowerCase();
-        const lastReply = recentReplyMap.get(guardKey);
-        if (lastReply && lastReply.text === normReply && (Date.now() - lastReply.ts) < 10000) {
-            console.log(`[WA] Duplicate reply detected for ${guardKey}. Skipping send.`);
-        } else {
-            if (replyText) {
-                const sentMsg = await whatsappService.sendMessage(sessionName, senderId, replyText);
-                
-                // Track Bot Message ID to prevent self-lock
-                if (sentMsg && sentMsg.id) {
-                    botMessageIds.add(sentMsg.id);
-                    // Clear after 2 minutes
-                    setTimeout(() => botMessageIds.delete(sentMsg.id), 2 * 60 * 1000);
-                }
-
-                // Log Bot Reply
-                await dbService.saveWhatsAppChat({
-                    session_name: sessionName,
-                    sender_id: sessionName,
-                    recipient_id: senderId,
-                    message_id: (sentMsg && sentMsg.id) ? sentMsg.id : botMessageId,
-                    text: replyText,
-                    timestamp: Date.now(),
-                    status: 'bot_reply',
-                    reply_by: 'bot',
-                    token_usage: aiResponse.token_usage || 0,
-                    is_group: isGroup
-                    // token usage could be saved if schema allows, currently whatsapp_chats doesn't have token col
-                });
-            }
-            recentReplyMap.set(guardKey, { text: normReply, ts: Date.now() });
+        // Send Text First
+        if (finalReplyText) {
+             await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
         }
 
         // Send Images
-        if (aiResponse.images.length > 0) {
-            for (const imgObj of aiResponse.images) {
-                await whatsappService.sendImage(sessionName, senderId, imgObj.url, imgObj.title);
-            }
+        for (const img of extractedImages) {
+            console.log(`[WA] Sending Extracted Image: ${img.title} -> ${img.url}`);
+            await whatsappService.sendImage(sessionName, senderId, img.url, img.title);
         }
 
-        await whatsappService.stopTyping(sessionName, senderId);
-
-        // Deduct Credit (WhatsApp Specific)
-        // Only deduct if NOT using Own API
+        // 6. Deduct Credit (If not Own API)
+        // Update: Deduct from User Shared Pool
         if (!hasOwnKey) {
-             await dbService.deductWhatsAppCredit(sessionName, 1);
+             const deducted = await dbService.deductWhatsAppCredit(sessionName);
+             if (!deducted) {
+                 console.warn(`[WA] Credit deduction failed for ${sessionName} (User Shared Pool).`);
+             }
         }
 
-    } catch (error) {
-        console.error("[WA] Error processing event:", error);
+        // 7. Save Bot Reply to DB
+        await dbService.saveWhatsAppChat({
+            session_name: sessionName,
+            sender_id: pageId || sessionName, // Bot (Page) is sender
+            recipient_id: senderId, // User is recipient
+            message_id: `bot_${Date.now()}`,
+            text: replyText, // Save full original text including image tags for context
+            timestamp: Date.now(),
+            status: 'sent',
+            reply_by: 'assistant',
+            model_used: aiResponse.model // Save Model Name
+        });
+
+    } catch (err) {
+        console.error(`[WA] Error processing buffered messages: ${err.message}`);
+        // Log System Error
+        await dbService.saveWhatsAppChat({
+            session_name: sessionName,
+            sender_id: sessionName,
+            recipient_id: senderId,
+            message_id: `err_${Date.now()}`,
+            text: `[SYSTEM ERROR] ${err.message}`,
+            timestamp: Date.now(),
+            status: 'system_error',
+            reply_by: 'system'
+        });
     }
 }
 

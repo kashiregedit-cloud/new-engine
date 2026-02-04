@@ -169,19 +169,36 @@ export default function WhatsAppControlPage() {
     if (!dbId) return;
     setSaving(true);
     try {
+      // Filter out keys that might not exist in DB or handled separately
+      // We know these columns exist from whatsapp_tables.sql
+      const validColumns = [
+        'reply_message', 'swipe_reply', 'image_detection', 'image_send', 
+        'order_tracking', 'audio_detection', 'file_upload', 'group_reply'
+      ];
+
       const updates: any = {};
-      Object.entries(config).forEach(([k, v]) => {
-        if (availableColumns.includes(k)) {
-          updates[k] = v;
-        }
+      validColumns.forEach(key => {
+        // @ts-ignore
+        updates[key] = config[key];
       });
-      const { error } = await (supabase
+
+      const { data, error } = await (supabase
         .from('whatsapp_message_database') as any)
         .update(updates)
-        .eq('id', parseInt(dbId));
+        .eq('id', parseInt(dbId))
+        .select();
 
       if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        throw new Error("No settings were updated. Check permissions or connection.");
+      }
+
       toast.success("Settings saved successfully");
+      
+      // Force verify persistence
+      await fetchConfig(dbId);
+      
       if (sessionName) {
         fetchMetrics(sessionName);
         fetchRecent(sessionName);

@@ -63,7 +63,7 @@ async function fetchOgImage(url) {
 }
 
 // Step 2: Business Logic / AI Brain
-async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer', senderGender = null) {
+async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer', senderGender = null, imageUrls = [], audioUrls = []) {
     
     // --- 0. SMART CACHE CHECK (Zero Cost) ---
     // DISABLED TEMPORARILY TO FIX CROSS-PAGE LEAK
@@ -189,16 +189,42 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }
     // -------------------------------------------------
     
-    // --- IMAGE DETECTION ---
-    let imageUrls = [];
+    // --- MEDIA HANDLING (Images & Audio) ---
     let cleanUserMessage = userMessage;
-    // Regex to extract "[User sent images: url1, url2]" pattern from webhookController
+
+    // 1. Process Images
+    // Use imageUrls passed from Controller (or extracted from text for legacy)
     const imageMatch = userMessage.match(/\[User sent images: (.*?)\]/);
     if (imageMatch && imageMatch[1]) {
-        imageUrls = imageMatch[1].split(',').map(url => url.trim());
-        cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); 
-        console.log(`[AI] Detected ${imageUrls.length} images. Enabling Vision Mode.`);
+         const extracted = imageMatch[1].split(',').map(url => url.trim());
+         imageUrls = [...imageUrls, ...extracted];
+         cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); 
     }
+
+    if (imageUrls.length > 0) {
+        console.log(`[AI] Processing ${imageUrls.length} images...`);
+        // We only process the LAST image for now to save tokens/time, or all?
+        // Let's process all but be careful with time.
+        // Actually, let's process them in parallel.
+        const imageDescriptions = await Promise.all(
+            imageUrls.map(url => processImageWithVision(url, pageConfig))
+        );
+        
+        const visionText = imageDescriptions.map((desc, i) => `[Image ${i+1} Analysis: ${desc}]`).join('\n');
+        cleanUserMessage += `\n\n${visionText}`;
+    }
+
+    // 2. Process Audio
+    if (audioUrls.length > 0) {
+        console.log(`[AI] Processing ${audioUrls.length} audio messages...`);
+        const audioTranscriptions = await Promise.all(
+            audioUrls.map(url => transcribeAudio(url, pageConfig))
+        );
+        
+        const audioText = audioTranscriptions.join('\n');
+        cleanUserMessage += `\n\n${audioText}`;
+    }
+    // ----------------------------------------
 
     // Updated Vision Models List
     const VISION_MODELS = [
@@ -289,7 +315,7 @@ Rules:
 4. AD CONTEXT: If '[System Note: User clicked on an AD...]' exists, use it to identify the product.
 5. STRICT DOMAIN CONTROL: Answer ONLY about business/products in 'Ctx'. Ignore unrelated topics (politics, health, etc).
 6. PHONE VALIDATION: If user gives phone, ensure it's valid (11-digit BD).
-7. SENDING IMAGES: If user asks for pics and you have URL in 'Ctx', send it as "[Image: Name | URL]".
+7. SENDING IMAGES: If user asks for pics and you have URL in 'Ctx', send it as "IMAGE: Name | URL".
 8. Output RAW JSON:
 {
   "reply": "Bengali text"|null,
@@ -909,7 +935,12 @@ async function processImageWithVision(imageUrl, pageConfig) {
     let finalImageUrl = imageUrl;
     try {
         console.log(`[Vision] Downloading image for Base64 conversion...`);
-        const imgResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const imgResponse = await axios.get(imageUrl, { 
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
         const base64 = Buffer.from(imgResponse.data).toString('base64');
         const mimeType = imgResponse.headers['content-type'] || 'image/jpeg';
         finalImageUrl = `data:${mimeType};base64,${base64}`;
@@ -965,7 +996,12 @@ async function transcribeAudio(audioUrl, pageConfig) {
         console.log(`[Audio] Transcribing: ${audioUrl}`);
 
         // 1. Download Audio File (Stream)
-        const response = await axios.get(audioUrl, { responseType: 'stream' });
+        const response = await axios.get(audioUrl, { 
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
         
         // 2. Prepare Form Data
         const form = new FormData();
@@ -1091,7 +1127,12 @@ async function transcribeAudio(audioUrl, pageConfig) {
             console.log(`[Audio] Using Gemini (Multimodal) with key ...${apiKey.slice(-4)}`);
             
             // 1. Need ArrayBuffer/Base64, not Stream. Re-download as buffer.
-            const bufferResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+            const bufferResponse = await axios.get(audioUrl, { 
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            });
             const base64Audio = Buffer.from(bufferResponse.data).toString('base64');
             
             // Determine MIME type

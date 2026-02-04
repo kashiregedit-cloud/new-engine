@@ -30,8 +30,14 @@ export function SessionSelector() {
           const dbIdStr = String(dbId);
           if (localStorage.getItem("active_wp_db_id") !== dbIdStr) {
               localStorage.setItem("active_wp_db_id", dbIdStr);
+              // Also set session ID (name) for other components
+              localStorage.setItem("active_wa_session_id", selected.name);
               window.dispatchEvent(new Event("db-connection-changed"));
           }
+      } else {
+         // Even if no DB ID (rare), set session ID
+         localStorage.setItem("active_wa_session_id", selected.name);
+         window.dispatchEvent(new Event("db-connection-changed"));
       }
     }
   };
@@ -39,6 +45,8 @@ export function SessionSelector() {
   // Auto-sync DB ID when currentSession changes (e.g. after creation or refresh)
   useEffect(() => {
     if (currentSession) {
+      localStorage.setItem("active_wa_session_id", currentSession.name);
+      
       const dbId = (currentSession as any).wp_db_id;
       if (dbId) {
         const dbIdStr = String(dbId);
@@ -54,11 +62,15 @@ export function SessionSelector() {
 
   // Sync LocalStorage when currentSession changes (e.g. auto-selected on load)
   useEffect(() => {
-    if (currentSession && (currentSession as any).wp_db_id) {
-        const dbId = String((currentSession as any).wp_db_id);
-        if (localStorage.getItem("active_wp_db_id") !== dbId) {
-            localStorage.setItem("active_wp_db_id", dbId);
-            window.dispatchEvent(new Event("db-connection-changed"));
+    if (currentSession) {
+        localStorage.setItem("active_wa_session_id", currentSession.name);
+        
+        if ((currentSession as any).wp_db_id) {
+            const dbId = String((currentSession as any).wp_db_id);
+            if (localStorage.getItem("active_wp_db_id") !== dbId) {
+                localStorage.setItem("active_wp_db_id", dbId);
+                window.dispatchEvent(new Event("db-connection-changed"));
+            }
         }
     }
   }, [currentSession]);

@@ -48,12 +48,18 @@ async function sendMessage(session, chatId, text, replyTo = null) {
  */
 async function sendImage(session, chatId, imageUrl, caption) {
     try {
+        // Auto-detect mimetype from URL extension
+        let mimetype = "image/jpeg";
+        if (imageUrl.endsWith(".png")) mimetype = "image/png";
+        else if (imageUrl.endsWith(".webp")) mimetype = "image/webp";
+        else if (imageUrl.endsWith(".gif")) mimetype = "image/gif";
+        
         const payload = {
             chatId: chatId,
             file: {
-                mimetype: "image/jpeg", // WAHA often auto-detects, but good to specify if known
+                mimetype: mimetype,
                 url: imageUrl,
-                filename: "image.jpg"
+                filename: "image" + (imageUrl.split('.').pop() || ".jpg")
             },
             caption: caption,
             session: session

@@ -460,6 +460,30 @@ async function saveWhatsAppOrderTracking(orderData) {
     return data[0];
 }
 
+// 17. Get WhatsApp Chat History
+async function getWhatsAppChatHistory(sessionName, senderId, limit = 10) {
+    const { data, error } = await supabase
+        .from('whatsapp_chats')
+        .select('*')
+        .eq('session_name', sessionName)
+        // Check both sender and recipient to get full conversation
+        // OR logic: (sender_id = user AND recipient_id = page) OR (sender_id = page AND recipient_id = user)
+        .or(`and(sender_id.eq.${senderId},recipient_id.eq.${sessionName}),and(sender_id.eq.${sessionName},recipient_id.eq.${senderId})`)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error("Error fetching WA chat history:", error.message);
+        return [];
+    }
+
+    // Transform for AI Service: [{ role: 'user'|'assistant', content: '...' }]
+    return data.reverse().map(msg => ({
+        role: (msg.reply_by === 'user') ? 'user' : 'assistant',
+        content: msg.text || ''
+    }));
+}
+
 // 18. Deduct WhatsApp Credit (Shared User Balance)
 async function deductWhatsAppCredit(sessionName, amount = 1) {
     // 1. Get User ID from Session

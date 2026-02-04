@@ -40,6 +40,7 @@ export default function WhatsAppConversionPage() {
     reply_by?: string;
     status?: string;
     token_usage?: number;
+    model_used?: string;
   };
   const [messages, setMessages] = useState<WaChat[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,12 +59,52 @@ export default function WhatsAppConversionPage() {
   const [filterType, setFilterType] = useState("today");
 
   useEffect(() => {
-    const storedSessionName = localStorage.getItem("active_wa_session_name");
-    setActiveSessionName(storedSessionName);
-    if (storedSessionName) {
-        fetchStats(storedSessionName);
-    }
+    const checkConnection = () => {
+        const storedSessionName = localStorage.getItem("active_wa_session_id");
+        setActiveSessionName(storedSessionName);
+        if (storedSessionName) {
+            fetchStats(storedSessionName);
+        } else {
+            // Fallback: If no session name but we have a DB ID, maybe we can fetch the session name?
+            // This happens if the user refreshes and SessionSelector hasn't run yet.
+            const storedDbId = localStorage.getItem("active_wp_db_id");
+            if (storedDbId) {
+                // We can't easily fetch session name from DB ID here without a query.
+                // Let's try to fetch it.
+                fetchSessionNameFromId(storedDbId);
+            }
+        }
+    };
+
+    checkConnection();
+    window.addEventListener("storage", checkConnection);
+    window.addEventListener("db-connection-changed", checkConnection);
+
+    return () => {
+        window.removeEventListener("storage", checkConnection);
+        window.removeEventListener("db-connection-changed", checkConnection);
+    };
   }, []); // Fetch stats once on mount
+
+  const fetchSessionNameFromId = async (id: string) => {
+      try {
+          const { data, error } = await supabase
+              .from('whatsapp_message_database')
+              .select('session_name')
+              .eq('id', parseInt(id))
+              .single();
+          
+          if (data && (data as any).session_name) {
+              const sName = (data as any).session_name;
+              localStorage.setItem("active_wa_session_id", sName); // Fix the missing key
+              setActiveSessionName(sName);
+              fetchStats(sName);
+          }
+      } catch (e) {
+          console.error("Error recovering session name", e);
+      }
+  };
+
 
   useEffect(() => {
     // Fetch messages whenever date or sessionName changes
@@ -79,18 +120,7 @@ export default function WhatsAppConversionPage() {
             .from('whatsapp_chats')
             .select('*')
             .eq('session_name', sessionName)
-            .gte('timestamp', from.getTime()) // WhatsApp timestamp is BigInt/number (ms) usually? Or check if it's ISO string.
-            // Wait, dbService.js says timestamp: Date.now() which is number (ms).
-            // But Supabase timestamp column expects ISO string usually, or if it's bigint column.
-            // Let's check dbService.js again.
-            // Line 106: timestamp: Date.now()
-            // Line 354: upsert(data)
-            // If the column is `timestamp` type in Postgres, it expects ISO string. If it's `bigint`, it expects number.
-            // In Messenger code: .gte('created_at', from.toISOString())
-            // In WhatsApp code, let's assume it stores as BigInt (ms) based on Date.now() usage?
-            // Actually, if I look at `WhatsAppControlPage` conversion section logic (which I am removing), maybe I can see how it fetches?
-            // Wait, I didn't check that closely. Let's assume number for now, or check error.
-            // If it fails, I'll switch to ISO.
+            .gte('timestamp', from.getTime()) 
             .lte('timestamp', to.getTime()) 
             .order('timestamp', { ascending: false });
 
@@ -324,7 +354,7 @@ export default function WhatsAppConversionPage() {
                 <TableHead>Sender ID</TableHead>
                 <TableHead>Message</TableHead>
                 <TableHead>Reply By</TableHead>
-                <TableHead>Tokens</TableHead>
+                <TableHead>Usage (Tokens/Model)</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -348,7 +378,14 @@ export default function WhatsAppConversionPage() {
                         {msg.reply_by || 'Unknown'}
                       </span>
                     </TableCell>
-                    <TableCell>{msg.token_usage || '-'}</TableCell>
+                    <TableCell>
+                        <div className="flex flex-col">
+                            <span className="font-bold">{msg.token_usage || 0}</span>
+                            <span className="text-[10px] text-muted-foreground truncate max-w-[150px]" title={msg.model_used}>
+                                {msg.model_used || '-'}
+                            </span>
+                        </div>
+                    </TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs ${msg.status === 'sent' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'}`}>
                         {msg.status}
