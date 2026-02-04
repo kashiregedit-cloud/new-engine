@@ -44,6 +44,36 @@ const handleWebhook = async (req, res) => {
         if (payload.from === 'status@broadcast') return;
 
         await queueMessage(session, payload);
+    } else if (event === 'state.change') {
+        // Handle State Changes (WORKING, STOPPED, SCAN_QR_CODE, etc.)
+        const status = payload.body || payload.status; // WAHA payload format varies
+        console.log(`[WA Webhook] State Change for ${session}: ${status}`);
+        
+        let dbStatus = 'unknown';
+        let isActive = false;
+
+        if (status === 'WORKING') {
+            dbStatus = 'working';
+            isActive = true;
+        } else if (status === 'STOPPED') {
+            dbStatus = 'stopped';
+            isActive = false;
+        } else if (status === 'SCAN_QR_CODE' || status === 'SCAN_QR') {
+            dbStatus = 'scan_qr_code';
+            isActive = false;
+        } else {
+            dbStatus = status.toLowerCase();
+        }
+
+        try {
+            await dbService.updateWhatsAppEntryByName(session, {
+                status: dbStatus,
+                active: isActive
+            });
+            console.log(`[WA Webhook] DB Updated for ${session} -> Status: ${dbStatus}, Active: ${isActive}`);
+        } catch (err) {
+            console.error(`[WA Webhook] Failed to update DB status for ${session}:`, err.message);
+        }
     }
 };
 
@@ -170,16 +200,23 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             return;
         }
 
-        // 2. Check Subscription/Credit
+        // 2. Check Subscription/Credit & Gatekeeper
         const validStatuses = ['active', 'trial', 'active_trial', 'active_paid'];
         if (!validStatuses.includes(pageConfig.subscription_status)) {
              console.log(`[WA] Session ${sessionName} subscription inactive (Status: ${pageConfig.subscription_status}).`);
              return;
         }
-        
-        if (pageConfig.message_credit <= 0) {
-            console.log(`[WA] Session ${sessionName} out of credits.`);
-            return;
+
+        // Gatekeeper Logic: Allow if Own API is used, otherwise require Credit
+        const hasOwnKey = (pageConfig.api_key && pageConfig.api_key.length > 5 && pageConfig.cheap_engine === false);
+
+        if (hasOwnKey) {
+             console.log(`[WA] Session ${sessionName} using Own API. Gatekeeper ALLOW.`);
+        } else {
+             if (pageConfig.message_credit <= 0) {
+                 console.log(`[WA] Session ${sessionName} blocked by Gatekeeper (No Credit & No Own API).`);
+                 return;
+             }
         }
 
         // --- FETCH CONTEXT ---
@@ -343,13 +380,65 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         await whatsappService.stopTyping(sessionName, senderId);
 
         // Deduct Credit (WhatsApp Specific)
-        await dbService.deductWhatsAppCredit(sessionName, pageConfig.message_credit);
+        // Only deduct if NOT using Own API
+        if (!hasOwnKey) {
+             await dbService.deductWhatsAppCredit(sessionName, 1);
+        }
 
     } catch (error) {
         console.error("[WA] Error processing event:", error);
     }
 }
 
+// Cleanup Job
+async function checkAndCleanupExpiredSessions() {
+    console.log('[WA Cleanup] Checking for expired sessions...');
+    try {
+        const expiredSessions = await dbService.getExpiredWhatsAppSessions();
+        
+        if (!expiredSessions || expiredSessions.length === 0) {
+            // console.log('[WA Cleanup] No expired sessions found.');
+            return;
+        }
+
+        console.log(`[WA Cleanup] Found ${expiredSessions.length} expired sessions. Processing...`);
+
+        for (const session of expiredSessions) {
+            const { session_name } = session;
+            console.log(`[WA Cleanup] Expiring session '${session_name}'...`);
+
+            // 1. Stop/Delete in WAHA
+            try {
+                // Try logout/stop first
+                try { await whatsappService.logoutSession(session_name); } catch(e){}
+                await new Promise(r => setTimeout(r, 1000));
+                
+                try { await whatsappService.stopSession(session_name); } catch(e){}
+                await new Promise(r => setTimeout(r, 1000));
+
+                await whatsappService.deleteSession(session_name);
+            } catch (err) {
+                console.warn(`[WA Cleanup] WAHA cleanup error for '${session_name}':`, err.message);
+                // Continue to DB cleanup anyway
+            }
+
+            // 2. Mark as Expired in DB
+            // We set status to 'expired', active to false.
+            await dbService.updateWhatsAppEntryByName(session_name, {
+                status: 'expired',
+                active: false,
+                subscription_status: 'expired'
+            });
+            
+            console.log(`[WA Cleanup] Session '${session_name}' marked as expired.`);
+        }
+
+    } catch (err) {
+        console.error('[WA Cleanup] Error:', err);
+    }
+}
+
 module.exports = {
-    handleWebhook
+    handleWebhook,
+    checkAndCleanupExpiredSessions
 };

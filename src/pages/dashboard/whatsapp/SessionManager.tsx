@@ -41,6 +41,11 @@ export default function SessionManager() {
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [loadingSession, setLoadingSession] = useState<{ name: string; action: string } | null>(null);
+  
+  // Renew States
+  const [showRenewModal, setShowRenewModal] = useState(false);
+  const [sessionToRenew, setSessionToRenew] = useState<string | null>(null);
+  const [isRenewing, setIsRenewing] = useState(false);
 
   // Selection States
   const [selectedEngine, setSelectedEngine] = useState<"WEBJS" | "NOWEB">("WEBJS");
@@ -107,12 +112,14 @@ export default function SessionManager() {
   const getPrice = () => {
     // Determine price based on selected engine and plan
     if (selectedEngine === "WEBJS") {
+      if (selectedPlan === "1") return 50;  // 1 Day
       if (selectedPlan === "2") return 200; // Demo
       if (selectedPlan === "30") return 2000;
       if (selectedPlan === "60") return 3500;
       if (selectedPlan === "90") return 4000;
     } else {
       // NOWAB (NOWEB)
+      if (selectedPlan === "1") return 20;  // 1 Day
       if (selectedPlan === "2") return 100; // Demo
       if (selectedPlan === "30") return 500;
       if (selectedPlan === "60") return 900;
@@ -258,15 +265,60 @@ export default function SessionManager() {
     }
   };
 
-  const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
+  const handleAction = async (action: 'start' | 'stop' | 'delete' | 'restart' | 'renew', sessionName: string) => {
     if (action === 'delete') {
         setSessionToDelete(sessionName);
         setShowDeleteModal(true);
         return;
     }
+    
+    if (action === 'renew') {
+        setSessionToRenew(sessionName);
+        setSelectedPlan("30"); // Default
+        setShowRenewModal(true);
+        return;
+    }
 
     // Direct action for start/stop/restart
     executeAction(action, sessionName);
+  };
+
+  const handleRenewSession = async () => {
+      if (!sessionToRenew) return;
+      
+      const price = getPrice();
+      if (balance !== null && balance < price) {
+          toast.error(`Insufficient Balance. You need ${price} BDT.`);
+          return;
+      }
+  
+      setIsRenewing(true);
+      try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const res = await fetch(`${BACKEND_URL}/whatsapp/session/renew`, {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+              },
+              body: JSON.stringify({ 
+                  sessionName: sessionToRenew,
+                  days: parseInt(selectedPlan)
+              })
+          });
+  
+          if (!res.ok) throw new Error('Renew failed');
+          
+          toast.success("Session renewed successfully!");
+          await refreshSessions();
+          setShowRenewModal(false);
+          setSessionToRenew(null);
+          fetchBalance();
+      } catch (e: any) {
+          toast.error(e.message || "Failed to renew");
+      } finally {
+          setIsRenewing(false);
+      }
   };
 
   const executeAction = async (action: 'start' | 'stop' | 'delete' | 'restart', sessionName: string) => {
@@ -382,6 +434,23 @@ export default function SessionManager() {
             </CardHeader>
 
             <CardContent className="pt-5 space-y-3">
+              {/* Expiry Info */}
+              {(session as any).expires_at && (
+                  <div className="flex justify-between items-center bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
+                      <span className="text-[10px] text-slate-500 font-mono">
+                          Expires: {new Date((session as any).expires_at).toLocaleDateString()}
+                      </span>
+                      <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleAction('renew', session.name)} 
+                          className="h-5 text-[10px] px-2 text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                      >
+                          Renew
+                      </Button>
+                  </div>
+              )}
+
               {/* Control Grid */}
               <div className="grid grid-cols-2 gap-2.5">
                 {session.status === 'STOPPED' ? (
@@ -505,25 +574,38 @@ export default function SessionManager() {
             {/* Plan Selection */}
             <div className="space-y-3">
                 <Label className="text-base font-semibold text-slate-200">Select Duration</Label>
-                <div className="grid grid-cols-4 gap-3">
-                    {["2", "30", "60", "90"].map((plan) => {
+                <div className="grid grid-cols-5 gap-3">
+                    {["1", "2", "30", "60", "90"].map((plan) => {
                         const isSelected = selectedPlan === plan;
-                        const price = selectedEngine === "WEBJS" 
-                            ? (plan === "2" ? 200 : plan === "30" ? 2000 : plan === "60" ? 3500 : 4000)
-                            : (plan === "2" ? 100 : plan === "30" ? 500 : plan === "60" ? 900 : 1500);
+                        let price = 0;
+                        if (selectedEngine === "WEBJS") {
+                             if (plan === "1") price = 50;
+                             else if (plan === "2") price = 200;
+                             else if (plan === "30") price = 2000;
+                             else if (plan === "60") price = 3500;
+                             else if (plan === "90") price = 4000;
+                        } else {
+                             if (plan === "1") price = 20;
+                             else if (plan === "2") price = 100;
+                             else if (plan === "30") price = 500;
+                             else if (plan === "60") price = 900;
+                             else if (plan === "90") price = 1500;
+                        }
 
                         return (
                             <div 
                                 key={plan}
                                 onClick={() => setSelectedPlan(plan)}
-                                className={`cursor-pointer rounded-xl border-2 p-3 text-center transition-all duration-200 hover:scale-[1.02] ${
+                                className={`cursor-pointer rounded-xl border-2 p-2 text-center transition-all duration-200 hover:scale-[1.02] ${
                                     isSelected 
                                     ? "border-green-500/50 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.1)]" 
                                     : "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900"
                                 }`}
                             >
-                                <div className={`text-lg font-bold ${isSelected ? "text-green-400" : "text-slate-300"}`}>{plan === "2" ? "48 Hrs" : `${plan} Days`}</div>
-                                <div className={`text-sm font-medium ${isSelected ? "text-green-500" : "text-slate-500"}`}>{price} BDT</div>
+                                <div className={`text-sm md:text-base font-bold ${isSelected ? "text-green-400" : "text-slate-300"}`}>
+                                    {plan === "1" ? "1 Day" : plan === "2" ? "48 Hrs" : `${plan} Days`}
+                                </div>
+                                <div className={`text-xs font-medium ${isSelected ? "text-green-500" : "text-slate-500"}`}>{price} BDT</div>
                             </div>
                         );
                     })}
@@ -592,6 +674,71 @@ export default function SessionManager() {
                 className="bg-red-600 hover:bg-red-700 min-w-[120px] shadow-lg shadow-red-900/20"
             >
                 {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Delete Session"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* RENEW SESSION MODAL */}
+      <Dialog open={showRenewModal} onOpenChange={setShowRenewModal}>
+        <DialogContent className="sm:max-w-[600px] bg-slate-950 shadow-2xl border border-slate-800 rounded-2xl overflow-hidden p-0 gap-0 text-slate-100">
+          <div className="bg-slate-900/50 p-6 border-b border-slate-800">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold flex items-center gap-2 text-white">
+                 <RefreshCw className="h-6 w-6 text-green-500" />
+                 Renew Session
+              </DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Extend the validity of <span className="font-mono text-green-400">{sessionToRenew}</span>.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          
+          <div className="grid gap-6 p-6">
+            {/* Plan Selection */}
+            <div className="space-y-3">
+                <Label className="text-base font-semibold text-slate-200">Select Extension Duration</Label>
+                <div className="grid grid-cols-4 gap-3">
+                    {["2", "30", "60", "90"].map((plan) => {
+                        const isSelected = selectedPlan === plan;
+                        const price = selectedEngine === "WEBJS" 
+                            ? (plan === "2" ? 200 : plan === "30" ? 2000 : plan === "60" ? 3500 : 4000)
+                            : (plan === "2" ? 100 : plan === "30" ? 500 : plan === "60" ? 900 : 1500);
+
+                        return (
+                            <div 
+                                key={plan}
+                                onClick={() => setSelectedPlan(plan)}
+                                className={`cursor-pointer rounded-xl border-2 p-3 text-center transition-all duration-200 hover:scale-[1.02] ${
+                                    isSelected 
+                                    ? "border-green-500/50 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.1)]" 
+                                    : "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900"
+                                }`}
+                            >
+                                <div className={`text-lg font-bold ${isSelected ? "text-green-400" : "text-slate-300"}`}>{plan === "2" ? "48 Hrs" : `${plan} Days`}</div>
+                                <div className={`text-sm font-medium ${isSelected ? "text-green-500" : "text-slate-500"}`}>{price} BDT</div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Total Price */}
+            <div className="flex items-center justify-between rounded-xl border border-slate-800 p-5 bg-slate-900/50">
+                <div className="flex flex-col">
+                    <span className="text-sm font-semibold text-slate-300">Total Renewal Cost</span>
+                    <span className="text-xs text-slate-500">Deducted from your balance</span>
+                </div>
+                <div className="text-3xl font-black text-green-500">
+                    {getPrice()} <span className="text-sm font-medium text-green-600/70">BDT</span>
+                </div>
+            </div>
+          </div>
+
+          <div className="p-6 bg-slate-900 border-t border-slate-800 flex justify-end gap-3">
+            <Button variant="outline" size="lg" onClick={() => setShowRenewModal(false)} className="border-slate-700 bg-transparent text-slate-300 hover:bg-slate-800 hover:text-white">Cancel</Button>
+            <Button size="lg" onClick={handleRenewSession} disabled={isRenewing} className="bg-green-600 hover:bg-green-700 text-white min-w-[150px] shadow-lg shadow-green-900/20">
+                {isRenewing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Pay & Renew"}
             </Button>
           </div>
         </DialogContent>

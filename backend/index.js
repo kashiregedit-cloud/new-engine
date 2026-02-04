@@ -1,5 +1,6 @@
 require('dotenv').config();
 const app = require('./src/app');
+const whatsappController = require('./src/controllers/whatsappController');
 
 const PORT = process.env.PORT || 3001;
 
@@ -18,4 +19,12 @@ process.on('unhandledRejection', (err) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Webhook URL: http://localhost:${PORT}/webhook`);
+
+  // Start Cleanup Job (Every 1 hour)
+  setInterval(() => {
+      whatsappController.checkAndCleanupExpiredSessions();
+  }, 60 * 60 * 1000);
+  
+  // Run once on start
+  whatsappController.checkAndCleanupExpiredSessions();
 });

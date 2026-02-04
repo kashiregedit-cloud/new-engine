@@ -801,6 +801,96 @@ async function updateWhatsAppEntryByName(sessionName, updates) {
     if (error) console.error("Error updating WhatsApp entry by name:", error.message);
 }
 
+// 22. Renew WhatsApp Session
+async function renewWhatsAppSession(sessionName, days) {
+    // 1. Get current expiry
+    const { data: session, error: fetchError } = await supabase
+        .from('whatsapp_message_database')
+        .select('expires_at, plan_days')
+        .eq('session_name', sessionName)
+        .single();
+
+    if (fetchError || !session) throw new Error("Session not found");
+
+    let newExpiresAt = new Date();
+    // If currently active and not expired, add to existing expiry
+    if (session.expires_at && new Date(session.expires_at) > new Date()) {
+        newExpiresAt = new Date(session.expires_at);
+    }
+    
+    // Add days
+    newExpiresAt.setDate(newExpiresAt.getDate() + days);
+
+    const { data, error } = await supabase
+        .from('whatsapp_message_database')
+        .update({
+            expires_at: newExpiresAt.toISOString(),
+            plan_days: (session.plan_days || 0) + days,
+            active: true,
+            status: 'working', // Restore status if it was expired
+            subscription_status: 'active'
+        })
+        .eq('session_name', sessionName)
+        .select()
+        .single();
+
+    if (error) throw error;
+    return data;
+}
+
+// 23. Get Expired WhatsApp Sessions
+async function getExpiredWhatsAppSessions() {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+        .from('whatsapp_message_database')
+        .select('session_name, user_id, expires_at')
+        .lt('expires_at', now)
+        .eq('active', true); // Only get those marked as active but time has passed
+
+    if (error) {
+        console.error("Error fetching expired sessions:", error);
+        return [];
+    }
+    return data;
+}
+
+// 24. Deduct User Balance (for Plans)
+async function deductUserBalance(userId, amount, description = 'Plan Purchase') {
+    // Check balance
+    const { data: userConfig, error: fetchError } = await supabase
+        .from('user_configs')
+        .select('balance, email') // Assuming email is not here but in auth.users, but checking schema
+        .eq('user_id', userId)
+        .single();
+
+    if (fetchError || !userConfig) throw new Error("User config not found");
+    
+    if ((userConfig.balance || 0) < amount) {
+        throw new Error("Insufficient balance");
+    }
+
+    // Deduct
+    const { error: updateError } = await supabase
+        .from('user_configs')
+        .update({ balance: (userConfig.balance || 0) - amount })
+        .eq('user_id', userId);
+
+    if (updateError) throw updateError;
+
+    // Log Transaction
+    await supabase.from('payment_transactions').insert({
+        user_email: userConfig.email || 'unknown', // Ideally fetch email from auth or store it in user_configs
+        amount: amount,
+        method: 'balance_deduction',
+        trx_id: `SUB_${Date.now()}`,
+        sender_number: 'SYSTEM',
+        status: 'completed',
+        notes: description
+    });
+
+    return true;
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -829,5 +919,8 @@ module.exports = {
     deductWhatsAppCredit,
     saveWhatsAppContact,
     updateWhatsAppEntry,
-    updateWhatsAppEntryByName
+    updateWhatsAppEntryByName,
+    renewWhatsAppSession,
+    getExpiredWhatsAppSessions,
+    deductUserBalance
 };
