@@ -79,9 +79,7 @@ export function DashboardSidebar({ isMobile, onLinkClick }: { isMobile?: boolean
     if (['whatsapp', 'messenger'].includes(platform)) {
       platformItems.push({ title: "AI Settings", icon: Sparkles, path: `${base}/settings` });
       platformItems.push({ title: "Order Tracking", icon: ShoppingBag, path: `${base}/orders` });
-      if (platform === 'messenger') {
-        platformItems.push({ title: "Conversion", icon: MessageSquare, path: `${base}/conversion` });
-      }
+      platformItems.push({ title: "Conversion", icon: MessageSquare, path: `${base}/conversion` });
     }
 
     const switchItem = { title: "Switch Platform", icon: ArrowLeft, path: "/dashboard" };

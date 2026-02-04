@@ -23,6 +23,7 @@ import SettingsPage from "./pages/dashboard/SettingsPage";
 import WhatsAppOrderTrackingPage from "./pages/dashboard/whatsapp/WhatsAppOrderTrackingPage";
 import SessionManager from "./pages/dashboard/whatsapp/SessionManager";
 import WhatsAppSettingsPage from "./pages/dashboard/whatsapp/WhatsAppSettingsPage";
+import WhatsAppConversionPage from "./pages/dashboard/whatsapp/WhatsAppConversionPage";
 import MessengerIntegrationPage from "./pages/dashboard/messenger/MessengerIntegrationPage";
 import MessengerControlPage from "./pages/dashboard/messenger/MessengerControlPage";
 import MessengerOrderTrackingPage from "./pages/dashboard/messenger/MessengerOrderTrackingPage";
@@ -99,6 +100,7 @@ const App = () => (
               <Route path="control" element={<WhatsAppControlPage />} />
               <Route path="settings" element={<WhatsAppSettingsPage />} />
               <Route path="orders" element={<WhatsAppOrderTrackingPage />} />
+              <Route path="conversion" element={<WhatsAppConversionPage />} />
               <Route path="products" element={<ProductsPage />} />
               <Route path="ads" element={<AdsPage />} />
               <Route path="reseller" element={<ResellerPage />} />

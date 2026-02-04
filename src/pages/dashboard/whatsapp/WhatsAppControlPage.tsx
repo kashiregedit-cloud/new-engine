@@ -485,46 +485,6 @@ export default function WhatsAppControlPage() {
         </Card>
 
       </div>
-
-      {/* Conversion Section (Compact) */}
-      <Card className="bg-card border-border shadow-sm">
-        <CardHeader>
-          <CardTitle>Conversion</CardTitle>
-          <CardDescription>Recent Conversations, Tokens Used, Bot Replies</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-            <div className="border rounded-md p-3">
-              <div className="text-xs text-muted-foreground">Bot Replies (Today/Yesterday)</div>
-              <div className="mt-1 text-lg font-bold">{stats.todayBotReplies} <span className="text-sm text-muted-foreground">/ {stats.yesterdayBotReplies}</span></div>
-            </div>
-            <div className="border rounded-md p-3">
-              <div className="text-xs text-muted-foreground">Tokens Used (Today/Yesterday)</div>
-              <div className="mt-1 text-lg font-bold">{stats.todayTokens} <span className="text-sm text-muted-foreground">/ {stats.yesterdayTokens}</span></div>
-            </div>
-            <div className="border rounded-md p-3">
-              <div className="text-xs text-muted-foreground">Customers (Today/Yesterday)</div>
-              <div className="mt-1 text-lg font-bold">{stats.todayCustomers} <span className="text-sm text-muted-foreground">/ {stats.yesterdayCustomers}</span></div>
-            </div>
-          </div>
-          <div className="border rounded-md">
-            <div className="px-3 py-2 text-sm font-semibold">Recent Conversations</div>
-            <div className="divide-y">
-              {recentChats.slice(0, 12).map((c, idx) => (
-                <div key={idx} className="px-3 py-2 text-sm">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{c.reply_by === 'bot' ? 'Bot' : 'User'}</span>
-                    <span>{new Date(Number(c.timestamp || 0)).toLocaleString()}</span>
-                  </div>
-                  <div className="mt-1 line-clamp-2">{c.text}</div>
-                  <div className="mt-1 text-[11px] text-muted-foreground">Tokens: {c.token_usage || 0}</div>
-                </div>
-              ))}
-              {recentChats.length === 0 && <div className="px-3 py-3 text-sm text-muted-foreground">No messages yet.</div>}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
