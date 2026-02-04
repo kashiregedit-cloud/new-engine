@@ -41,9 +41,21 @@ const handleWebhook = async (req, res) => {
         if (payload.fromMe) return;
 
         // Ignore Status Updates (broadcasts)
-        if (payload.from === 'status@broadcast') return;
+    if (payload.from === 'status@broadcast') return;
 
-        await queueMessage(session, payload);
+    // --- TIMESTAMP CHECK (Ignore Old Messages > 2 Mins) ---
+    // Prevents "Backlog Blast" when connecting a session with unread messages.
+    const msgTimestamp = payload.timestamp || Date.now() / 1000;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const ageSeconds = nowSeconds - msgTimestamp;
+    
+    if (ageSeconds > 120) { // 2 Minutes Tolerance
+        console.log(`[WA] Ignoring old message from ${payload.from}. Age: ${ageSeconds}s`);
+        return;
+    }
+    // -----------------------------------------------------
+
+    await queueMessage(session, payload);
     } else if (event === 'state.change') {
         // Handle State Changes (WORKING, STOPPED, SCAN_QR_CODE, etc.)
         const status = payload.body || payload.status; // WAHA payload format varies
@@ -317,7 +329,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Inject Formatting
         // Note: pageConfig IS pagePrompts in WhatsApp (merged table)
         if (pageConfig.text_prompt) {
-             pageConfig.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. Use WhatsApp Formatting (*Bold*, _Italic_, ~Strike~).\n2. Keep it concise.\n3. **STRICT IMAGE FORMAT**: 'IMAGE: Title | URL'`;
+             pageConfig.text_prompt += `\n\n[IMPORTANT OUTPUT RULES]\n1. Use WhatsApp Formatting (*Bold*, _Italic_, ~Strike~).\n2. Keep it concise.\n3. If explaining multiple items/plans, keep each section SHORT.\n4. Include the IMAGE LINK for EVERY item/plan described.\n5. **STRICT IMAGE FORMAT**: You MUST output images using this EXACT format:\n   IMAGE: Plan Name | https://your-image-url.com\n   (Example: "IMAGE: 🌟 Basic Plan | https://i.imgur.com/xyz.jpg")\n   **CRITICAL**: The URL MUST be a direct image link (ending in .jpg, .png, .webp). Do NOT use product page URLs.\n6. DO NOT use [Image] placeholders. ONLY use the 'IMAGE: Title | URL' format.`;
         }
 
         // pageConfig serves as both config and prompts
@@ -339,18 +351,72 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
              });
         }
 
+        // --- PRE-SEND CHECK (Race Condition Fix) ---
+        // Check again if Admin replied while AI was generating
+        const freshHistory = await dbService.getWhatsAppChatHistory(sessionName, senderId, 1);
+        if (freshHistory && freshHistory.length > 0) {
+            const latest = freshHistory[0];
+            // If latest message is from US (sessionName) and NOT bot_reply, it's a human/admin reply
+            if (latest.sender_id === sessionName && latest.status !== 'bot_reply') {
+                console.log(`[WA] Admin replied while AI was generating. Stopping reply for ${sessionId}.`);
+                return;
+            }
+        }
+        // -------------------------------------------
+
         // --- SEND REPLY ---
         let replyText = aiResponse.reply;
 
         // Silent Failure Rule
         if (!replyText && (!aiResponse.images || aiResponse.images.length === 0)) {
-             console.log(`[WA] No response generated. Skipping reply.`);
+             console.log(`[WA] No response generated (Silent Failure). Skipping reply.`);
              return;
         }
         
-        // Extract Images
+        // --- SMART IMAGE EXTRACTION & CLEANING ---
         if (!aiResponse.images) aiResponse.images = [];
+        const extractedImages = [...aiResponse.images]; 
+
+        // 1. STRICT FORMAT: IMAGE: Title | URL
+        const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s,]+)/gi;
+        let strictMatch;
+        while ((strictMatch = strictImageRegex.exec(replyText)) !== null) {
+            const fullMatch = strictMatch[0];
+            const title = strictMatch[1].trim();
+            let url = strictMatch[2].trim();
+            url = url.replace(/[,.]$/, ''); // Cleanup
+
+            // Fix Google Drive Links
+            const driveIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (driveIdMatch && driveIdMatch[1]) {
+                url = `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
+            }
+
+            if (!extractedImages.some(img => img.url === url)) {
+                extractedImages.push({ url: url, title: title });
+            }
+            
+            // Remove from text
+            replyText = replyText.replace(fullMatch, '').trim();
+        }
+
+        // 2. Google Drive Viewer Links (Standalone)
+        const driveRegex = /(?:(?:Image|Link|Sobi|Photo|Picture|চিত্র)\s*[:|-]?\s*)?(https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view[^\s,]*)/gi;
+        let driveMatch;
+        while ((driveMatch = driveRegex.exec(replyText)) !== null) {
+             const fullMatch = driveMatch[0];
+             const fileId = driveMatch[2];
+             const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+             
+             if (!extractedImages.some(img => img.url === directUrl)) {
+                 extractedImages.push({ url: directUrl, title: 'Image' });
+             }
+             replyText = replyText.replace(fullMatch, '').trim();
+        }
         
+        // Update aiResponse with cleaned text and extracted images
+        aiResponse.images = extractedImages;
+
         // Send Text
         let botMessageId = `bot_${Date.now()}`;
         if (replyText) {

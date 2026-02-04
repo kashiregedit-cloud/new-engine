@@ -13,6 +13,7 @@ export default function WhatsAppControlPage() {
   const [saving, setSaving] = useState(false);
   const [dbId, setDbId] = useState<string | null>(null);
   const [verified, setVerified] = useState(true);
+  const [expiryDays, setExpiryDays] = useState<number | null>(null);
   const [config, setConfig] = useState({
     reply_message: false,
     swipe_reply: false,
@@ -49,7 +50,7 @@ export default function WhatsAppControlPage() {
   const fetchConfig = async (id: string) => {
     try {
       const { data, error } = await supabase
-        .from('wp_message_database')
+        .from('whatsapp_message_database')
         .select('*')
         .eq('id', parseInt(id))
         .single();
@@ -60,6 +61,16 @@ export default function WhatsAppControlPage() {
         // Explicitly cast data to any to bypass 'never' type inference
         const row = data as any;
         setVerified(row.verified !== false); 
+        
+        // Calculate Days Left
+        if (row.expires_at) {
+          const expires = new Date(row.expires_at);
+          const now = new Date();
+          const diffTime = expires.getTime() - now.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+          setExpiryDays(diffDays > 0 ? diffDays : 0);
+        }
+
         setConfig({
           reply_message: row.reply_message ?? false,
           swipe_reply: row.swipe_reply ?? false,
@@ -83,7 +94,7 @@ export default function WhatsAppControlPage() {
     setSaving(true);
     try {
       const { error } = await (supabase
-        .from('wp_message_database') as any)
+        .from('whatsapp_message_database') as any)
         .update(config)
         .eq('id', parseInt(dbId));
 
@@ -153,6 +164,28 @@ export default function WhatsAppControlPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Expiry Card */}
+        {expiryDays !== null && (
+          <Card className="bg-card border-border shadow-sm col-span-1 lg:col-span-2">
+            <CardContent className="p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className={`p-3 rounded-full ${expiryDays < 3 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                   <Sparkles size={24} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-lg font-semibold">Session Status</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {expiryDays} days remaining in your active plan.
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" className="cursor-default hover:bg-transparent">
+                {expiryDays} Days Left
+              </Button>
+            </CardContent>
+          </Card>
+        )}
         
         {/* Reply Message */}
         <Card className="bg-card border-border shadow-sm">

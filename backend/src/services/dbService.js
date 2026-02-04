@@ -272,7 +272,7 @@ async function getMessageById(messageId) {
 }
 
 // 12. Create WhatsApp Entry (whatsapp_message_database)
-async function createWhatsAppEntry(sessionName, userId) {
+async function createWhatsAppEntry(sessionName, userId, planDays = 30, initialStatus = 'connected') {
     // Check if it already exists
     const { data: existing } = await supabase
         .from('whatsapp_message_database')
@@ -282,16 +282,23 @@ async function createWhatsAppEntry(sessionName, userId) {
 
     if (existing) return existing;
 
+    // Calculate Expiry
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + parseInt(planDays));
+
     const { data, error } = await supabase
         .from('whatsapp_message_database')
         .insert({
             session_name: sessionName,
             user_id: userId,
             active: true,
-            status: 'created',
+            status: initialStatus,         // Use detected status
             reply_message: true,           // Auto-enable bot
+            order_tracking: true,          // Auto-enable order tracking
             subscription_status: 'active', // Auto-activate subscription
-            text_prompt: "You are a helpful assistant for this store. Reply in a friendly manner." // Default prompt
+            text_prompt: "You are a helpful assistant for this store. Reply in a friendly manner.", // Default prompt
+            expires_at: expiresAt.toISOString(),
+            plan_days: parseInt(planDays)
         })
         .select()
         .single();
@@ -891,6 +898,19 @@ async function deductUserBalance(userId, amount, description = 'Plan Purchase') 
     return true;
 }
 
+// 25. Delete WhatsApp Entry
+async function deleteWhatsAppEntry(sessionName) {
+    const { error } = await supabase
+        .from('whatsapp_message_database')
+        .delete()
+        .eq('session_name', sessionName);
+
+    if (error) {
+        console.error("Error deleting WhatsApp entry:", error.message);
+        throw error;
+    }
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -922,5 +942,6 @@ module.exports = {
     updateWhatsAppEntryByName,
     renewWhatsAppSession,
     getExpiredWhatsAppSessions,
-    deductUserBalance
+    deductUserBalance,
+    deleteWhatsAppEntry
 };

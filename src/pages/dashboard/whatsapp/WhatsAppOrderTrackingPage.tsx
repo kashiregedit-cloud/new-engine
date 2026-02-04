@@ -48,7 +48,7 @@ Phone: ${order.number || 'N/A'}`;
     const fetchOrders = async () => {
       setOrderLoading(true);
       try {
-        let query = (supabase.from('wpp_order_tracking') as any).select('*').order('created_at', { ascending: false });
+        let query = (supabase.from('whatsapp_order_tracking') as any).select('*').order('created_at', { ascending: false });
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);

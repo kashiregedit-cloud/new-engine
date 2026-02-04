@@ -134,6 +134,7 @@ router.post('/session/create', async (req, res) => {
         // 2. Wait for Session to appear and Start it
         let sessionReady = false;
         let attempts = 0;
+        let detectedStatus = 'created'; // Default
         const maxAttempts = 20; // 20 seconds timeout
 
         while (!sessionReady && attempts < maxAttempts) {
@@ -147,6 +148,7 @@ router.post('/session/create', async (req, res) => {
 
                 if (session) {
                     console.log(`[WhatsApp] Session '${finalName}' found. Status: ${session.status}`);
+                    detectedStatus = session.status; // Capture status
                     
                     if (session.status === 'STOPPED') {
                         console.log(`[WhatsApp] Session '${finalName}' is STOPPED. Starting...`);
@@ -170,7 +172,7 @@ router.post('/session/create', async (req, res) => {
         }
         
         // 3. Insert into whatsapp_message_database
-        const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id, duration);
+        const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id, duration, detectedStatus);
         
         let qr = null;
 
