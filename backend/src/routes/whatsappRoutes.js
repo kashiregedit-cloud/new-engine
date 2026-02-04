@@ -17,7 +17,7 @@ router.get('/sessions', async (req, res) => {
         // 2. Get DB Sessions (for expiry info)
         const { data: dbSessions, error } = await dbService.supabase
             .from('whatsapp_message_database')
-            .select('session_name, expires_at, plan_days, status, subscription_status');
+            .select('id, session_name, expires_at, plan_days, status, subscription_status');
 
         if (error) throw error;
 
@@ -26,6 +26,8 @@ router.get('/sessions', async (req, res) => {
             const dbSession = dbSessions.find(ds => ds.session_name === ws.name);
             return {
                 ...ws,
+                wp_db_id: dbSession?.id || null, // Critical for auto-connect
+                wp_id: dbSession?.id || null,    // For UI display
                 expires_at: dbSession?.expires_at || null,
                 plan_days: dbSession?.plan_days || null,
                 subscription_status: dbSession?.subscription_status || 'unknown',
@@ -41,6 +43,8 @@ router.get('/sessions', async (req, res) => {
                     status: 'STOPPED', // Assume stopped if not in WAHA
                     config: {},
                     me: null,
+                    wp_db_id: ds.id,
+                    wp_id: ds.id,
                     expires_at: ds.expires_at,
                     plan_days: ds.plan_days,
                     subscription_status: ds.subscription_status || 'unknown',
@@ -53,6 +57,26 @@ router.get('/sessions', async (req, res) => {
     } catch (err) {
         console.error("Get Sessions Error:", err);
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Get Pairing Code
+router.post('/session/pairing-code', async (req, res) => {
+    try {
+        const { sessionName, phoneNumber } = req.body;
+        if (!sessionName || !phoneNumber) {
+            return res.status(400).json({ error: "Missing sessionName or phoneNumber" });
+        }
+        
+        console.log(`[WhatsApp] Requesting Pairing Code for ${sessionName} (Phone: ${phoneNumber})...`);
+        const code = await whatsappService.getPairingCode(sessionName, phoneNumber);
+        
+        res.json({ success: true, code: code });
+    } catch (err) {
+        console.error("Get Pairing Code Error:", err);
+        // Extract helpful error message if possible
+        const msg = err.response?.data?.error || err.message;
+        res.status(500).json({ error: msg });
     }
 });
 
@@ -195,6 +219,7 @@ router.post('/session/create', async (req, res) => {
         res.json({ 
             success: true, 
             id: dbEntry.id,
+            wp_db_id: dbEntry.id, // Explicitly return wp_db_id for frontend consistency
             session_name: finalName,
             qr_code: qr
         });

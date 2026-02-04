@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useWhatsApp } from "@/context/WhatsAppContext";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,10 +21,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Calendar as CalendarIcon, Download, ShoppingBag, Copy, Check } from "lucide-react";
+import { Calendar as CalendarIcon, Download, ShoppingBag, Copy, Check, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { Link } from "react-router-dom";
 
 export default function WhatsAppOrderTrackingPage() {
+  const { currentSession } = useWhatsApp();
   const [orders, setOrders] = useState<any[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom' | 'all'>('today');
@@ -45,10 +48,15 @@ Phone: ${order.number || 'N/A'}`;
   };
 
   useEffect(() => {
+    if (!currentSession) return;
+
     const fetchOrders = async () => {
       setOrderLoading(true);
       try {
-        let query = (supabase.from('whatsapp_order_tracking') as any).select('*').order('created_at', { ascending: false });
+        let query = (supabase.from('whatsapp_order_tracking') as any)
+            .select('*')
+            .eq('session_name', currentSession.name)
+            .order('created_at', { ascending: false });
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -83,7 +91,20 @@ Phone: ${order.number || 'N/A'}`;
     };
 
     fetchOrders();
-  }, [dateFilter, date]);
+  }, [dateFilter, date, currentSession]);
+
+  if (!currentSession) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
+        <AlertCircle className="h-16 w-16 text-muted-foreground" />
+        <h2 className="text-2xl font-bold">No Session Selected</h2>
+        <p className="text-muted-foreground">Please select a WhatsApp session to view orders.</p>
+        <Button asChild>
+            <Link to="/dashboard/whatsapp/sessions">Go to Sessions</Link>
+        </Button>
+      </div>
+    );
+  }
 
   const downloadCSV = () => {
     if (!orders.length) {

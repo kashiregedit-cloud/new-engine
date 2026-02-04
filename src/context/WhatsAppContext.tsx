@@ -113,11 +113,21 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       // Filter WAHA sessions to only show allowed ones and merge DB data
       formattedSessions = allSessions
           .filter((s) => allowedNames.includes(s.name))
-          .map(s => ({
-              ...s,
-              wp_db_id: dbSessionMap.get(s.name)?.id,
-              expires_at: dbSessionMap.get(s.name)?.expires_at
-          }));
+          .map(s => {
+              // Try exact match first, then case-insensitive
+              let dbSession = dbSessionMap.get(s.name);
+              if (!dbSession) {
+                  // Fallback: Case-insensitive search
+                  const key = Array.from(dbSessionMap.keys()).find(k => k.toLowerCase() === s.name.toLowerCase());
+                  if (key) dbSession = dbSessionMap.get(key);
+              }
+
+              return {
+                ...s,
+                wp_db_id: dbSession?.id,
+                expires_at: dbSession?.expires_at
+              };
+          });
       
       setSessions(formattedSessions);
       

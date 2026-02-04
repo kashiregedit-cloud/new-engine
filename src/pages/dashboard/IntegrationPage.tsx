@@ -75,6 +75,11 @@ export default function IntegrationPage() {
   const [balance, setBalance] = useState<number | null>(null);
   const [selectedPlan, setSelectedPlan] = useState("30");
 
+  // Pairing Code State
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+
   const fetchBalance = React.useCallback(async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -272,7 +277,7 @@ export default function IntegrationPage() {
     }, 100);
   };
 
-  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
+  const handleAction = async (sessionName: string, action: 'start' | 'stop' | 'restart' | 'delete') => {
         if (action === 'delete') {
             // Force delay to prevent UI race conditions
             setTimeout(() => {
@@ -288,6 +293,31 @@ export default function IntegrationPage() {
 
         performAction(sessionName, action);
     };
+
+  const handleGetPairingCode = async () => {
+      if (!qrSession || !phoneNumber) {
+          toast.error("Please enter a phone number");
+          return;
+      }
+      setPairingLoading(true);
+      setPairingCode(null);
+      try {
+          const res = await fetch(`${BACKEND_URL}/whatsapp/session/pairing-code`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionName: qrSession.session_name, phoneNumber })
+          });
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          setPairingCode(data.code);
+          toast.success("Pairing Code Generated!");
+      } catch (e: any) {
+          toast.error(e.message || "Failed to get pairing code");
+      } finally {
+          setPairingLoading(false);
+      }
+  };
+
 
     const performAction = async (sessionName: string, action: 'start' | 'stop' | 'delete' | 'restart') => {
       let { data: { session } } = await supabase.auth.getSession();
@@ -604,8 +634,29 @@ export default function IntegrationPage() {
                     I Scanned It
                 </Button>
             </div>
+
+            <div className="w-full border-t pt-4 mt-2">
+                <p className="text-sm font-medium mb-2 text-center">Or Link with Phone Number</p>
+                <div className="flex gap-2">
+                    <Input 
+                        placeholder="+8801..." 
+                        value={phoneNumber} 
+                        onChange={e => setPhoneNumber(e.target.value)}
+                    />
+                    <Button onClick={handleGetPairingCode} disabled={pairingLoading}>
+                        {pairingLoading ? <Loader2 className="animate-spin h-4 w-4" /> : "Get Code"}
+                    </Button>
+                </div>
+                {pairingCode && (
+                    <div className="mt-4 p-4 bg-secondary rounded-lg text-center">
+                        <p className="text-xs text-muted-foreground mb-1">Pairing Code</p>
+                        <p className="text-2xl font-mono font-bold tracking-widest text-primary">{pairingCode}</p>
+                    </div>
+                )}
+            </div>
           </div>
         </DialogContent>
+
       </Dialog>
 
 

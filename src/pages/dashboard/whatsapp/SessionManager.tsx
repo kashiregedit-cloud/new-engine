@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 
 export default function SessionManager() {
-  const { sessions, refreshSessions, loading: listLoading } = useWhatsApp();
+  const { sessions, refreshSessions, loading: listLoading, setCurrentSession } = useWhatsApp();
   const [newSessionName, setNewSessionName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
@@ -186,13 +186,38 @@ export default function SessionManager() {
       toast.success("Session created!");
       
       // Auto-connect database
-      if (data.wp_db_id) {
-          const dbIdStr = String(data.wp_db_id);
+      // Check for wp_db_id OR id (some backends return id)
+      const dbId = data.wp_db_id || data.id;
+      if (dbId) {
+          const dbIdStr = String(dbId);
           localStorage.setItem("active_wp_db_id", dbIdStr);
           // Dispatch event for same-tab updates
           window.dispatchEvent(new Event("db-connection-changed"));
-          toast.success(`Database Connected: ID ${data.wp_db_id}`);
+          toast.success(`Database Connected: ID ${dbId}`);
       }
+
+      // Refresh sessions and auto-select the new one
+      await refreshSessions();
+      
+      // Construct a temporary session object to set immediately if refresh is lagging
+      // But ideally refreshSessions should find it because backend waits for it
+      // We need to find the session in the UPDATED sessions list.
+      // Since refreshSessions updates the context state, we can't access the *new* state immediately here 
+      // because state updates are async.
+      // However, we can construct a partial session object and set it.
+      
+      const newSessionObj = {
+          name: finalSessionName,
+          status: 'SCAN_QR_CODE', // Initial status
+          wp_db_id: dbId,
+          config: {},
+          me: null,
+          expires_at: null, // Will be fetched on next refresh
+          plan_days: payload.planDays
+      };
+      
+      // Force set current session to the new one
+      setCurrentSession(newSessionObj);
 
       fetchBalance(); 
       setShowCreateModal(false);

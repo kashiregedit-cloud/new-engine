@@ -1,4 +1,5 @@
 import { useWhatsApp } from "@/context/WhatsAppContext";
+import { useEffect } from "react";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,7 @@ export function SessionSelector() {
 
   const handleValueChange = (value: string) => {
     if (value === "add_new") {
-      navigate("/dashboard/whatsapp/sessions"); // Navigate to session manager
+      navigate("/dashboard/whatsapp/sessions");
       return;
     }
     const selected = sessions.find((s) => s.name === value);
@@ -26,16 +27,41 @@ export function SessionSelector() {
       // Auto-connect DB logic
       const dbId = (selected as any).wp_db_id;
       if (dbId) {
-          localStorage.setItem("active_wp_db_id", String(dbId));
-          window.dispatchEvent(new Event("db-connection-changed"));
-          // Optional: toast.success(`Switched to ${selected.name}`);
-      } else {
-          // If no DB ID found (unlikely if logic is correct), maybe clear it?
-          // localStorage.removeItem("active_wp_db_id");
-          // window.dispatchEvent(new Event("db-connection-changed"));
+          const dbIdStr = String(dbId);
+          if (localStorage.getItem("active_wp_db_id") !== dbIdStr) {
+              localStorage.setItem("active_wp_db_id", dbIdStr);
+              window.dispatchEvent(new Event("db-connection-changed"));
+          }
       }
     }
   };
+
+  // Auto-sync DB ID when currentSession changes (e.g. after creation or refresh)
+  React.useEffect(() => {
+    if (currentSession) {
+      const dbId = (currentSession as any).wp_db_id;
+      if (dbId) {
+        const dbIdStr = String(dbId);
+        const currentStored = localStorage.getItem("active_wp_db_id");
+        if (currentStored !== dbIdStr) {
+          localStorage.setItem("active_wp_db_id", dbIdStr);
+          window.dispatchEvent(new Event("db-connection-changed"));
+          // console.log("Auto-connected DB:", dbIdStr);
+        }
+      }
+    }
+  }, [currentSession]);
+
+  // Sync LocalStorage when currentSession changes (e.g. auto-selected on load)
+  useEffect(() => {
+    if (currentSession && (currentSession as any).wp_db_id) {
+        const dbId = String((currentSession as any).wp_db_id);
+        if (localStorage.getItem("active_wp_db_id") !== dbId) {
+            localStorage.setItem("active_wp_db_id", dbId);
+            window.dispatchEvent(new Event("db-connection-changed"));
+        }
+    }
+  }, [currentSession]);
 
   if (sessions.length === 0) {
     return (
