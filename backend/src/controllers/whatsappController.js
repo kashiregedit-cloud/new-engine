@@ -18,6 +18,12 @@ function logToFile(message) {
 // Global Debounce Map (In-Memory)
 // Key: sessionId (session_chatId)
 const debounceMap = new Map();
+// Recent reply guard (avoid double answers)
+const recentReplyMap = new Map();
+// Last user message guard (avoid reprocessing identical short texts)
+const lastUserMessageMap = new Map();
+// Admin handover map (stop AI after admin label or intervention)
+const handoverMap = new Map();
 
 // Step 1: Webhook Trigger
 const handleWebhook = async (req, res) => {
@@ -64,6 +70,9 @@ const handleWebhook = async (req, res) => {
                     status: 'sent',
                     reply_by: 'admin' // Assume Admin for now to trigger stop logic
                 });
+                // Activate handover lock for this chat for 5 minutes
+                const chatKey = `${sessionName}_${payload.to || payload.chatId || 'unknown'}`;
+                handoverMap.set(chatKey, Date.now() + 5 * 60 * 1000);
             }
             return; // STOP Processing (Don't auto-reply to self)
         }
@@ -114,6 +123,23 @@ const handleWebhook = async (req, res) => {
         } catch (err) {
             console.error(`[WA Webhook] Failed to update DB status for ${session}:`, err.message);
         }
+    } else if (event && String(event).toLowerCase().includes('label')) {
+        // Admin updated labels in WAHA UI -> treat as human handover
+        const sessionName = session;
+        const chatKey = `${sessionName}_${payload?.chatId || payload?.to || 'unknown'}`;
+        handoverMap.set(chatKey, Date.now() + 5 * 60 * 1000);
+        try {
+            await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: sessionName,
+                recipient_id: payload?.chatId || payload?.to || 'unknown',
+                message_id: `label_${Date.now()}`,
+                text: `[SYSTEM] Admin label changed. AI paused for this chat.`,
+                timestamp: Date.now(),
+                status: 'system_notice',
+                reply_by: 'admin'
+            });
+        } catch (e) {}
     }
 };
 
@@ -127,6 +153,16 @@ async function queueMessage(session, messagePayload) {
     const logMsg = `[WA Webhook] Received Message. Session: ${sessionName}, Sender: ${senderId}, Text: "${messageText.substring(0, 50)}..."`;
     console.log(logMsg);
     logToFile(logMsg);
+
+    // Handover guard: if admin takeover active for this chat, skip
+    const chatKey = `${sessionName}_${senderId}`;
+    const handoverUntil = handoverMap.get(chatKey);
+    if (handoverUntil && handoverUntil > Date.now()) {
+        console.log(`[WA] Handover active for ${chatKey}. Skipping AI.`);
+        return;
+    } else if (handoverUntil && handoverUntil <= Date.now()) {
+        handoverMap.delete(chatKey);
+    }
 
     // Handle Images/Media (If WAHA exposes URL)
     const imageUrls = [];
@@ -151,6 +187,15 @@ async function queueMessage(session, messagePayload) {
         console.log(`[WA] Duplicate message ${messageId} ignored.`);
         return;
     }
+
+    // Additional n8n-style filter: collapse trivial repeats (e.g., "hi" twice fast)
+    const normalized = (messageText || '').trim().toLowerCase();
+    const lastUser = lastUserMessageMap.get(chatKey);
+    if (lastUser && lastUser.text === normalized && (Date.now() - lastUser.ts) < 5000) {
+        console.log(`[WA] Ignoring repeated short message from ${chatKey}: "${normalized}"`);
+        return;
+    }
+    lastUserMessageMap.set(chatKey, { text: normalized, ts: Date.now() });
 
     // --- SAVE USER MESSAGE TO whatsapp_chats (Immediate - Raw) ---
     try {
@@ -228,7 +273,14 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
         if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
     }
-    combinedText = combinedText.trim();
+    // Remove duplicate lines (n8n-style filter)
+    combinedText = combinedText
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter((val, idx, arr) => arr.indexOf(val) === idx)
+        .join('\n')
+        .trim();
     console.log(`[WA] Processing buffered. Text: ${combinedText.substring(0,50)}...`);
 
     try {
@@ -498,21 +550,30 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
         // Send Text
         let botMessageId = `bot_${Date.now()}`;
-        if (replyText) {
-            await whatsappService.sendMessage(sessionName, senderId, replyText);
-            
-            // Log Bot Reply
-            await dbService.saveWhatsAppChat({
-                session_name: sessionName,
-                sender_id: sessionName,
-                recipient_id: senderId,
-                message_id: botMessageId,
-                text: replyText,
-                timestamp: Date.now(),
-                status: 'bot_reply',
-                reply_by: 'bot'
-                // token usage could be saved if schema allows, currently whatsapp_chats doesn't have token col
-            });
+        // Duplicate reply guard (10s window)
+        const guardKey = `${sessionName}_${senderId}`;
+        const normReply = (replyText || '').trim().toLowerCase();
+        const lastReply = recentReplyMap.get(guardKey);
+        if (lastReply && lastReply.text === normReply && (Date.now() - lastReply.ts) < 10000) {
+            console.log(`[WA] Duplicate reply detected for ${guardKey}. Skipping send.`);
+        } else {
+            if (replyText) {
+                await whatsappService.sendMessage(sessionName, senderId, replyText);
+                
+                // Log Bot Reply
+                await dbService.saveWhatsAppChat({
+                    session_name: sessionName,
+                    sender_id: sessionName,
+                    recipient_id: senderId,
+                    message_id: botMessageId,
+                    text: replyText,
+                    timestamp: Date.now(),
+                    status: 'bot_reply',
+                    reply_by: 'bot'
+                    // token usage could be saved if schema allows, currently whatsapp_chats doesn't have token col
+                });
+            }
+            recentReplyMap.set(guardKey, { text: normReply, ts: Date.now() });
         }
 
         // Send Images
