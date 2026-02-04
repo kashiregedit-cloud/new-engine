@@ -37,7 +37,7 @@ export function SessionSelector() {
   };
 
   // Auto-sync DB ID when currentSession changes (e.g. after creation or refresh)
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentSession) {
       const dbId = (currentSession as any).wp_db_id;
       if (dbId) {
