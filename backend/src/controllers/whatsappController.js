@@ -24,6 +24,12 @@ const recentReplyMap = new Map();
 const lastUserMessageMap = new Map();
 // Admin handover map (stop AI after admin label or intervention)
 const handoverMap = new Map();
+// Session Start Time Map (for n8n-style backlog filtering)
+const sessionStartTimeMap = new Map();
+// In-memory duplicate check (faster than DB)
+const recentMessageIds = new Set();
+// Bot Message IDs (to distinguish Bot vs Admin replies)
+const botMessageIds = new Set();
 
 // Step 1: Webhook Trigger
 const handleWebhook = async (req, res) => {
@@ -43,23 +49,54 @@ const handleWebhook = async (req, res) => {
     res.send('OK');
 
     if (event === 'message' || event === 'message.any') {
+        // --- n8n-style Backlog Filtering ---
+        // 1. Establish Baseline (Processing Start Time) for this session
+        if (!sessionStartTimeMap.has(session)) {
+            // Check for x-webhook-timestamp header (if available from WAHA/Reverse Proxy)
+            // Otherwise default to current server time
+            const headerTime = req.headers['x-webhook-timestamp'];
+            const startTime = headerTime ? Math.floor(Number(headerTime) / 1000) : Math.floor(Date.now() / 1000);
+            sessionStartTimeMap.set(session, startTime);
+            console.log(`[WA] Session ${session} connected. Baseline Time: ${startTime}`);
+        }
+
+        const msgTimestamp = payload.timestamp || Math.floor(Date.now() / 1000);
+        const baselineTime = sessionStartTimeMap.get(session);
+
+        // 2. Filter Backlog Messages (Sent BEFORE we started processing)
+        // Add small buffer (e.g. 10 seconds) to allow for slight clock skew if using server time
+        // If msgTimestamp < baselineTime, it's old.
+        if (msgTimestamp < baselineTime) {
+            console.log(`[WA] Ignoring BACKLOG message from ${payload.from}. MsgTime: ${msgTimestamp}, Baseline: ${baselineTime}`);
+            return;
+        }
+        // -----------------------------------
+
         // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
         if (payload.fromMe) {
-            // Save Admin/Bot messages to DB for context & Human Handover logic
-            // We assume it's an Admin reply unless we can distinguish Bot vs Admin (WAHA doesn't easily distinguish self-bot vs phone-admin)
-            // But usually 'bot_reply' status is set when WE send it.
-            // If it comes via Webhook and we didn't just send it (hard to track exactly), it's likely Admin via Phone.
-            // Strategy: Save it. The Pre-Send check looks for 'sender_id === sessionName'.
+            // Check if this is a BOT message we just sent
+            if (botMessageIds.has(payload.id)) {
+                // It's the Bot. Remove from set and Ignore.
+                botMessageIds.delete(payload.id);
+                // console.log(`[WA] Ignoring Bot's own echo message: ${payload.id}`);
+                return;
+            }
+
+            // If NOT in botMessageIds, it's the ADMIN (via Phone/Web)
+            // Save Admin message to DB & Activate Handover
             
             const messageId = payload.id;
             const messageText = payload.body || '';
             const sessionName = session;
             
-            // Avoid saving if it's a message WE just sent (duplicate echo)
-            // But duplicate check handles message_id.
+            // In-memory duplicate check
+            if (recentMessageIds.has(messageId)) return;
+            recentMessageIds.add(messageId);
+            setTimeout(() => recentMessageIds.delete(messageId), 10 * 60 * 1000); // Clear after 10 mins
+
             const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
             if (!isDuplicate) {
-                 console.log(`[WA] Saving Admin/Bot message (fromMe): ${messageText.substring(0,30)}...`);
+                 console.log(`[WA] Saving ADMIN message (fromMe): ${messageText.substring(0,30)}...`);
                  await dbService.saveWhatsAppChat({
                     session_name: sessionName,
                     sender_id: sessionName, // Admin is the sender (Session Name)
@@ -68,31 +105,30 @@ const handleWebhook = async (req, res) => {
                     text: messageText,
                     timestamp: Date.now(),
                     status: 'sent',
-                    reply_by: 'admin' // Assume Admin for now to trigger stop logic
+                    reply_by: 'admin' // Trigger stop logic
                 });
                 // Activate handover lock for this chat for 5 minutes
                 const chatKey = `${sessionName}_${payload.to || payload.chatId || 'unknown'}`;
                 handoverMap.set(chatKey, Date.now() + 5 * 60 * 1000);
             }
-            return; // STOP Processing (Don't auto-reply to self)
+            return; // STOP Processing
         }
 
         // Ignore Status Updates (broadcasts)
-    if (payload.from === 'status@broadcast') return;
+        if (payload.from === 'status@broadcast') return;
 
-    // --- TIMESTAMP CHECK (Ignore Old Messages > 2 Mins) ---
-    // Prevents "Backlog Blast" when connecting a session with unread messages.
-    const msgTimestamp = payload.timestamp || Date.now() / 1000;
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    const ageSeconds = nowSeconds - msgTimestamp;
-    
-    if (ageSeconds > 120) { // 2 Minutes Tolerance
-        console.log(`[WA] Ignoring old message from ${payload.from}. Age: ${ageSeconds}s`);
-        return;
-    }
-    // -----------------------------------------------------
+        // --- TIMESTAMP CHECK (Ignore Old Messages > 2 Mins) ---
+        // Keeps the "Realtime" sanity check even if baseline was set long ago
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const ageSeconds = nowSeconds - msgTimestamp;
+        
+        if (ageSeconds > 120) { // 2 Minutes Tolerance
+            console.log(`[WA] Ignoring old message from ${payload.from}. Age: ${ageSeconds}s`);
+            return;
+        }
+        // -----------------------------------------------------
 
-    await queueMessage(session, payload);
+        await queueMessage(session, payload);
     } else if (event === 'state.change') {
         // Handle State Changes (WORKING, STOPPED, SCAN_QR_CODE, etc.)
         const status = payload.body || payload.status; // WAHA payload format varies
@@ -558,14 +594,21 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             console.log(`[WA] Duplicate reply detected for ${guardKey}. Skipping send.`);
         } else {
             if (replyText) {
-                await whatsappService.sendMessage(sessionName, senderId, replyText);
+                const sentMsg = await whatsappService.sendMessage(sessionName, senderId, replyText);
                 
+                // Track Bot Message ID to prevent self-lock
+                if (sentMsg && sentMsg.id) {
+                    botMessageIds.add(sentMsg.id);
+                    // Clear after 2 minutes
+                    setTimeout(() => botMessageIds.delete(sentMsg.id), 2 * 60 * 1000);
+                }
+
                 // Log Bot Reply
                 await dbService.saveWhatsAppChat({
                     session_name: sessionName,
                     sender_id: sessionName,
                     recipient_id: senderId,
-                    message_id: botMessageId,
+                    message_id: (sentMsg && sentMsg.id) ? sentMsg.id : botMessageId,
                     text: replyText,
                     timestamp: Date.now(),
                     status: 'bot_reply',
