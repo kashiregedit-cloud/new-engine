@@ -185,6 +185,9 @@ async function queueMessage(session, messagePayload) {
     const sessionName = session; // Using WAHA Session as Session Name
     let messageText = messagePayload.body || '';
     const messageId = messagePayload.id;
+    const isGroup = typeof senderId === 'string' && senderId.includes('@g.us');
+    const groupId = messagePayload.chatId || (isGroup ? senderId : null);
+    const groupName = messagePayload.chatName || null;
 
     const logMsg = `[WA Webhook] Received Message. Session: ${sessionName}, Sender: ${senderId}, Text: "${messageText.substring(0, 50)}..."`;
     console.log(logMsg);
@@ -243,7 +246,10 @@ async function queueMessage(session, messagePayload) {
             text: messageText,
             timestamp: Date.now(),
             status: 'received',
-            reply_by: 'user'
+            reply_by: 'user',
+            is_group: isGroup,
+            group_id: groupId,
+            group_name: groupName
         });
         
         // Save Contact/Lead
@@ -302,6 +308,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     let replyToId = null;
     let allImages = [];
     let allAudios = [];
+    const isGroup = typeof senderId === 'string' && senderId.includes('@g.us');
 
     for (const msg of messages) {
         if (msg.text) combinedText += msg.text + "\n";
@@ -336,6 +343,11 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                 status: 'system_error',
                 reply_by: 'system'
             });
+            return;
+        }
+
+        if (isGroup && pageConfig && pageConfig.group_reply === false) {
+            console.log(`[WA] Group reply disabled for ${sessionName}. Skipping group message from ${senderId}.`);
             return;
         }
 
@@ -612,7 +624,9 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                     text: replyText,
                     timestamp: Date.now(),
                     status: 'bot_reply',
-                    reply_by: 'bot'
+                    reply_by: 'bot',
+                    token_usage: aiResponse.token_usage || 0,
+                    is_group: isGroup
                     // token usage could be saved if schema allows, currently whatsapp_chats doesn't have token col
                 });
             }

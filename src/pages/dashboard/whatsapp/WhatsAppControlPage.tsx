@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload } from "lucide-react";
+import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload, Users, MessageSquareText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -14,6 +14,7 @@ export default function WhatsAppControlPage() {
   const [dbId, setDbId] = useState<string | null>(null);
   const [verified, setVerified] = useState(true);
   const [expiryDays, setExpiryDays] = useState<number | null>(null);
+  const [sessionName, setSessionName] = useState<string | null>(null);
   const [config, setConfig] = useState({
     reply_message: false,
     swipe_reply: false,
@@ -21,8 +22,18 @@ export default function WhatsAppControlPage() {
     image_send: false,
     order_tracking: false,
     audio_detection: false,
-    file_upload: false
+    file_upload: false,
+    group_reply: false
   });
+  const [stats, setStats] = useState({
+    todayTokens: 0,
+    yesterdayTokens: 0,
+    todayBotReplies: 0,
+    yesterdayBotReplies: 0,
+    todayCustomers: 0,
+    yesterdayCustomers: 0
+  });
+  const [recentChats, setRecentChats] = useState<any[]>([]);
 
   useEffect(() => {
     const checkConnection = () => {
@@ -61,6 +72,7 @@ export default function WhatsAppControlPage() {
         // Explicitly cast data to any to bypass 'never' type inference
         const row = data as any;
         setVerified(row.verified !== false); 
+        setSessionName(row.session_name || null);
         
         // Calculate Days Left
         if (row.expires_at) {
@@ -78,14 +90,75 @@ export default function WhatsAppControlPage() {
           image_send: row.image_send ?? false,
           order_tracking: row.order_tracking ?? false,
           audio_detection: row.audio_detection ?? false,
-          file_upload: row.file_upload ?? false
+          file_upload: row.file_upload ?? false,
+          group_reply: row.group_reply ?? false
         });
+
+        fetchMetrics(row.session_name);
+        fetchRecent(row.session_name);
       }
     } catch (error) {
       console.error('Error fetching config:', error);
       toast.error("Failed to load configuration");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMetrics = async (sName: string) => {
+    try {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const startOfYesterday = new Date(startOfToday - 24 * 60 * 60 * 1000).getTime();
+      const endOfYesterday = startOfToday - 1;
+
+      const { data: todayRows } = await supabase
+        .from('whatsapp_chats')
+        .select('sender_id, reply_by, token_usage, timestamp')
+        .eq('session_name', sName)
+        .gte('timestamp', startOfToday);
+
+      const { data: yRows } = await supabase
+        .from('whatsapp_chats')
+        .select('sender_id, reply_by, token_usage, timestamp')
+        .eq('session_name', sName)
+        .gte('timestamp', startOfYesterday)
+        .lte('timestamp', endOfYesterday);
+
+      const sumTokens = (rows: any[] | null) => (rows || []).reduce((acc, r) => acc + (Number(r.token_usage) || 0), 0);
+      const countBot = (rows: any[] | null) => (rows || []).filter(r => r.reply_by === 'bot').length;
+      const countCustomers = (rows: any[] | null) => {
+        const set = new Set<string>();
+        (rows || []).forEach(r => {
+          if (r.reply_by === 'user') set.add(r.sender_id);
+        });
+        return set.size;
+      };
+
+      setStats({
+        todayTokens: sumTokens(todayRows || []),
+        yesterdayTokens: sumTokens(yRows || []),
+        todayBotReplies: countBot(todayRows || []),
+        yesterdayBotReplies: countBot(yRows || []),
+        todayCustomers: countCustomers(todayRows || []),
+        yesterdayCustomers: countCustomers(yRows || [])
+      });
+    } catch (e) {
+      console.error('Metrics error', e);
+    }
+  };
+
+  const fetchRecent = async (sName: string) => {
+    try {
+      const { data } = await supabase
+        .from('whatsapp_chats')
+        .select('sender_id, recipient_id, text, reply_by, token_usage, timestamp')
+        .eq('session_name', sName)
+        .order('timestamp', { ascending: false })
+        .limit(20);
+      setRecentChats(data || []);
+    } catch (e) {
+      console.error('Recent fetch error', e);
     }
   };
 
@@ -100,6 +173,10 @@ export default function WhatsAppControlPage() {
 
       if (error) throw error;
       toast.success("Settings saved successfully");
+      if (sessionName) {
+        fetchMetrics(sessionName);
+        fetchRecent(sessionName);
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error("Failed to save settings: " + message);
@@ -186,6 +263,64 @@ export default function WhatsAppControlPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Metrics: Today vs Yesterday */}
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><MessageSquareText className="h-4 w-4" /> Bot Replies</CardTitle>
+            <CardDescription>Today vs Yesterday</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-sm text-muted-foreground">Today</div>
+                <div className="text-2xl font-bold">{stats.todayBotReplies}</div>
+              </div>
+              <div className="space-y-1 text-right">
+                <div className="text-sm text-muted-foreground">Yesterday</div>
+                <div className="text-2xl font-bold">{stats.yesterdayBotReplies}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Bot className="h-4 w-4" /> Tokens Used</CardTitle>
+            <CardDescription>Today vs Yesterday</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-sm text-muted-foreground">Today</div>
+                <div className="text-2xl font-bold">{stats.todayTokens}</div>
+              </div>
+              <div className="space-y-1 text-right">
+                <div className="text-sm text-muted-foreground">Yesterday</div>
+                <div className="text-2xl font-bold">{stats.yesterdayTokens}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> Unique Customers</CardTitle>
+            <CardDescription>Today vs Yesterday</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-sm text-muted-foreground">Today</div>
+                <div className="text-2xl font-bold">{stats.todayCustomers}</div>
+              </div>
+              <div className="space-y-1 text-right">
+                <div className="text-sm text-muted-foreground">Yesterday</div>
+                <div className="text-2xl font-bold">{stats.yesterdayCustomers}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         
         {/* Reply Message */}
         <Card className="bg-card border-border shadow-sm">
@@ -282,6 +417,25 @@ export default function WhatsAppControlPage() {
           </CardContent>
         </Card>
 
+        {/* Group Reply */}
+        <Card className="bg-card border-border shadow-sm">
+          <CardContent className="p-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-slate-100 text-slate-600 rounded-full">
+                 <MessageSquare size={24} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-lg font-semibold cursor-pointer">Group Reply</Label>
+                <p className="text-sm text-muted-foreground">Reply to WhatsApp group chats</p>
+              </div>
+            </div>
+            <Switch 
+              checked={config.group_reply}
+              onCheckedChange={(c) => setConfig({...config, group_reply: c})}
+            />
+          </CardContent>
+        </Card>
+
         {/* Audio Detection */}
         <Card className="bg-card border-border shadow-sm">
           <CardContent className="p-6 flex items-center justify-between">
@@ -321,6 +475,29 @@ export default function WhatsAppControlPage() {
         </Card>
 
       </div>
+
+      {/* Recent Conversations */}
+      <Card className="bg-card border-border shadow-sm">
+        <CardHeader>
+          <CardTitle>Recent Conversations</CardTitle>
+          <CardDescription>Last 20 messages with token usage</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {recentChats.map((c, idx) => (
+              <div key={idx} className="border rounded-md p-3">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{c.reply_by === 'bot' ? 'Bot' : 'User'}</span>
+                  <span>{new Date(Number(c.timestamp || 0)).toLocaleString()}</span>
+                </div>
+                <div className="mt-2 text-sm line-clamp-3">{c.text}</div>
+                <div className="mt-2 text-xs text-muted-foreground">Tokens: {c.token_usage || 0}</div>
+              </div>
+            ))}
+            {recentChats.length === 0 && <div className="text-sm text-muted-foreground">No messages yet.</div>}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

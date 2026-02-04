@@ -1,0 +1,8 @@
+ALTER TABLE whatsapp_chats
+  ADD COLUMN IF NOT EXISTS token_usage INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS group_id TEXT,
+  ADD COLUMN IF NOT EXISTS group_name TEXT;
+
+ALTER TABLE whatsapp_message_database
+  ADD COLUMN IF NOT EXISTS group_reply BOOLEAN DEFAULT false;

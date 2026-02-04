@@ -64,6 +64,7 @@ export default function WhatsAppSettingsPage() {
   const [mode, setMode] = useState<"own" | "managed">("own");
   const [activeMode, setActiveMode] = useState<"own" | "managed" | null>(null);
   const [isOwner, setIsOwner] = useState(true);
+  const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   
   // New State for System Prompt Modal
   const [isPromptOpen, setIsPromptOpen] = useState(false);
@@ -145,6 +146,7 @@ export default function WhatsAppSettingsPage() {
         
         setVerified(dbRow.verified !== false);
         setIsOwner(true); // Assuming user owns their config
+        setRemainingCredits(typeof configRow.message_credit === 'number' ? configRow.message_credit : null);
 
         // Determine Mode
         const apiKey = configRow.api_key || "";
@@ -330,6 +332,20 @@ export default function WhatsAppSettingsPage() {
             Edit System Prompt
         </Button>
       </div>
+      
+      {remainingCredits !== null && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              Engine Usage
+              <Badge variant="outline" className="text-green-700 border-green-300 bg-green-50">
+                Remaining Credits: {remainingCredits}
+              </Badge>
+            </CardTitle>
+            <CardDescription>Your available managed message credits</CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
       {/* System Prompt Full Screen Dialog */}
       <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
