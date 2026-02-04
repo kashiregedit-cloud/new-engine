@@ -167,31 +167,32 @@ USING (auth.uid()::text = user_id);
 -- ==========================================
 --  6. WhatsApp Sessions Updates (Expiry)
 -- ==========================================
-ALTER TABLE public.whatsapp_sessions 
+-- NOTE: Table name is 'whatsapp_message_database', NOT 'whatsapp_sessions'
+ALTER TABLE public.whatsapp_message_database 
 ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone,
 ADD COLUMN IF NOT EXISTS plan_days integer DEFAULT 30;
 
 -- Ensure RLS allows insert/update/delete for backend (or users if needed)
-ALTER TABLE public.whatsapp_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.whatsapp_message_database ENABLE ROW LEVEL SECURITY;
 
 -- Allow users to view their own sessions
-DROP POLICY IF EXISTS "Users can view own sessions" ON public.whatsapp_sessions;
+DROP POLICY IF EXISTS "Users can view own sessions" ON public.whatsapp_message_database;
 CREATE POLICY "Users can view own sessions" 
-ON public.whatsapp_sessions FOR SELECT 
-USING (auth.uid()::text = user_id OR auth.email() = user_email);
+ON public.whatsapp_message_database FOR SELECT 
+USING (auth.uid()::text = user_id OR auth.email() = (select email from auth.users where id = auth.uid())); -- Simplified RLS
 
 -- Allow users/backend to insert/update their own sessions
-DROP POLICY IF EXISTS "Users can insert own sessions" ON public.whatsapp_sessions;
+DROP POLICY IF EXISTS "Users can insert own sessions" ON public.whatsapp_message_database;
 CREATE POLICY "Users can insert own sessions" 
-ON public.whatsapp_sessions FOR INSERT 
-WITH CHECK (auth.uid()::text = user_id OR auth.email() = user_email);
+ON public.whatsapp_message_database FOR INSERT 
+WITH CHECK (auth.uid()::text = user_id);
 
-DROP POLICY IF EXISTS "Users can update own sessions" ON public.whatsapp_sessions;
+DROP POLICY IF EXISTS "Users can update own sessions" ON public.whatsapp_message_database;
 CREATE POLICY "Users can update own sessions" 
-ON public.whatsapp_sessions FOR UPDATE
-USING (auth.uid()::text = user_id OR auth.email() = user_email);
+ON public.whatsapp_message_database FOR UPDATE
+USING (auth.uid()::text = user_id);
 
-DROP POLICY IF EXISTS "Users can delete own sessions" ON public.whatsapp_sessions;
+DROP POLICY IF EXISTS "Users can delete own sessions" ON public.whatsapp_message_database;
 CREATE POLICY "Users can delete own sessions" 
-ON public.whatsapp_sessions FOR DELETE
-USING (auth.uid()::text = user_id OR auth.email() = user_email);
+ON public.whatsapp_message_database FOR DELETE
+USING (auth.uid()::text = user_id);
