@@ -50,6 +50,17 @@ export default function WhatsAppConversionPage() {
   const [allTimeTokenCount, setAllTimeTokenCount] = useState(0);
   const [tokenBreakdown, setTokenBreakdown] = useState<Record<string, number>>({});
   const [activeSessionName, setActiveSessionName] = useState<string | null>(null);
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string | number>>(new Set());
+
+  const toggleExpand = (id: string | number) => {
+    const newSet = new Set(expandedMessageIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setExpandedMessageIds(newSet);
+  };
   
   // Date Filter State
   const [date, setDate] = useState<DateRange | undefined>({
@@ -372,7 +383,18 @@ export default function WhatsAppConversionPage() {
                   <TableRow key={msg.id || msg.message_id}>
                     <TableCell>{new Date(msg.timestamp).toLocaleString()}</TableCell>
                     <TableCell className="font-mono text-xs">{msg.sender_id}</TableCell>
-                    <TableCell className="max-w-[300px] truncate" title={msg.text}>{msg.text}</TableCell>
+                    <TableCell 
+                        className={`max-w-[300px] cursor-pointer transition-all ${expandedMessageIds.has(msg.id || msg.message_id || 'unknown') ? 'whitespace-pre-wrap break-words' : 'truncate'}`} 
+                        title="Click to expand"
+                        onClick={() => toggleExpand(msg.id || msg.message_id || 'unknown')}
+                    >
+                        {msg.text}
+                        {expandedMessageIds.has(msg.id || msg.message_id || 'unknown') && msg.model_used && (
+                             <div className="text-[10px] text-muted-foreground mt-1">
+                                 {msg.model_used}
+                             </div>
+                        )}
+                    </TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs ${msg.reply_by === 'bot' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'}`}>
                         {msg.reply_by || 'Unknown'}

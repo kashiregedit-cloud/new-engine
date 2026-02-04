@@ -1239,9 +1239,53 @@ async function transcribeAudio(audioUrl, pageConfig) {
     }
 }
 
+// Step 3: Wrapper for Controller (Standardized Interface)
+async function generateResponse({ pageId, userId, userMessage, history, imageUrls, audioUrls, config, platform }) {
+    // 1. Prepare Prompts
+    // For WhatsApp, prompts are often embedded in the config (whatsapp_message_database)
+    // For Messenger, they are separate (fb_message_database).
+    let pagePrompts = config;
+    
+    if (platform === 'messenger' || !pagePrompts.text_prompt) {
+         // Fetch if missing or strictly messenger
+         const dbService = require('./dbService');
+         pagePrompts = await dbService.getPagePrompts(pageId);
+    }
+
+    // 2. Fetch Sender Name (if possible)
+    let senderName = userId; // Default to ID/Phone
+    try {
+        const dbService = require('./dbService');
+        // Check contact table
+        // For WhatsApp
+        if (platform === 'whatsapp') {
+             const { data } = await dbService.supabase
+                .from('whatsapp_contacts')
+                .select('name')
+                .eq('phone_number', userId)
+                .eq('session_name', pageId)
+                .maybeSingle();
+             if (data && data.name) senderName = data.name;
+        }
+    } catch (e) { /* ignore */ }
+
+    // 3. Call Core Logic
+    return generateReply(
+        userMessage,
+        config,
+        pagePrompts,
+        history,
+        senderName,
+        null, // Gender (not implemented yet)
+        imageUrls,
+        audioUrls
+    );
+}
+
 module.exports = {
     generateReply,
-    processImageWithVision,
+    generateResponse, // Export the wrapper
     transcribeAudio,
+    processImageWithVision,
     optimizeSystemPrompt
 };
