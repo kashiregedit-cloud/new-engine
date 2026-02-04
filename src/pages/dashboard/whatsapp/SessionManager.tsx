@@ -432,22 +432,55 @@ export default function SessionManager() {
             </CardHeader>
 
             <CardContent className="pt-5 space-y-3">
-              {/* Expiry Info */}
-              {(session as any).expires_at && (
-                  <div className="flex justify-between items-center bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
-                      <span className="text-[10px] text-slate-500 font-mono">
-                          Expires: {new Date((session as any).expires_at).toLocaleDateString()}
-                      </span>
-                      <Button 
-                          variant="ghost" 
+              {/* Expiry Info Enhanced */}
+              {(session as any).expires_at && (() => {
+                  const expiresAt = new Date((session as any).expires_at);
+                  const now = new Date();
+                  const diffTime = expiresAt.getTime() - now.getTime();
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  const isExpired = diffDays <= 0;
+                  
+                  return (
+                    <div className={`flex justify-between items-center p-2.5 rounded-lg border mb-3 ${
+                        isExpired 
+                            ? "bg-red-500/5 border-red-500/20" 
+                            : diffDays <= 3 
+                                ? "bg-orange-500/5 border-orange-500/20" 
+                                : "bg-slate-800/30 border-slate-700/30"
+                    }`}>
+                        <div className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">
+                                {isExpired ? "Subscription Ended" : "Valid Until"}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <div className={`h-1.5 w-1.5 rounded-full ${isExpired ? "bg-red-500" : diffDays <= 3 ? "bg-orange-500" : "bg-emerald-500"}`} />
+                                <span className={`text-xs font-bold font-mono ${
+                                    isExpired ? "text-red-400" : diffDays <= 3 ? "text-orange-400" : "text-emerald-400"
+                                }`}>
+                                    {isExpired 
+                                        ? "EXPIRED" 
+                                        : `${diffDays} Day${diffDays !== 1 ? 's' : ''} Left`}
+                                </span>
+                                <span className="text-[10px] text-slate-600 font-mono ml-1">
+                                    ({expiresAt.toLocaleDateString()})
+                                </span>
+                            </div>
+                        </div>
+                         <Button 
+                          variant="outline" 
                           size="sm" 
                           onClick={() => handleAction('renew', session.name)} 
-                          className="h-5 text-[10px] px-2 text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                          className={`h-7 text-[10px] px-3 border-dashed ${
+                              isExpired 
+                                ? "border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50" 
+                                : "border-green-500/30 text-green-400 hover:bg-green-500/10 hover:border-green-500/50"
+                          }`}
                       >
                           Renew
                       </Button>
-                  </div>
-              )}
+                    </div>
+                  );
+              })()}
 
               {/* Control Grid */}
               <div className="grid grid-cols-2 gap-2.5">
