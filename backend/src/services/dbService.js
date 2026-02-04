@@ -358,22 +358,9 @@ async function saveWhatsAppChat(data) {
     }
 }
 
-// 15. Get WhatsApp Chat History
-async function getWhatsAppChatHistory(sessionName, senderId, limit = 20) {
-    const { data, error } = await supabase
-        .from('whatsapp_chats')
-        .select('*')
-        .eq('session_name', sessionName)
-        .or(`sender_id.eq.${senderId},recipient_id.eq.${senderId}`)
-        .order('timestamp', { ascending: false })
-        .limit(limit);
+// 15. Get WhatsApp Chat History (Deprecated - Removed Duplicate)
+// See function at line ~460
 
-    if (error) {
-        console.error("Error getting whatsapp_chats history:", error);
-        return [];
-    }
-    return data.reverse();
-}
 
 // 16. Check WhatsApp Duplicate
 async function checkWhatsAppDuplicate(messageId) {

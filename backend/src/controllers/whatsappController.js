@@ -419,10 +419,47 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Ensure Page ID is correctly identified (Session Name = Page ID for WhatsApp)
         const pageId = sessionName; 
 
+        // --- CHECK LABELS (Admin Handover) ---
+        try {
+            const contact = await whatsappService.getContact(sessionName, senderId);
+            // WAHA Labels can be strings or objects. Check both.
+            // Example: ["adminhandle", "new_customer"] or [{id: "...", name: "adminhandle"}]
+            if (contact && contact.labels && Array.isArray(contact.labels)) {
+                const hasAdminLabel = contact.labels.some(l => 
+                    (typeof l === 'string' && l.toLowerCase() === 'adminhandle') ||
+                    (l.name && l.name.toLowerCase() === 'adminhandle')
+                );
+                
+                if (hasAdminLabel) {
+                    console.log(`[WA] User ${senderId} has 'adminhandle' label. Blocking AI.`);
+                    // Ensure handover lock is active
+                    const chatKey = `${sessionName}_${senderId}`;
+                    handoverMap.set(chatKey, Date.now() + 60 * 60 * 1000); // 1 Hour Lock
+                    return;
+                } else {
+                    // Label removed? Unblock immediately.
+                    const chatKey = `${sessionName}_${senderId}`;
+                    if (handoverMap.has(chatKey)) {
+                        console.log(`[WA] 'adminhandle' label removed for ${senderId}. Unblocking AI.`);
+                        handoverMap.delete(chatKey);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn(`[WA] Label check failed: ${e.message}`);
+        }
+        // -------------------------------------
+
         // Fetch History (User + Assistant)
         // n8n workflow uses 'postgres_chat_memory'
-        // User Feedback: "Messenger uses fewer tokens". Reducing history limit from 10 to 6.
-        const history = await dbService.getWhatsAppChatHistory(sessionName, senderId, 6);
+        // Dynamic History Limit: Check 'check_conversion' (from Behavior Settings) or default to 20
+        let historyLimit = 20;
+        if (pageConfig.check_conversion) {
+            const limit = Number(pageConfig.check_conversion);
+            if (limit > 0 && limit <= 50) historyLimit = limit;
+        }
+        
+        const history = await dbService.getWhatsAppChatHistory(sessionName, senderId, historyLimit);
         
         // 4. Generate Response (AI)
         console.log(`[AI] Generating response for ${senderId} (Session: ${sessionName})...`);

@@ -293,6 +293,35 @@ async function getPairingCode(sessionName, phoneNumber) {
     }
 }
 
+/**
+ * Get Contact Info (Labels, etc.)
+ * @param {string} session 
+ * @param {string} chatId 
+ */
+async function getContact(session, chatId) {
+    try {
+        const response = await apiClient.get('/api/contacts', {
+            params: {
+                session: session,
+                contactId: chatId
+            }
+        });
+        // WAHA returns array for /api/contacts usually, or single object if contactId is unique?
+        // Let's assume it returns a list and we find the one.
+        // Or check if there's a specific endpoint. 
+        // Based on WAHA Swagger: GET /api/contacts returns list.
+        // There might be /api/contacts/{contactId} in some versions.
+        // Let's try the list filter first.
+        if (Array.isArray(response.data)) {
+            return response.data.find(c => c.id === chatId || c.id._serialized === chatId);
+        }
+        return response.data;
+    } catch (error) {
+        console.error(`[WhatsApp] Get Contact Error:`, error.message);
+        return null;
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImage,
@@ -308,5 +337,6 @@ module.exports = {
     stopSession,
     logoutSession,
     getScreenshot,
-    getPairingCode
+    getPairingCode,
+    getContact
 };
