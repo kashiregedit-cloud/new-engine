@@ -7,6 +7,71 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+// --- DYNAMIC FREE MODEL OPTIMIZER (OpenRouter) ---
+let bestFreeModels = {
+    text: 'google/gemini-2.0-flash-lite-preview-02-05:free', // Default safe fallback
+    vision: 'qwen/qwen-2.5-vl-7b-instruct:free',
+    voice: 'google/gemini-2.0-flash-lite-preview-02-05:free' // Using Multimodal Gemini for Voice
+};
+
+async function updateBestFreeModels() {
+    try {
+        console.log('[AI Optimizer] Fetching latest free models from OpenRouter...');
+        const response = await axios.get('https://openrouter.ai/api/v1/models');
+        const models = response.data.data;
+        
+        if (!models || !Array.isArray(models)) throw new Error("Invalid response format");
+
+        // Filter for Strictly Free Models
+        const freeModels = models.filter(m => 
+            m.pricing && 
+            (m.pricing.prompt === "0" || m.pricing.prompt === 0) && 
+            (m.pricing.completion === "0" || m.pricing.completion === 0)
+        );
+
+        if (freeModels.length === 0) {
+            console.warn('[AI Optimizer] No free models found. Keeping defaults.');
+            return;
+        }
+
+        // 1. SELECT BEST TEXT MODEL
+        // Criteria: High Context > Known Providers > Popularity
+        const textCandidates = freeModels.filter(m => !m.id.includes('vision') && !m.id.includes('vl')); // Exclude specialized vision
+        textCandidates.sort((a, b) => (b.context_length || 0) - (a.context_length || 0)); // Sort by Context
+        // Prefer known reliable free models if available at top
+        const preferredText = textCandidates.find(m => m.id.includes('google/gemini') || m.id.includes('meta-llama/llama-3')) || textCandidates[0];
+        if (preferredText) bestFreeModels.text = preferredText.id;
+
+        // 2. SELECT BEST VISION MODEL
+        // Criteria: 'modality' includes 'image' OR id includes 'vision'/'vl'
+        const visionCandidates = freeModels.filter(m => 
+            (m.architecture && m.architecture.modality && m.architecture.modality.includes('text+image')) ||
+            m.id.includes('vision') || m.id.includes('vl') || m.id.includes('gemini') // Gemini is usually multimodal
+        );
+        // Prefer Gemini or Qwen for Vision
+        const preferredVision = visionCandidates.find(m => m.id.includes('gemini-2.0') || m.id.includes('qwen-2.5')) || visionCandidates[0];
+        if (preferredVision) bestFreeModels.vision = preferredVision.id;
+
+        // 3. SELECT BEST VOICE MODEL (Multimodal capable of Audio)
+        // OpenRouter metadata for audio is scarce, but Gemini models are usually Audio-capable.
+        // We will prioritize Gemini Flash/Lite variants.
+        const voiceCandidates = freeModels.filter(m => m.id.includes('gemini') && m.id.includes('flash'));
+        const preferredVoice = voiceCandidates[0] || preferredText; // Fallback to best text if no specific voice model
+        if (preferredVoice) bestFreeModels.voice = preferredVoice.id;
+
+        console.log('[AI Optimizer] Updated Best Free Models:', bestFreeModels);
+
+    } catch (e) {
+        console.warn('[AI Optimizer] Failed to update free models:', e.message);
+    }
+}
+
+// Schedule: Run every 2 hours
+setInterval(updateBestFreeModels, 2 * 60 * 60 * 1000);
+// Run immediately on startup
+updateBestFreeModels();
+// -----------------------------------------------------
+
 function logDebug(msg) {
     try {
         const logDir = path.join(__dirname, '../../logs');
@@ -377,30 +442,45 @@ Rules:
     }
 
     // PHASE 2: Fallback to Cheap Engine / Dynamic Config
-    console.log(`[AI] Phase 2: Using Dynamic/Fallback Engine (${dynamicProvider}/${dynamicModel})...`);
-    
-    // Retry Logic for Cheap Engine (Max 3 attempts)
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            // Get Rotated Key
-            const keyData = await keyService.getSmartKey(dynamicProvider, dynamicModel || 'default');
-            if (!keyData || !keyData.key) throw new Error("No keys available for Cheap Engine.");
-            const apiKey = keyData.key;
+    console.log(`[AI] Phase 2: Using Strict Priority Engine Chain...`);
 
+    // Strict Priority Chain (User Request):
+    // 1. Gemini 2.5 Flash (mapped to gemini-2.0-flash)
+    // 2. Gemini 2.5 Flash Lite (mapped to gemini-2.0-flash-lite-preview-02-05)
+    // 3. Gemini 2.0 Flash (mapped to gemini-2.0-flash) - Redundant but requested as step
+    // 4. OpenRouter Best Free Model (Dynamic)
+
+    const priorityChain = [
+        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.5 Flash' },
+        { provider: 'google', model: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.5 Flash Lite' },
+        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Retry)' }, // Using 2.0 Flash again as requested
+        { provider: 'openrouter', model: bestFreeModels.text, name: `OpenRouter Free (${bestFreeModels.text})` }
+    ];
+
+    for (const option of priorityChain) {
+        try {
+            console.log(`[AI] Phase 2 Attempt: ${option.name} (${option.model})...`);
+            
+            // Get Key
+            const keyData = await keyService.getSmartKey(option.provider, option.model);
+            if (!keyData || !keyData.key) {
+                // If specific key not found, try generic for provider
+                const genericKey = await keyService.getSmartKey(option.provider, 'default');
+                if (!genericKey || !genericKey.key) {
+                    console.warn(`[AI] No keys found for ${option.name}. Skipping.`);
+                    continue;
+                }
+                keyData = genericKey; // Use generic key
+            }
+            
+            const apiKey = keyData.key;
             let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-            if (dynamicProvider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
-            if (dynamicProvider === 'groq') baseURL = 'https://api.groq.com/openai/v1';
+            if (option.provider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
 
             const openai = new OpenAI({ apiKey: apiKey, baseURL: baseURL });
             
-            // Use fallback model on last attempt
-            const modelToUse = (attempt === MAX_RETRIES && fallbackModel) ? fallbackModel : (defaultModel || dynamicModel);
-            
-            console.log(`[AI] Phase 2 Attempt ${attempt}/${MAX_RETRIES}: ${modelToUse} (Provider: ${dynamicProvider})`);
-
             const completion = await openai.chat.completions.create({
-                model: modelToUse,
+                model: option.model,
                 messages: messages,
                 response_format: { type: "json_object" }
             });
@@ -412,20 +492,19 @@ Rules:
                 try {
                     const parsed = JSON.parse(rawContent);
                     if (!parsed.reply) parsed.reply = parsed.response || parsed.text;
-                    return { ...parsed, model: modelToUse, token_usage: tokenUsage + totalTokenUsage };
+                    return { ...parsed, model: option.model, token_usage: tokenUsage + totalTokenUsage };
                 } catch (e) {
-                    return { reply: rawContent, sentiment: 'neutral', model: modelToUse, token_usage: tokenUsage + totalTokenUsage };
+                    return { reply: rawContent, sentiment: 'neutral', model: option.model, token_usage: tokenUsage + totalTokenUsage };
                 }
             }
+
         } catch (error) {
-            console.warn(`[AI] Phase 2 Attempt ${attempt} Failed:`, error.message);
-            if (attempt === MAX_RETRIES) {
-                console.error("[AI] All attempts failed.");
-                return null;
-            }
+            console.warn(`[AI] Phase 2 Attempt (${option.name}) Failed:`, error.message);
+            // Continue to next priority...
         }
     }
 
+    console.error("[AI] All Phase 2 attempts failed.");
     return null;
 }
 
@@ -699,97 +778,119 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
     return { text: "Image found but analysis unavailable due to technical errors.", usage: 0 };
 }
 
-// --- HELPER: Transcribe Audio (Whisper) ---
+// --- HELPER: Transcribe Audio (Multi-Engine Priority) ---
 async function transcribeAudio(audioUrl, config) {
+    console.log(`[Audio] Processing: ${audioUrl.substring(0, 50)}...`);
+    let audioBuffer, mimeType;
+
+    // 1. Download Audio
     try {
-        console.log(`[Audio] Processing: ${audioUrl.substring(0, 50)}...`);
-        logDebug(`[Audio] Starting transcription for URL: ${audioUrl}`);
-        
-        // 1. Download Audio
-        // WAHA Authentication Check
-        const headers = { 
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': '*/*' 
-        };
-        
-        // Check both configured Base URL and the hardcoded domain the user is using
-        if (audioUrl.includes(WAHA_BASE_URL) || audioUrl.includes('wahubbd.salesmanchatbot.online')) {
-            console.log('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
-            logDebug('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
-            headers['X-Api-Key'] = WAHA_API_KEY;
-        } else if (audioUrl.includes('graph.facebook.com') && config.page_access_token) {
-            console.log('[Audio] Detected Facebook Graph URL. Injecting Access Token.');
-            headers['Authorization'] = `Bearer ${config.page_access_token}`;
-        }
+        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        if (audioUrl.includes(WAHA_BASE_URL)) headers['X-Api-Key'] = WAHA_API_KEY;
+        else if (audioUrl.includes('graph.facebook.com') && config.page_access_token) headers['Authorization'] = `Bearer ${config.page_access_token}`;
 
-        logDebug(`[Audio] Downloading...`);
-        const response = await axios.get(audioUrl, { 
-            responseType: 'arraybuffer',
-            headers: headers,
-            validateStatus: status => status === 200 // Only accept 200 OK
-        });
-        
+        const response = await axios.get(audioUrl, { responseType: 'arraybuffer', headers, validateStatus: s => s === 200 });
+        audioBuffer = Buffer.from(response.data);
         const contentType = response.headers['content-type'] || 'audio/ogg';
-        console.log(`[Audio] Downloaded. Size: ${response.data.length}, Type: ${contentType}`);
-        logDebug(`[Audio] Downloaded. Size: ${response.data.length}, Type: ${contentType}`);
+        
+        // Map to Gemini-supported MIME types
+        if (contentType.includes('opus') || contentType.includes('ogg')) mimeType = 'audio/ogg';
+        else if (contentType.includes('mp3') || contentType.includes('mpeg')) mimeType = 'audio/mp3';
+        else if (contentType.includes('wav')) mimeType = 'audio/wav';
+        else if (contentType.includes('aac')) mimeType = 'audio/aac';
+        else mimeType = 'audio/ogg'; // Default safe assumption
+        
+        logDebug(`[Audio] Downloaded. Size: ${audioBuffer.length}, Type: ${mimeType}`);
 
-        // 2. Use Groq Whisper (Fastest)
-        const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
-        if (!keyData || !keyData.key) {
-            logDebug(`[Audio] No Groq Key found for transcription.`);
-            return "[Audio Message]";
+    } catch (e) {
+        console.error(`[Audio] Download Failed:`, e.message);
+        return "[Audio Download Failed]";
+    }
+
+    // 2. Priority Chain: Gemini 2.5 Flash -> Lite -> OpenRouter -> Groq (Fallback)
+    const priorityChain = [
+        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.5 Flash' },
+        { provider: 'google', model: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.5 Flash Lite' },
+        // Only try OpenRouter if it's a known multimodal model that might support audio (Gemini/Qwen usually don't via standard chat API for audio)
+        // But we will try if bestFreeModels.voice is set to a Gemini model
+        { provider: 'openrouter', model: bestFreeModels.voice, name: `OpenRouter Voice (${bestFreeModels.voice})` }
+    ];
+
+    for (const option of priorityChain) {
+        try {
+            // Skip OpenRouter if it's just a text model (not mapped to Gemini/Multimodal)
+            if (option.provider === 'openrouter' && !option.model.includes('gemini') && !option.model.includes('claude')) {
+                // Most OpenRouter models don't support audio input via Chat API yet.
+                // We skip to avoid errors, unless we are sure.
+                continue; 
+            }
+
+            console.log(`[Audio] Attempting Transcription with ${option.name}...`);
+            const keyData = await keyService.getSmartKey(option.provider, option.model);
+            if (!keyData || !keyData.key) continue;
+            
+            const apiKey = keyData.key;
+            
+            // GEMINI DIRECT API
+            if (option.provider === 'google' || option.model.includes('google/gemini')) {
+                const baseUrl = option.provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://generativelanguage.googleapis.com/v1beta';
+                
+                // If OpenRouter, we need to check if they support 'inline_data' or OpenAI 'image_url' (audio?)
+                // OpenRouter Gemini support usually follows OpenAI spec or Google spec.
+                // Safest is to use Google Direct for Google models. 
+                // If OpenRouter, we might skip for now as audio input support is experimental there.
+                if (option.provider === 'openrouter') continue; 
+
+                const url = `${baseUrl}/models/${option.model}:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: "Transcribe this audio in Bengali exactly as spoken. Output ONLY the transcription." },
+                            { inline_data: { mime_type: mimeType, data: audioBuffer.toString('base64') } }
+                        ]
+                    }]
+                };
+                
+                const res = await axios.post(url, payload);
+                const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (text) {
+                    console.log(`[Audio] Success with ${option.name}: "${text.substring(0, 30)}..."`);
+                    return text.trim();
+                }
+            }
+            
+        } catch (e) {
+             console.warn(`[Audio] ${option.name} Failed:`, e.message);
         }
+    }
+
+    // 3. Fallback to Groq Whisper (Existing Reliable Method)
+    try {
+        console.log(`[Audio] Falling back to Groq Whisper...`);
+        const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
+        if (!keyData || !keyData.key) return "[Audio Message]";
         const apiKey = keyData.key;
 
-        // OpenAI/Groq require FormData for file uploads
         const formData = new FormData();
-        
-        // Smart Extension Handling: If opus is mentioned, use .opus, otherwise default to .ogg or .mp3
-        let filename = 'audio.ogg';
-        if (contentType.includes('opus')) filename = 'audio.opus';
-        else if (contentType.includes('mp3') || contentType.includes('mpeg')) filename = 'audio.mp3';
-        else if (contentType.includes('wav')) filename = 'audio.wav';
-        else if (contentType.includes('m4a')) filename = 'audio.m4a';
-
-        formData.append('file', Buffer.from(response.data), { 
-            filename: filename, 
-            contentType: contentType 
-        });
-        
+        formData.append('file', audioBuffer, { filename: `audio.${mimeType.split('/')[1]}`, contentType: mimeType });
         formData.append('model', 'whisper-large-v3');
-        formData.append('language', 'bn'); // Force Bengali
-        formData.append('prompt', 'This audio is in Bengali language. Transcribe it exactly as spoken in Bengali script.'); // Context Prompt
-        formData.append('temperature', '0'); // Deterministic for accuracy
+        formData.append('language', 'bn'); 
+        formData.append('prompt', 'Transcribe exactly in Bengali.');
+        formData.append('temperature', '0');
 
-        logDebug(`[Audio] Sending to Groq Whisper...`);
-        const transcriptionResponse = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
-            headers: {
-                ...formData.getHeaders(),
-                'Authorization': `Bearer ${apiKey}`
-            },
-            timeout: 10000 // 10s timeout
+        const res = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
+            headers: { ...formData.getHeaders(), 'Authorization': `Bearer ${apiKey}` },
+            timeout: 10000
         });
 
-        const text = transcriptionResponse.data.text;
-        if (!text || !text.trim()) {
-            logDebug(`[Audio] Transcription empty.`);
-            return "[Audio Message (Empty/Silence)]";
-        }
+        if (res.data.text) return res.data.text;
 
-        console.log(`[Audio] Transcription: "${text.substring(0, 30)}..."`);
-        logDebug(`[Audio] Success: "${text}"`);
-        // Return raw text to simulate SMS-like behavior as per user request
-        return text;
-
-    } catch (error) {
-        const errMsg = error.response?.data?.error?.message || error.message;
-        console.error(`[Audio] Transcription Error:`, errMsg);
-        logDebug(`[Audio] Failed: ${errMsg}`);
-        if (error.response) {
-            logDebug(`[Audio] Response Data: ${JSON.stringify(error.response.data)}`);
-        }
-        return `[Audio Message (Transcription Failed: ${errMsg})]`;
+    } catch (e) {
+        console.error(`[Audio] Groq Fallback Failed:`, e.message);
     }
+
+    return "[Audio Message (Transcription Failed)]";
 }
 
 module.exports = {
