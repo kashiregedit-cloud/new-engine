@@ -217,8 +217,17 @@ async function queueMessage(session, messagePayload) {
     const audioUrls = [];
     
     if (messagePayload.hasMedia) {
-        // 1. Try mediaUrl (Preferred - Requires WAHA downloadMedia: true)
-        if (messagePayload.mediaUrl) {
+        // 0. Try media.url (WAHA Standard Structure)
+        if (messagePayload.media && messagePayload.media.url) {
+            console.log(`[WA] Found media.url: ${messagePayload.media.url}`);
+            if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('image/')) {
+                imageUrls.push(messagePayload.media.url);
+            } else if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('audio/')) {
+                audioUrls.push(messagePayload.media.url);
+            }
+        }
+        // 1. Try mediaUrl (Legacy/Alternative)
+        else if (messagePayload.mediaUrl) {
             if (messagePayload.mimetype && messagePayload.mimetype.startsWith('image/')) {
                 imageUrls.push(messagePayload.mediaUrl);
             } else if (messagePayload.mimetype && messagePayload.mimetype.startsWith('audio/')) {
@@ -379,11 +388,12 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // We only process the first image for now as per n8n logic, or map all
         try {
             // Process all images
-            // Use the new Robust Fallback Logic in aiService (No hardcoded OpenRouter options)
-            // But we keep the n8n-style prompt for product analysis
+            // Use OpenRouter Qwen 2.5 VL as requested by user
             const productAnalysisPrompt = "You are a smart image analzer . you can detect product colour, product name . try to send product name :  ,  prodocut color :  . You can Analyze Multiple Product image at once dynamically . Try to make it very shorter ans like name and  color only . Must add this line with the result 'Based the image this is + Result' this is mandetory  ";
             
             const analysisResults = await Promise.all(allImages.map(img => aiService.processImageWithVision(img, {}, {
+                provider: 'openrouter',
+                model: 'qwen/qwen-2.5-vl-7b-instruct:free',
                 prompt: productAnalysisPrompt
             })));
             
