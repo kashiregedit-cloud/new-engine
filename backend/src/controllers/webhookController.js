@@ -736,6 +736,11 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
 
         const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, effectiveHistory, senderName, senderGender);
         
+        if (!aiResponse) {
+             console.error(`[Webhook] AI generation failed for ${senderId}. No response generated.`);
+             return;
+        }
+
         // --- ZERO COST ORDER TRACKING LOGIC ---
         // If AI detects order details, save to DB immediately.
         // This uses the SAME AI call, so ZERO extra cost.

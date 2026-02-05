@@ -16,7 +16,7 @@ export default function ApiManagementPage() {
     const [loading, setLoading] = useState(true);
     const [newApi, setNewApi] = useState("");
     const [provider, setProvider] = useState("gemini");
-    const [model, setModel] = useState("gemini-1.5-flash");
+    const [model, setModel] = useState("gemini-2.5-flash");
 
     useEffect(() => {
         fetchApis();
@@ -81,7 +81,7 @@ export default function ApiManagementPage() {
                         </Select>
                         
                         <Input 
-                            placeholder="Model Name (e.g., gemini-1.5-flash)" 
+                            placeholder="Model Name (e.g., gemini-2.5-flash)" 
                             value={model} 
                             onChange={(e) => setModel(e.target.value)}
                             className="w-[250px]"

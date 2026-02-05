@@ -177,11 +177,11 @@ export default function WhatsAppSettingsPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      provider: "openrouter",
-      api_key: "",
-      chatmodel: "xiaomi/mimo-v2-flash:free",
-      text_prompt: "You are a helpful assistant for a WhatsApp store.",
-    },
+        provider: "openrouter",
+        api_key: "",
+        chatmodel: "openrouter/auto",
+        text_prompt: "You are a helpful assistant for a WhatsApp store.",
+      },
   });
 
   useEffect(() => {
@@ -250,7 +250,7 @@ export default function WhatsAppSettingsPage() {
         setMode(isManaged ? "managed" : "own");
         setActiveMode(isManaged ? "managed" : "own");
 
-        const rawModel = configRow.model_name || "xiaomi/mimo-v2-flash:free";
+        const rawModel = configRow.model_name || "openrouter/auto";
         const displayModel = rawModel.replace(':free', '');
 
         const credit = (configRow as any).message_credit || 0;
@@ -566,7 +566,7 @@ export default function WhatsAppSettingsPage() {
                                 <Input placeholder="gpt-4o-mini" {...field} />
                               </FormControl>
                               <FormDescription>
-                                e.g. gpt-4o, claude-3-sonnet, gemini-pro
+                                e.g. gpt-4o, claude-3-sonnet, gemini-2.5-flash
                               </FormDescription>
                               <FormMessage />
                             </FormItem>

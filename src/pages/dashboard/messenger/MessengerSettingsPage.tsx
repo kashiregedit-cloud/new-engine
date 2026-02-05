@@ -102,11 +102,11 @@ export default function MessengerSettingsPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      provider: "openrouter",
-      api_key: "",
-      chatmodel: "xiaomi/mimo-v2-flash:free",
-      text_prompt: "You are a helpful assistant for a Facebook page.",
-    },
+        provider: "openrouter",
+        api_key: "",
+        chatmodel: "openrouter/auto",
+        text_prompt: "You are a helpful assistant for a Facebook page.",
+      },
   });
 
   useEffect(() => {
@@ -216,7 +216,7 @@ export default function MessengerSettingsPage() {
         setActiveMode(isManaged ? "managed" : "own");
 
         // Clean model name (remove :free suffix for display)
-        const rawModel = pageRow.chat_model || "arcee-ai/trinity-large-preview";
+        const rawModel = pageRow.chat_model || "openrouter/auto";
         const displayModel = rawModel.replace(':free', '');
 
         form.reset({

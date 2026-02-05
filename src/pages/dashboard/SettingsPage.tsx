@@ -51,7 +51,7 @@ export default function SettingsPage() {
     defaultValues: {
       provider: "openrouter",
       api_key: "",
-      chatmodel: "xiaomi/mimo-v2-flash:free",
+      chatmodel: "google/gemini-2.0-flash-lite-preview-02-05:free",
       text_prompt: "You are a helpful assistant for a WhatsApp store.",
     },
   });
@@ -94,9 +94,9 @@ export default function SettingsPage() {
         const row = data as any;
         setVerified(row.verified !== false);
         form.reset({
-          provider: row.provider || "openrouter",
+          provider: row.provider || "google",
           api_key: row.api_key || "",
-          chatmodel: row.chatmodel || "xiaomi/mimo-v2-flash:free",
+          chatmodel: row.chatmodel || "gemini-2.5-flash",
           text_prompt: row.text_prompt || "",
         });
       }

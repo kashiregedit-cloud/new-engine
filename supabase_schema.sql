@@ -22,7 +22,7 @@ create table if not exists user_configs (
   user_id text not null unique, -- Supabase Auth User ID or Email
   ai_provider text default 'openrouter', -- 'openai', 'gemini', 'openrouter', 'groq'
   api_key text,
-  model_name text default 'xiaomi/mimo-v2-flash:free',
+  model_name text default 'openrouter/auto',
   system_prompt text,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
@@ -78,9 +78,9 @@ create table if not exists page_access_token_message (
   secret_key text,
   found_id text,
   email text,
-  ai text default 'openrouter',
+  ai text default 'google',
   api_key text, -- Supports multiple comma-separated keys for load balancing (e.g., "key1,key2,key3")
-  chat_model text default 'xiaomi/mimo-v2-flash:free',
+  chat_model text default 'openrouter/auto',
   subscription_status text default 'inactive', -- active, inactive, trial
   subscription_plan text, -- free, basic, pro, etc.
   subscription_expiry timestamp with time zone,
@@ -92,7 +92,7 @@ create table if not exists page_access_token_message (
 -- Ensure columns exist for page_access_token_message (if table already existed)
 alter table page_access_token_message add column if not exists ai text default 'openrouter';
 alter table page_access_token_message add column if not exists api_key text;
-alter table page_access_token_message add column if not exists chat_model text default 'xiaomi/mimo-v2-flash:free';
+alter table page_access_token_message add column if not exists chat_model text default 'openrouter/auto';
 alter table page_access_token_message add column if not exists subscription_status text default 'inactive';
 alter table page_access_token_message add column if not exists subscription_plan text;
 alter table page_access_token_message add column if not exists subscription_expiry timestamp with time zone;
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS public.api_list (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL PRIMARY KEY,
   provider text NOT NULL, -- 'google', 'openai', 'gemini'
   api text NOT NULL, -- The API Key
-  model text DEFAULT 'gemini-1.5-flash',
+  model text DEFAULT 'gemini-2.5-flash',
   usage_count bigint DEFAULT 0,
   created_at timestamp with time zone DEFAULT now()
 );

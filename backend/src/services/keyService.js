@@ -37,17 +37,10 @@ setInterval(() => {
 // --- Default Limits Map (Fallback if DB values are null) ---
 // Based on typical Free Tier limits as of early 2025
 const DEFAULT_LIMITS = {
-    'gemini-3-pro': { rpm: 2, rpd: 50 },
-    'gemini-3-flash': { rpm: 10, rpd: 1500 },
-    'gemini-2.5-flash': { rpm: 5, rpd: 20 }, // Strict limit (User reported)
-    'gemini-2.5-flash-lite': { rpm: 5, rpd: 40 }, // User estimate: 25 keys for 1k msgs = 40 RPD
-    'gemini-2.5-pro': { rpm: 2, rpd: 50 },
-    'gemini-2.0-flash': { rpm: 10, rpd: 1500 },
-    'gemini-1.5-flash': { rpm: 15, rpd: 1500 },
-    'gemini-1.5-flash-8b': { rpm: 15, rpd: 1500 },
-    'gemini-1.5-pro': { rpm: 2, rpd: 50 },
-    'gemini-1.0-pro': { rpm: 15, rpd: 1500 },
-    'gpt-4o-mini': { rpm: 3, rpd: 200 },
+    // Gemini Limits (Based on User Info)
+    'gemini-2.5-flash': { rpm: 20, rpd: 1500 }, // User Confirmed: 20 RPM per Key
+    'gemini-2.5-flash-lite': { rpm: 20, rpd: 1500 }, // User Confirmed: 20 RPM per Key
+    
     // Groq Limits (Based on Official Docs)
     'llama-3.3-70b-versatile': { rpm: 30, rpd: 1000 }, // High Intelligence, Lower Daily Limit
     'llama-3.1-8b-instant': { rpm: 30, rpd: 14400 },   // High Speed, Massive Daily Limit
@@ -230,13 +223,18 @@ async function recordKeyUsage(apiKey, tokenUsage = 0) {
 
     if (cachedKey) {
         if (cachedKey.last_date_checked === today) {
-            cachedKey.usage_today = (cachedKey.usage_today || 0) + 1;
+            // usage_today is already incremented in getSmartKey (Optimistic)
+            // We only update tokens here.
+            // cachedKey.usage_today = (cachedKey.usage_today || 0) + 1; 
             cachedKey.usage_tokens_today = (cachedKey.usage_tokens_today || 0) + tokenUsage;
             newUsage = cachedKey.usage_today;
             newTokens = cachedKey.usage_tokens_today;
         } else {
+            // Date changed between getSmartKey and here? Unlikely but possible.
             cachedKey.last_date_checked = today;
-            cachedKey.usage_today = 1;
+            cachedKey.usage_today = 1; // Reset + 1 for this call? Or just 1 (from getSmartKey)? 
+            // If getSmartKey was called yesterday, and this finishes today...
+            // Safest to just set tokens.
             cachedKey.usage_tokens_today = tokenUsage;
             newUsage = 1;
             newTokens = tokenUsage;
@@ -438,6 +436,22 @@ async function getSmartKey(provider, model) {
 
         if (isKeyAlive(candidateKey.api) && isKeyWithinLimits(candidateKey)) {
             // Found a good key!
+            
+            // OPTIMISTIC USAGE INCREMENT:
+            // Increment usage immediately to prevent race conditions where multiple requests
+            // grab the same key before the first one finishes.
+            const today = new Date().toISOString().split('T')[0];
+            if (candidateKey.last_date_checked !== today) {
+                candidateKey.last_date_checked = today;
+                candidateKey.usage_today = 1;
+                candidateKey.usage_tokens_today = 0;
+            } else {
+                candidateKey.usage_today = (candidateKey.usage_today || 0) + 1;
+            }
+            candidateKey.last_used_at = new Date().toISOString();
+            
+            // Mark for DB Sync
+            pendingUpdates.add(candidateKey.api);
             
             // Update pointer to next one for next call
             modelIndexMap.set(mapKey, (currentIndex + 1) % validKeys.length);

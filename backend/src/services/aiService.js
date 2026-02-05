@@ -8,10 +8,11 @@ const fs = require('fs');
 const path = require('path');
 
 // --- DYNAMIC FREE MODEL OPTIMIZER (OpenRouter) ---
+// User Request: Dynamically fetch best free models using Gemini (Cheap Engine) to analyze the list.
 let bestFreeModels = {
-    text: 'google/gemini-2.0-flash-lite-preview-02-05:free', // Default safe fallback
-    vision: 'qwen/qwen-2.5-vl-7b-instruct:free',
-    voice: 'google/gemini-2.0-flash-lite-preview-02-05:free' // Using Multimodal Gemini for Voice
+    text: 'google/gemini-2.0-flash-lite-preview-02-05:free', // Default fallback
+    vision: 'qwen/qwen-2.5-vl-7b-instruct:free', 
+    voice: 'google/gemini-2.0-flash-lite-preview-02-05:free' 
 };
 
 async function updateBestFreeModels() {
@@ -22,7 +23,7 @@ async function updateBestFreeModels() {
         
         if (!models || !Array.isArray(models)) throw new Error("Invalid response format");
 
-        // Filter for Strictly Free Models
+        // Filter for Strictly Free Models (Prompt & Completion = 0)
         const freeModels = models.filter(m => 
             m.pricing && 
             (m.pricing.prompt === "0" || m.pricing.prompt === 0) && 
@@ -34,32 +35,78 @@ async function updateBestFreeModels() {
             return;
         }
 
-        // 1. SELECT BEST TEXT MODEL
-        // Criteria: High Context > Known Providers > Popularity
-        const textCandidates = freeModels.filter(m => !m.id.includes('vision') && !m.id.includes('vl')); // Exclude specialized vision
-        textCandidates.sort((a, b) => (b.context_length || 0) - (a.context_length || 0)); // Sort by Context
-        // Prefer known reliable free models if available at top
-        const preferredText = textCandidates.find(m => m.id.includes('google/gemini') || m.id.includes('meta-llama/llama-3')) || textCandidates[0];
-        if (preferredText) bestFreeModels.text = preferredText.id;
+        // Limit to Top 50 to capture new high-potential models like stepfun/upstage
+        freeModels.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+        // User Update: Analyze ALL free models, not just top 50.
+        const candidates = freeModels.map(m => ({
+            id: m.id,
+            name: m.name,
+            context: m.context_length,
+            modality: m.architecture?.modality || 'text',
+            description: m.description // Help AI understand model capabilities
+        }));
 
-        // 2. SELECT BEST VISION MODEL
-        // Criteria: 'modality' includes 'image' OR id includes 'vision'/'vl'
-        const visionCandidates = freeModels.filter(m => 
-            (m.architecture && m.architecture.modality && m.architecture.modality.includes('text+image')) ||
-            m.id.includes('vision') || m.id.includes('vl') || m.id.includes('gemini') // Gemini is usually multimodal
-        );
-        // Prefer Gemini or Qwen for Vision
-        const preferredVision = visionCandidates.find(m => m.id.includes('gemini-2.0') || m.id.includes('qwen-2.5')) || visionCandidates[0];
-        if (preferredVision) bestFreeModels.vision = preferredVision.id;
+        // --- GEMINI SELECTION LOGIC (Cheap Engine) ---
+        // We use Gemini 2.0 Flash to pick the best models from the list
+        try {
+            console.log(`[AI Optimizer] Asking Gemini to select best models from ${candidates.length} candidates...`);
+            const keyData = await keyService.getSmartKey('google', 'gemini-2.0-flash');
+            
+            if (keyData && keyData.key) {
+                const prompt = `
+You are an expert AI Engineer. Analyze this COMPLETE list of FREE OpenRouter models and pick the ABSOLUTE BEST ones for a production chatbot.
 
-        // 3. SELECT BEST VOICE MODEL (Multimodal capable of Audio)
-        // OpenRouter metadata for audio is scarce, but Gemini models are usually Audio-capable.
-        // We will prioritize Gemini Flash/Lite variants.
-        const voiceCandidates = freeModels.filter(m => m.id.includes('gemini') && m.id.includes('flash'));
-        const preferredVoice = voiceCandidates[0] || preferredText; // Fallback to best text if no specific voice model
-        if (preferredVoice) bestFreeModels.voice = preferredVoice.id;
+Candidates: ${JSON.stringify(candidates)}
 
-        console.log('[AI Optimizer] Updated Best Free Models:', bestFreeModels);
+Requirements:
+1. TEXT: Select the BEST General Chat Model. 
+   - Look for high intelligence, reasoning, and instruction following.
+   - Do NOT just pick 'Google' or 'Meta' brands. Look for 'Pro', 'Max', 'Ultra' or 'Reasoning' variants even from lesser known providers like 'Upstage', 'Stepfun', 'Mistral', 'Qwen' etc.
+   - High context is good, but smartness is priority.
+2. VISION: Best Multimodal Model. Must support images (Gemini, Qwen VL, Llama 3.2 Vision).
+3. VOICE: Fastest model for text generation (Flash/Lite/Instant variants).
+
+Return ONLY valid JSON:
+{
+  "text": "model_id",
+  "vision": "model_id",
+  "voice": "model_id"
+}`;
+                const openai = new OpenAI({ 
+                    apiKey: keyData.key, 
+                    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/' 
+                });
+
+                const completion = await openai.chat.completions.create({
+                    model: 'gemini-2.0-flash',
+                    messages: [{ role: 'user', content: prompt }],
+                    response_format: { type: "json_object" }
+                });
+
+                const result = JSON.parse(completion.choices[0].message.content);
+                
+                if (result.text && result.vision && result.voice) {
+                    bestFreeModels = result;
+                    console.log('[AI Optimizer] Gemini Selected Models:', bestFreeModels);
+                } else {
+                    throw new Error("Invalid JSON structure from Gemini");
+                }
+            } else {
+                throw new Error("No Gemini keys available for optimizer.");
+            }
+        } catch (geminiError) {
+            console.warn('[AI Optimizer] Gemini Selection Failed:', geminiError.message);
+            console.log('[AI Optimizer] Falling back to rule-based selection.');
+            
+            // Fallback: Rule-based (Previous Logic)
+             const reliableProviders = /gemini|llama-3|mistral|qwen/i;
+             let bestText = freeModels.find(m => reliableProviders.test(m.id) && !m.id.includes('vision')) || freeModels[0];
+             let bestVision = freeModels.find(m => m.id.includes('gemini-2.0') || m.id.includes('qwen-2.5')) || freeModels[0];
+             let bestVoice = freeModels.find(m => m.id.includes('flash') && m.id.includes('gemini')) || bestText;
+
+             bestFreeModels = { text: bestText.id, vision: bestVision.id, voice: bestVoice.id };
+             console.log('[AI Optimizer] Rule-based Selected Models:', bestFreeModels);
+        }
 
     } catch (e) {
         console.warn('[AI Optimizer] Failed to update free models:', e.message);
@@ -254,7 +301,14 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }
 
     // PRIORITIZE PAGE CONFIG (User's specific choice overrides everything)
-    const userModel = (pageConfig.chat_model && pageConfig.chat_model !== 'default') ? pageConfig.chat_model.trim() : null;
+    let userModel = (pageConfig.chat_model && pageConfig.chat_model !== 'default') ? pageConfig.chat_model.trim() : null;
+    
+    // AUTO MODEL SELECTION (User Request: "openrouter/auto")
+    if (userModel === 'openrouter/auto') {
+        console.log(`[AI] Auto-Model Selected. Using best free model: ${bestFreeModels.text}`);
+        userModel = bestFreeModels.text;
+    }
+
     const userProvider = pageConfig.ai || pageConfig.operator; 
 
     let defaultProvider = userProvider || (useCheapEngine ? dynamicProvider : 'gemini');
@@ -263,13 +317,13 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // IF User did NOT specify a model (null), pick a smart default based on the Provider
     if (!defaultModel) {
         if (defaultProvider === 'gemini') {
-            defaultModel = 'gemini-1.5-flash'; 
+            defaultModel = 'gemini-2.5-flash'; 
         } else if (defaultProvider === 'openrouter') {
             defaultModel = useCheapEngine ? dynamicModel : 'arcee-ai/trinity-large-preview';
         } else if (defaultProvider === 'groq') {
             defaultModel = 'llama-3.3-70b-versatile';
         } else {
-            defaultModel = useCheapEngine ? dynamicModel : 'gemini-1.5-flash'; 
+            defaultModel = useCheapEngine ? dynamicModel : 'gemini-2.5-flash'; 
         }
     }
 
@@ -284,8 +338,6 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     const MODEL_ALIASES = {
         'gemini-2.5-flash': 'gemini-2.0-flash', // User Alias
         'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // User Alias
-        'gemini-2.0-flash-exp': 'gemini-2.0-flash', 
-        'gemini-2.5-pro': 'gemini-2.5-pro-preview', 
         'groq-fast': 'llama-3.3-70b-versatile', 
         'groq-speed': 'llama-3.1-8b-instant', 
         'grok-4.1-fast': 'llama-3.3-70b-versatile',
@@ -307,7 +359,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // We set 'defaultModel' to the Primary Choice.
         defaultModel = 'gemini-2.5-flash';
         dynamicModel = 'gemini-2.5-flash-lite';
-        fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // OpenRouter Free Version
+        fallbackModel = bestFreeModels.text || 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Dynamic Fallback
     }
     // -------------------------------------------------
     
@@ -348,7 +400,28 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     let basePrompt = pagePrompts?.text_prompt || "You are a helpful assistant.";
     
     let personaInstruction = "";
-    if (useCheapEngine) {
+    // User Request: Strong Prompt Engineering for OpenRouter Stability & Bengali
+    if (defaultProvider === 'openrouter' || useCheapEngine) {
+        personaInstruction = `
+### SYSTEM OVERRIDE: STABILITY & LANGUAGE PROTOCOL ###
+You are a sophisticated AI Assistant optimized for BENGALI communication.
+Your primary directive is to provide STABLE, ACCURATE, and BENGALI responses.
+
+[MANDATORY RULES]
+1. **LANGUAGE ENFORCEMENT (বাংলা)**: 
+   - You MUST reply in BENGALI.
+   - Translate any English concepts into natural Bengali.
+   - Do NOT use broken Bengali. Use formal/polite forms (আপনি/আপনার).
+2. **ANSWER STABILITY**:
+   - Analyze the 'Ctx' (Context) carefully.
+   - If the user asks something outside the 'Ctx', politely decline in Bengali.
+   - Do NOT hallucinate or invent features.
+   - IGNORE minor typos in user input; infer intent.
+3. **FORMATTING**:
+   - Keep replies SHORT and TO THE POINT.
+   - No preambles like "Here is your response". Just the answer.
+`;
+    } else {
         personaInstruction = `Persona: Gemini 2.5 Flash. Fast, accurate, Bengali expert. Strict JSON. No fluff.`;
     }
 
@@ -411,7 +484,11 @@ Rules:
             else if (currentProvider.includes('xai')) baseURL = 'https://api.x.ai/v1';
 
             try {
-                const openai = new OpenAI({ apiKey: currentKey, baseURL: baseURL });
+                const openai = new OpenAI({ 
+                    apiKey: currentKey, 
+                    baseURL: baseURL,
+                    timeout: 25000 // 25s Timeout for User Keys
+                });
                 console.log(`[AI] Phase 1: Calling User Key (${currentProvider}/${defaultModel})...`);
 
                 const completion = await openai.chat.completions.create({
@@ -454,28 +531,27 @@ Rules:
         }
     }
 
-    // PHASE 2: Fallback to Cheap Engine / Dynamic Config
+    // Phase 2: Fallback to Cheap Engine / Dynamic Config
     console.log(`[AI] Phase 2: Using Strict Priority Engine Chain...`);
 
     // Strict Priority Chain (User Request):
-    // 1. Gemini 2.5 Flash (mapped to gemini-2.0-flash)
-    // 2. Gemini 2.5 Flash Lite (mapped to gemini-2.0-flash-lite-preview-02-05)
-    // 3. Gemini 2.0 Flash (mapped to gemini-2.0-flash) - Redundant but requested as step
-    // 4. OpenRouter Best Free Model (Dynamic)
+    // 1. Gemini 2.5 Flash (ID: gemini-2.5-flash)
+    // 2. Gemini 2.5 Flash Lite (ID: gemini-2.5-flash-lite)
+    // 3. OpenRouter Best Free Model (Dynamic)
 
     const priorityChain = [
-        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.5 Flash' },
-        { provider: 'google', model: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.5 Flash Lite' },
-        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash (Retry)' }, // Using 2.0 Flash again as requested
+        { provider: 'google', model: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { provider: 'google', model: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
         { provider: 'openrouter', model: bestFreeModels.text, name: `OpenRouter Free (${bestFreeModels.text})` }
     ];
 
     for (const option of priorityChain) {
+        let keyData = null; // Defined outside try for error handling
         try {
             console.log(`[AI] Phase 2 Attempt: ${option.name} (${option.model})...`);
             
             // Get Key
-            const keyData = await keyService.getSmartKey(option.provider, option.model);
+            keyData = await keyService.getSmartKey(option.provider, option.model);
             if (!keyData || !keyData.key) {
                 // If specific key not found, try generic for provider
                 const genericKey = await keyService.getSmartKey(option.provider, 'default');
@@ -490,7 +566,11 @@ Rules:
             let baseURL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
             if (option.provider === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
 
-            const openai = new OpenAI({ apiKey: apiKey, baseURL: baseURL });
+            const openai = new OpenAI({ 
+                apiKey: apiKey, 
+                baseURL: baseURL,
+                timeout: 15000 // 15s Timeout per Attempt (Phase 2)
+            });
             
             const completion = await openai.chat.completions.create({
                 model: option.model,
@@ -502,6 +582,9 @@ Rules:
                 const rawContent = completion.choices[0].message.content;
                 const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
                 
+                // Success! Record Token Usage (But do NOT increment request count again)
+                keyService.recordKeyUsage(apiKey, tokenUsage);
+
                 try {
                     const parsed = JSON.parse(rawContent);
                     if (!parsed.reply) parsed.reply = parsed.response || parsed.text;
@@ -513,6 +596,28 @@ Rules:
 
         } catch (error) {
             console.warn(`[AI] Phase 2 Attempt (${option.name}) Failed:`, error.message);
+            
+            // CIRCUIT BREAKER / ERROR HANDLING
+            if (keyData && keyData.key) {
+                const status = error.status || (error.response ? error.response.status : null);
+                
+                if (status === 429 || error.message.includes('429') || error.message.includes('quota') || error.message.includes('Too Many Requests')) {
+                    // Rate Limit / Quota Exceeded -> Ban for rest of day (RPD) or 1 min (RPM)
+                    // Since we have optimistic increment, this is likely a HARD limit (RPD) or strict RPM.
+                    // Let's be safe and assume RPM first (1 min ban) unless message says "quota"
+                    if (error.message.toLowerCase().includes('quota')) {
+                         keyService.markKeyAsQuotaExceeded(keyData.key);
+                    } else {
+                         keyService.markKeyAsDead(keyData.key, 60 * 1000, 'rate_limit_429');
+                    }
+                } else if (status === 401 || status === 403) {
+                    // Auth Error -> Ban permanently (24h)
+                    keyService.markKeyAsDead(keyData.key, 24 * 60 * 60 * 1000, 'auth_error');
+                } else if (status >= 500) {
+                    // Server Error -> Temporary backoff (1 min)
+                    keyService.markKeyAsDead(keyData.key, 60 * 1000, 'server_error');
+                }
+            }
             // Continue to next priority...
         }
     }
@@ -615,7 +720,8 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
                     'Content-Type': 'application/json',
                     'HTTP-Referer': 'https://orderly-conversations.com', 
                     'X-Title': 'Orderly Conversations'
-                }
+                },
+                timeout: 20000 // 20s Timeout
             });
 
             const result = response.data?.choices?.[0]?.message?.content;
@@ -667,7 +773,8 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         };
 
         const visionResponse = await axios.post(url, payload, {
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 20000 // 20s Timeout
         });
 
         const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -685,17 +792,26 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         logDebug(`[Vision] Error 1: ${errMsg}`);
     }
 
-    // ATTEMPT 2: Gemini 2.0 Flash Lite
+    // ATTEMPT 2: Gemini 2.5 Flash Lite
     try {
         const provider = 'google';
-        const model = 'gemini-2.0-flash-lite-preview-02-05'; // Explicit ID
+        const model = 'gemini-2.5-flash-lite'; // Use Alias for consistency
         console.log(`[Vision] Attempt 2: ${model} (${provider})`);
         
         const keyData = await keyService.getSmartKey(provider, model);
-        if (!keyData || !keyData.key) throw new Error("No Key found for Gemini 2.0 Flash Lite");
+        if (!keyData || !keyData.key) throw new Error("No Key found for Gemini 2.5 Flash Lite");
 
         const apiKey = keyData.key;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        // Use the ACTUAL model ID for the API call (via alias map or direct if alias works)
+        // Since we are calling the API directly, we need the real ID.
+        // We can use the MODEL_ALIASES map if available, or just hardcode the real ID here.
+        // But wait, the previous code used the real ID directly.
+        // Let's check if MODEL_ALIASES is accessible here. It is defined in generateReply scope.
+        // We should define it globally or duplicate it.
+        // Or better, just use the real ID for the URL but 'gemini-2.5-flash-lite' for the key service.
+        
+        const realModelId = 'gemini-2.0-flash-lite-preview-02-05'; 
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${realModelId}:generateContent?key=${apiKey}`;
         
         const textPrompt = systemPrompt; // Reuse prompt
         const payload = {
@@ -721,8 +837,8 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
-        console.warn(`[Vision] Attempt 2 (${'gemini-2.0-flash-lite'}) Failed: ${errMsg}`);
-        errors.push(`Gemini 2.0 Flash Lite: ${errMsg}`);
+        console.warn(`[Vision] Attempt 2 (${'gemini-2.5-flash-lite'}) Failed: ${errMsg}`);
+        errors.push(`Gemini 2.5 Flash Lite: ${errMsg}`);
         logDebug(`[Vision] Error 2: ${errMsg}`);
     }
 
@@ -822,8 +938,8 @@ async function transcribeAudio(audioUrl, config) {
 
     // 2. Priority Chain: Gemini 2.5 Flash -> Lite -> OpenRouter -> Groq (Fallback)
     const priorityChain = [
-        { provider: 'google', model: 'gemini-2.0-flash', name: 'Gemini 2.5 Flash' },
-        { provider: 'google', model: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.5 Flash Lite' },
+        { provider: 'google', model: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { provider: 'google', model: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
         // Only try OpenRouter if it's a known multimodal model that might support audio (Gemini/Qwen usually don't via standard chat API for audio)
         // But we will try if bestFreeModels.voice is set to a Gemini model
         { provider: 'openrouter', model: bestFreeModels.voice, name: `OpenRouter Voice (${bestFreeModels.voice})` }
