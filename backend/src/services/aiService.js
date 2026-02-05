@@ -392,13 +392,14 @@ Rules:
     return null;
 }
 
-// --- HELPER: Process Image (Vision) ---
-async function processImageWithVision(imageUrl, pageConfig = {}) {
-    try {
-        let base64Image;
-        let mimeType;
+// --- HELPER: Process Image (Vision) with Smart Fallback ---
+async function processImageWithVision(imageUrl, pageConfig = {}, customOptions = null) {
+    let base64Image;
+    let mimeType;
+    let errors = [];
 
-        // Check if input is already a Data URI (Base64)
+    // 0. Pre-process Image (Download/Decode)
+    try {
         if (imageUrl.startsWith('data:')) {
             console.log(`[Vision] Processing Base64 Data URI...`);
             const matches = imageUrl.match(/^data:(.+);base64,(.+)$/);
@@ -409,7 +410,6 @@ async function processImageWithVision(imageUrl, pageConfig = {}) {
                 throw new Error("Invalid Data URI format");
             }
         } else {
-            // 1. Download Image from URL
             console.log(`[Vision] Downloading image from URL: ${imageUrl.substring(0, 50)}...`);
             const response = await axios.get(imageUrl, { 
                 responseType: 'arraybuffer',
@@ -419,25 +419,40 @@ async function processImageWithVision(imageUrl, pageConfig = {}) {
             mimeType = response.headers['content-type'] || 'image/jpeg';
             logDebug(`[Vision] Image Downloaded. Mime: ${mimeType}, Size: ${base64Image.length}`);
         }
+    } catch (e) {
+        logDebug(`[Vision] Pre-processing Failed: ${e.message}`);
+        return "Image found but failed to download/decode.";
+    }
 
-        // 2. Use Gemini Flash (Multimodal) - It's fast and free/cheap
-        const keyData = await keyService.getSmartKey('google', 'gemini-2.5-flash');
-        if (!keyData || !keyData.key) {
-            logDebug(`[Vision] No Key Found.`);
-            return "Image found but analysis unavailable.";
-        }
-        const apiKey = keyData.key;
-        logDebug(`[Vision] Using Key: ${apiKey.substring(0, 5)}...`);
+    // Determine System Prompt
+    const systemPrompt = customOptions?.prompt || "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any.";
 
-        // Use Native Gemini API via Axios (More reliable than OpenAI compat for Vision)
-        // Try gemini-2.5-flash (User Preference & Available in Models)
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        logDebug(`[Vision] Requesting URL: ${url.replace(apiKey, '***')}`);
+    // --- FALLBACK STRATEGY ---
+    // Priority 1: Gemini 2.5 Flash
+    // Priority 2: Gemini 2.0 Flash Lite (Preview)
+    // Priority 3: OpenRouter Best Free Vision (Qwen 2.5 VL)
+    
+    // ATTEMPT 1: Gemini 2.5 Flash
+    try {
+        const provider = 'google';
+        const model = 'gemini-2.5-flash';
+        console.log(`[Vision] Attempt 1: ${model} (${provider})`);
         
+        const keyData = await keyService.getSmartKey(provider, model);
+        if (!keyData || !keyData.key) throw new Error("No Key found for Gemini 2.5 Flash");
+
+        const apiKey = keyData.key;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        
+        // Gemini doesn't strictly separate system prompt in generateContent
+        const textPrompt = systemPrompt === "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." 
+            ? "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." 
+            : systemPrompt;
+
         const payload = {
             contents: [{
                 parts: [
-                    { text: "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." },
+                    { text: textPrompt },
                     { inline_data: { mime_type: mimeType, data: base64Image } }
                 ]
             }]
@@ -447,17 +462,119 @@ async function processImageWithVision(imageUrl, pageConfig = {}) {
             headers: { 'Content-Type': 'application/json' }
         });
 
-        const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text || "Image content unclear.";
-        logDebug(`[Vision] Result: ${result}`);
+        const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!result) throw new Error("Empty response from Gemini");
+        
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
         return result;
+
     } catch (error) {
-        logDebug(`[Vision] Error: ${error.message}`);
-        if (error.response) {
-            logDebug(`[Vision] API Error: ${JSON.stringify(error.response.data)}`);
-        }
-        console.error(`[Vision] Error:`, error.message);
-        return "Image processing failed.";
+        const errMsg = error.response?.data?.error?.message || error.message;
+        console.warn(`[Vision] Attempt 1 (${'gemini-2.5-flash'}) Failed: ${errMsg}`);
+        errors.push(`Gemini 2.5 Flash: ${errMsg}`);
+        logDebug(`[Vision] Error 1: ${errMsg}`);
     }
+
+    // ATTEMPT 2: Gemini 2.0 Flash Lite
+    try {
+        const provider = 'google';
+        const model = 'gemini-2.0-flash-lite-preview-02-05'; // Explicit ID
+        console.log(`[Vision] Attempt 2: ${model} (${provider})`);
+        
+        const keyData = await keyService.getSmartKey(provider, model);
+        if (!keyData || !keyData.key) throw new Error("No Key found for Gemini 2.0 Flash Lite");
+
+        const apiKey = keyData.key;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        
+        const textPrompt = systemPrompt; // Reuse prompt
+        const payload = {
+            contents: [{
+                parts: [
+                    { text: textPrompt },
+                    { inline_data: { mime_type: mimeType, data: base64Image } }
+                ]
+            }]
+        };
+
+        const visionResponse = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!result) throw new Error("Empty response from Gemini Lite");
+
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
+        return result;
+
+    } catch (error) {
+        const errMsg = error.response?.data?.error?.message || error.message;
+        console.warn(`[Vision] Attempt 2 (${'gemini-2.0-flash-lite'}) Failed: ${errMsg}`);
+        errors.push(`Gemini 2.0 Flash Lite: ${errMsg}`);
+        logDebug(`[Vision] Error 2: ${errMsg}`);
+    }
+
+    // ATTEMPT 3: OpenRouter (Qwen 2.5 VL - Free)
+    try {
+        const provider = 'openrouter';
+        const model = 'qwen/qwen-2.5-vl-7b-instruct:free';
+        console.log(`[Vision] Attempt 3: ${model} (${provider})`);
+
+        let keyData = await keyService.getSmartKey(provider, model);
+        if (!keyData || !keyData.key) {
+             // Try generic default
+             keyData = await keyService.getSmartKey(provider, 'default');
+        }
+        
+        if (!keyData || !keyData.key) throw new Error("No Key found for OpenRouter");
+
+        const apiKey = keyData.key;
+        const url = 'https://openrouter.ai/api/v1/chat/completions';
+        
+        const payload = {
+            model: model,
+            messages: [
+                {
+                    role: "system",
+                    content: systemPrompt
+                },
+                {
+                    role: "user",
+                    content: [
+                        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                    ]
+                }
+            ]
+        };
+
+        const response = await axios.post(url, payload, {
+            headers: { 
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://orderly-conversations.com', 
+                'X-Title': 'Orderly Conversations'
+            }
+        });
+
+        const result = response.data?.choices?.[0]?.message?.content;
+        if (!result) throw new Error("Empty response from OpenRouter");
+
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
+        return result;
+
+    } catch (error) {
+        const errMsg = error.response?.data?.error?.message || error.message;
+        console.warn(`[Vision] Attempt 3 (${'qwen/qwen-2.5-vl-7b-instruct:free'}) Failed: ${errMsg}`);
+        errors.push(`OpenRouter Qwen: ${errMsg}`);
+        logDebug(`[Vision] Error 3: ${errMsg}`);
+    }
+
+    // FINAL FAILURE LOGGING
+    const failureReason = `Image Analysis Failed. Reasons: ${errors.join(' | ')}`;
+    console.error(`[Vision] All attempts failed. Logs: ${failureReason}`);
+    logDebug(`[Vision] FATAL: ${failureReason}`);
+    
+    return "Image found but analysis unavailable due to technical errors.";
 }
 
 // --- HELPER: Transcribe Audio (Whisper) ---

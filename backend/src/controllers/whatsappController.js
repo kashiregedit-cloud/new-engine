@@ -372,6 +372,65 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         .trim();
     console.log(`[WA] Processing buffered. Text: ${combinedText.substring(0,50)}...`);
 
+    // --- IMAGE ANALYSIS (User Request: OpenRouter qwen/qwen-2.5-vl-7b-instruct:free) ---
+    let imageAnalyzeText = null;
+    if (allImages.length > 0) {
+        console.log(`[WA] Analyzing ${allImages.length} images via Vision API...`);
+        // We only process the first image for now as per n8n logic, or map all
+        try {
+            // Process all images
+            // Use the new Robust Fallback Logic in aiService (No hardcoded OpenRouter options)
+            // But we keep the n8n-style prompt for product analysis
+            const productAnalysisPrompt = "You are a smart image analzer . you can detect product colour, product name . try to send product name :  ,  prodocut color :  . You can Analyze Multiple Product image at once dynamically . Try to make it very shorter ans like name and  color only . Must add this line with the result 'Based the image this is + Result' this is mandetory  ";
+            
+            const analysisResults = await Promise.all(allImages.map(img => aiService.processImageWithVision(img, {}, {
+                prompt: productAnalysisPrompt
+            })));
+            
+            imageAnalyzeText = analysisResults.join("\n");
+            console.log(`[WA] Image Analysis Result: ${imageAnalyzeText.substring(0, 50)}...`);
+        } catch (err) {
+            console.error(`[WA] Image Analysis Failed:`, err.message);
+        }
+    }
+
+    // --- MERGE LOGIC (n8n Style) ---
+    // Priority: Image Analysis > Webhook Text
+    let finalOutput = "";
+    if (imageAnalyzeText && imageAnalyzeText.trim() !== "") {
+        finalOutput = imageAnalyzeText;
+    } else if (combinedText && combinedText.trim() !== "") {
+        finalOutput = combinedText;
+    }
+
+    // If we have new content from Analysis, SAVE it to DB so Human Agent sees it
+    if (imageAnalyzeText && imageAnalyzeText.trim() !== "") {
+         try {
+            console.log(`[WA] Saving Analysis Result to DB as User Message...`);
+            await dbService.saveWhatsAppChat({
+                session_name: sessionName,
+                sender_id: senderId,
+                recipient_id: pageId || sessionName, // Page is recipient
+                message_id: `analysis_${Date.now()}`,
+                text: `[Image Analysis] ${finalOutput}`, // Tag it clearly
+                timestamp: Date.now(),
+                status: 'received', // Treat as received from user
+                reply_by: 'user',
+                is_group: isGroup,
+                group_id: null, // Context is usually direct
+                group_name: null
+            });
+         } catch (e) {
+             console.error(`[WA] Failed to save analysis to DB:`, e.message);
+         }
+    }
+
+    // If finalOutput is empty (no text, no valid image analysis), skip AI
+    if (!finalOutput) {
+        console.log(`[WA] No content to process (Empty text & No Image Analysis). Skipping.`);
+        return;
+    }
+
     try {
         // 1. Fetch Config (WhatsApp Specific)
         const pageConfig = await dbService.getWhatsAppConfig(sessionName);
@@ -505,12 +564,16 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         
         // 4. Generate Response (AI)
         console.log(`[AI] Generating response for ${senderId} (Session: ${sessionName})...`);
+        
+        // If we already analyzed images and replaced the text, don't pass images again to avoid double-processing
+        const imagesToPass = (imageAnalyzeText && imageAnalyzeText.trim() !== "") ? [] : allImages;
+
         const aiResponse = await aiService.generateResponse({
             pageId: pageId, 
             userId: senderId,
-            userMessage: combinedText,
+            userMessage: finalOutput, // Use the resolved output (Analysis or Text)
             history: history,
-            imageUrls: allImages, // Pass accumulated images
+            imageUrls: imagesToPass, 
             audioUrls: allAudios, // Pass accumulated audios
             config: pageConfig,
             platform: 'whatsapp'
