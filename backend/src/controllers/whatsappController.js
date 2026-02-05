@@ -261,7 +261,9 @@ async function queueMessage(session, messagePayload) {
         else if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
              console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as fallback.');
              const thumb = messagePayload._data.message.imageMessage.jpegThumbnail;
-             const base64 = `data:image/jpeg;base64,${thumb}`;
+             // Clean Base64 string (remove newlines/spaces)
+             const cleanThumb = thumb.replace(/\s/g, '');
+             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
              imageUrls.push(base64);
         }
         // 5. Try raw body as Base64 (Some versions send raw base64 in body without prefix)

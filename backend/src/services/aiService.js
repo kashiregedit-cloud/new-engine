@@ -402,26 +402,35 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
     try {
         if (imageUrl.startsWith('data:')) {
             console.log(`[Vision] Processing Base64 Data URI...`);
-            const matches = imageUrl.match(/^data:(.+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-                mimeType = matches[1];
-                base64Image = matches[2];
+            // Safer parsing than strict regex
+            const parts = imageUrl.split(',');
+            if (parts.length >= 2) {
+                // Extract mime type from first part (data:image/jpeg;base64)
+                const mimeMatch = parts[0].match(/:(.*?);/);
+                mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                // Join rest as data (in case of extra commas, though unlikely in base64)
+                base64Image = parts.slice(1).join(',');
+                // Clean whitespace just in case
+                base64Image = base64Image.replace(/\s/g, '');
             } else {
-                throw new Error("Invalid Data URI format");
+                throw new Error("Invalid Data URI format (missing comma)");
             }
         } else {
             console.log(`[Vision] Downloading image from URL: ${imageUrl.substring(0, 50)}...`);
             const response = await axios.get(imageUrl, { 
                 responseType: 'arraybuffer',
-                headers: { 'User-Agent': 'Mozilla/5.0' }
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                timeout: 10000 // 10s timeout
             });
             base64Image = Buffer.from(response.data).toString('base64');
             mimeType = response.headers['content-type'] || 'image/jpeg';
             logDebug(`[Vision] Image Downloaded. Mime: ${mimeType}, Size: ${base64Image.length}`);
         }
     } catch (e) {
-        logDebug(`[Vision] Pre-processing Failed: ${e.message}`);
-        return "Image found but failed to download/decode.";
+        const errorMsg = `[Vision] Pre-processing Failed: ${e.message}`;
+        console.error(errorMsg);
+        logDebug(errorMsg);
+        return `Image found but failed to download/decode. Reason: ${e.message}`;
     }
 
     // Determine System Prompt
