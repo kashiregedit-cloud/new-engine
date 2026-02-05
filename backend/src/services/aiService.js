@@ -437,6 +437,19 @@ Rules:
                 }
             } catch (error) {
                 console.warn(`[AI] Phase 1 Key Failed:`, error.message);
+                
+                // STRICT OWN API LOCK: If User specified a chatmodel, they want THAT model.
+                // If it fails, do NOT fallback to System Keys (which use different models).
+                if (pageConfig.chatmodel && pageConfig.chatmodel.trim() !== '') {
+                     console.error(`[AI] Strict Own API Failed. Not falling back to Phase 2.`);
+                     return { 
+                        reply: null, // Silent failure or error message? 
+                        // User prefers silent fail or system error? usually system error log.
+                        // We return null so controller handles it.
+                        token_usage: 0,
+                        model: defaultModel
+                     };
+                }
             }
         }
     }
