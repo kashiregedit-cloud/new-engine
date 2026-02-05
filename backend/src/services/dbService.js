@@ -268,7 +268,16 @@ async function getMessageById(messageId) {
         .eq('message_id', messageId)
         .maybeSingle();
         
-    return fbData ? fbData.text : null;
+    if (fbData && fbData.text) return fbData.text;
+
+    // WhatsApp fallback: check whatsapp_chats for quoted/replied media messages
+    const { data: waData } = await supabase
+        .from('whatsapp_chats')
+        .select('text')
+        .eq('message_id', messageId)
+        .maybeSingle();
+
+    return waData ? waData.text : null;
 }
 
 // 12. Create WhatsApp Entry (whatsapp_message_database)

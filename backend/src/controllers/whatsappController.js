@@ -359,6 +359,7 @@ async function queueMessage(session, messagePayload) {
     
     // Push Object
     sessionData.messages.push({
+        id: messageId,
         text: messageText,
         reply_to: messagePayload.replyTo?.id || null, // WAHA reply info
         images: imageUrls,
@@ -411,36 +412,69 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         .trim();
     console.log(`[WA] Processing buffered. Text: ${combinedText.substring(0,50)}...`);
 
-    // --- IMAGE ANALYSIS (User Request: OpenRouter qwen/qwen-2.5-vl-7b-instruct:free) ---
+    // If this is a swipe-reply, fetch quoted message text by ID for context
+    if (replyToId) {
+        try {
+            const quotedText = await dbService.getMessageById(replyToId);
+            if (quotedText && quotedText.trim()) {
+                combinedText = `[Replying to] ${quotedText.trim()}\n\n${combinedText}`;
+            }
+        } catch (e) {
+            console.warn(`[WA] Failed to fetch quoted message ${replyToId}: ${e.message}`);
+        }
+    }
+
+    // --- IMAGE ANALYSIS (Per-Message) ---
     let imageAnalyzeText = null;
     let totalVisionTokens = 0;
+    if (messages.some(m => m.images && m.images.length > 0)) {
+        const productAnalysisPrompt = "Analyze this image to identify the Product Name, Color, and any visible text (like Price or Model). Output format: 'Based on the image, this is [Product Name] in [Color] color. Model: [Model], Price: [Price]'. If details are not clear, state 'Not identifiable'. Keep it concise.";
+        let collectedTexts = [];
+        for (const msg of messages) {
+            if (msg.images && msg.images.length > 0) {
+                try {
+                    const perMsgResults = await Promise.all(msg.images.map(img => aiService.processImageWithVision(img, {}, {
+                        provider: 'openrouter',
+                        model: 'qwen/qwen-2.5-vl-7b-instruct:free',
+                        prompt: productAnalysisPrompt
+                    })));
+                    const perMsgText = perMsgResults.map(res => {
+                        if (typeof res === 'object') {
+                            totalVisionTokens += (res.usage || 0);
+                            return res.text;
+                        }
+                        return res;
+                    }).join("\n").trim();
 
-    if (allImages.length > 0) {
-        console.log(`[WA] Analyzing ${allImages.length} images via Vision API...`);
-        // We only process the first image for now as per n8n logic, or map all
-        try {
-            // Process all images
-            // Use OpenRouter Qwen 2.5 VL as requested by user
-            const productAnalysisPrompt = "Analyze this image to identify the Product Name, Color, and any visible text (like Price or Model). Output format: 'Based on the image, this is [Product Name] in [Color] color. Model: [Model], Price: [Price]'. If details are not clear, state 'Not identifiable'. Keep it concise.";
-            
-            const analysisResults = await Promise.all(allImages.map(img => aiService.processImageWithVision(img, {}, {
-                provider: 'openrouter',
-                model: 'qwen/qwen-2.5-vl-7b-instruct:free',
-                prompt: productAnalysisPrompt
-            })));
-            
-            // Handle { text, usage } objects
-            imageAnalyzeText = analysisResults.map(res => {
-                if (typeof res === 'object') {
-                    totalVisionTokens += (res.usage || 0);
-                    return res.text;
+                    if (perMsgText) {
+                        collectedTexts.push(perMsgText);
+                        // SAVE analysis as TEXT under ORIGINAL message_id for professional swipe-reply
+                        try {
+                            await dbService.saveWhatsAppChat({
+                                session_name: sessionName,
+                                sender_id: senderId,
+                                recipient_id: pageId || sessionName,
+                                message_id: msg.id,
+                                text: `[Image Analysis] ${perMsgText}`,
+                                timestamp: Date.now(),
+                                status: 'received',
+                                reply_by: 'user',
+                                is_group: isGroup,
+                                group_id: null,
+                                group_name: null
+                            });
+                        } catch (e) {
+                            console.error(`[WA] Failed to save per-message analysis:`, e.message);
+                        }
+                    }
+                } catch (err) {
+                    console.error(`[WA] Image Analysis Failed (msg ${msg.id}):`, err.message);
                 }
-                return res;
-            }).join("\n");
-
-            console.log(`[WA] Image Analysis Result: ${imageAnalyzeText.substring(0, 50)}... Total Tokens: ${totalVisionTokens}`);
-        } catch (err) {
-            console.error(`[WA] Image Analysis Failed:`, err.message);
+            }
+        }
+        imageAnalyzeText = collectedTexts.join("\n").trim();
+        if (imageAnalyzeText) {
+            console.log(`[WA] Image Analysis Result (collected): ${imageAnalyzeText.substring(0,50)}... Total Tokens: ${totalVisionTokens}`);
         }
     }
 
@@ -455,27 +489,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         finalOutput += imageAnalyzeText;
     }
 
-    // If we have new content from Analysis, SAVE it to DB so Human Agent sees it
-    if (imageAnalyzeText && imageAnalyzeText.trim() !== "") {
-         try {
-            console.log(`[WA] Saving Analysis Result to DB as User Message...`);
-            await dbService.saveWhatsAppChat({
-                session_name: sessionName,
-                sender_id: senderId,
-                recipient_id: pageId || sessionName, // Page is recipient
-                message_id: `analysis_${Date.now()}`,
-                text: `[Image Analysis] ${finalOutput}`, // Tag it clearly
-                timestamp: Date.now(),
-                status: 'received', // Treat as received from user
-                reply_by: 'user',
-                is_group: isGroup,
-                group_id: null, // Context is usually direct
-                group_name: null
-            });
-         } catch (e) {
-             console.error(`[WA] Failed to save analysis to DB:`, e.message);
-         }
-    }
+    // Remove legacy combined analysis save (we now save per message_id)
 
     // If finalOutput is empty (no text, no valid image analysis), skip AI
     if (!finalOutput) {

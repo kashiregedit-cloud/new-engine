@@ -295,6 +295,7 @@ async function queueMessage(event) {
 
     // Push Object
     sessionData.messages.push({
+        id: messageId,
         text: messageText,
         reply_to: replyToId,
         images: thisMsgImages,
@@ -367,6 +368,18 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
     }
     combinedText = combinedText.trim();
     if (adContext) combinedText += adContext; // Append Ad Context
+
+    // If this is a swipe-reply, fetch quoted message text by ID for context
+    if (replyToId) {
+        try {
+            const quotedText = await dbService.getMessageById(replyToId);
+            if (quotedText && quotedText.trim()) {
+                combinedText = `[User Replying To: "${quotedText.trim()}"]\n\n${combinedText}`;
+            }
+        } catch (e) {
+            console.warn(`[FB] Failed to fetch quoted message ${replyToId}: ${e.message}`);
+        }
+    }
 
     console.log(`Processing buffered messages for ${sessionId}. Text: ${combinedText.substring(0,50)}... Images: ${allImages.length}, Audios: ${allAudios.length}`);
 
@@ -500,19 +513,42 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
              const reason = hasVideo ? "User sent a video." : `User sent ${allImages.length} images.`;
              combinedText += `\n[System Note: ${reason} This is too costly/complex to analyze directly. Instead of analyzing these media files, use the Ad Context (Ref/Title) if available, or ask the user to specify which product they are interested in from the post.]`;
         } else if (allImages.length > 0) {
-            // Use the already fetched pagePrompts
-            if (pagePrompts && pagePrompts.image_detection) {
-                console.log(`[Batch] Analyzing ${allImages.length} images...`);
-                // Process in parallel
-                const imagePromises = allImages.map(url => aiService.processImageWithVision(url, pageConfig));
-                const imageResults = await Promise.all(imagePromises);
-                
-                // Format clearly for AI
-                let combinedImageAnalysis = "";
-                imageResults.forEach((result, index) => {
-                    combinedImageAnalysis += `\n[Image ${index + 1} Analysis]: ${result}\n`;
-                });
-                
+            // Per-message analysis + save by original message_id for swipe reply context
+            console.log(`[Batch] Per-message analysis for ${allImages.length} images...`);
+            let combinedImageAnalysis = "";
+            for (const msg of messages) {
+                if (msg.images && msg.images.length > 0) {
+                    try {
+                        const imagePromises = msg.images.map(url => aiService.processImageWithVision(url, pageConfig));
+                        const imageResults = await Promise.all(imagePromises);
+                        const perMsgText = imageResults.map((result, index) => {
+                            const text = typeof result === 'object' ? (result.text || '') : String(result || '');
+                            return `[Image ${index + 1} Analysis]: ${text}`;
+                        }).join("\n").trim();
+                        if (perMsgText) {
+                            combinedImageAnalysis += `\n${perMsgText}\n`;
+                            // Save analysis under original message_id
+                            try {
+                                await dbService.saveFbChat({
+                                    page_id: pageId,
+                                    sender_id: senderId,
+                                    recipient_id: pageId,
+                                    message_id: msg.id,
+                                    text: `[Image Analysis] ${perMsgText}`,
+                                    timestamp: Date.now(),
+                                    status: 'received',
+                                    reply_by: 'user'
+                                });
+                            } catch (e) {
+                                console.error(`[FB] Failed to save per-message analysis:`, e.message);
+                            }
+                        }
+                    } catch (err) {
+                        console.error(`[FB] Image Analysis Failed (msg ${msg.id}):`, err.message);
+                    }
+                }
+            }
+            if (combinedImageAnalysis) {
                 combinedText += `\n\n[System: User sent ${allImages.length} images. Analysis follows:]${combinedImageAnalysis}`;
             } else {
                 combinedText += `\n[User sent ${allImages.length} images: ${allImages.join(', ')}]`;

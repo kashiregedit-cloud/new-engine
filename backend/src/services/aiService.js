@@ -687,17 +687,29 @@ async function transcribeAudio(audioUrl, config) {
         
         // 1. Download Audio
         // WAHA Authentication Check
-        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        const headers = { 
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': '*/*' 
+        };
+        
+        // Check both configured Base URL and the hardcoded domain the user is using
         if (audioUrl.includes(WAHA_BASE_URL) || audioUrl.includes('wahubbd.salesmanchatbot.online')) {
             console.log('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
             headers['X-Api-Key'] = WAHA_API_KEY;
+        } else if (audioUrl.includes('graph.facebook.com') && config.page_access_token) {
+            console.log('[Audio] Detected Facebook Graph URL. Injecting Access Token.');
+            headers['Authorization'] = `Bearer ${config.page_access_token}`;
         }
 
         const response = await axios.get(audioUrl, { 
             responseType: 'arraybuffer',
-            headers: headers
+            headers: headers,
+            validateStatus: status => status === 200 // Only accept 200 OK
         });
         
+        const contentType = response.headers['content-type'] || 'audio/ogg';
+        console.log(`[Audio] Downloaded. Size: ${response.data.length}, Type: ${contentType}`);
+
         // 2. Use Groq Whisper (Fastest)
         const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
         if (!keyData || !keyData.key) return "[Audio Message]";
@@ -705,22 +717,41 @@ async function transcribeAudio(audioUrl, config) {
 
         // OpenAI/Groq require FormData for file uploads
         const formData = new FormData();
-        formData.append('file', Buffer.from(response.data), { filename: 'audio.ogg', contentType: response.headers['content-type'] || 'audio/ogg' });
+        
+        // Smart Extension Handling: If opus is mentioned, use .opus, otherwise default to .ogg or .mp3
+        let filename = 'audio.ogg';
+        if (contentType.includes('opus')) filename = 'audio.opus';
+        else if (contentType.includes('mp3') || contentType.includes('mpeg')) filename = 'audio.mp3';
+        else if (contentType.includes('wav')) filename = 'audio.wav';
+        else if (contentType.includes('m4a')) filename = 'audio.m4a';
+
+        formData.append('file', Buffer.from(response.data), { 
+            filename: filename, 
+            contentType: contentType 
+        });
+        
         formData.append('model', 'whisper-large-v3');
         formData.append('language', 'bn'); // Bengali Hint
+        // formData.append('temperature', '0'); // Deterministic
 
         const transcriptionResponse = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
             headers: {
                 ...formData.getHeaders(),
                 'Authorization': `Bearer ${apiKey}`
-            }
+            },
+            timeout: 10000 // 10s timeout
         });
 
-        return `[User Audio Message: "${transcriptionResponse.data.text}"]`;
+        const text = transcriptionResponse.data.text;
+        if (!text || !text.trim()) return "[Audio Message (Empty/Silence)]";
+
+        console.log(`[Audio] Transcription: "${text.substring(0, 30)}..."`);
+        return `[User Audio Message: "${text}"]`;
 
     } catch (error) {
-        console.error(`[Audio] Error:`, error.message);
-        return "[Audio Message (Transcription Failed)]";
+        const errMsg = error.response?.data?.error?.message || error.message;
+        console.error(`[Audio] Transcription Error:`, errMsg);
+        return `[Audio Message (Transcription Failed: ${errMsg})]`;
     }
 }
 
