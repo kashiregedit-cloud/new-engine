@@ -217,15 +217,40 @@ async function queueMessage(session, messagePayload) {
     const audioUrls = [];
     
     if (messagePayload.hasMedia) {
-        // If WAHA sends mediaUrl (configured in WAHA to download media)
+        // 1. Try mediaUrl (Preferred - Requires WAHA downloadMedia: true)
         if (messagePayload.mediaUrl) {
             if (messagePayload.mimetype && messagePayload.mimetype.startsWith('image/')) {
                 imageUrls.push(messagePayload.mediaUrl);
             } else if (messagePayload.mimetype && messagePayload.mimetype.startsWith('audio/')) {
                 audioUrls.push(messagePayload.mediaUrl);
             }
-        } else {
+        } 
+        // 2. Try body (if Base64 Data URI)
+        else if (messagePayload.body && messagePayload.body.startsWith('data:')) {
+             if (messagePayload.body.startsWith('data:image')) {
+                imageUrls.push(messagePayload.body);
+             } else if (messagePayload.body.startsWith('data:audio')) {
+                audioUrls.push(messagePayload.body);
+             }
+        }
+        // 3. Try _data.body (if Base64 Data URI - raw data often here)
+        else if (messagePayload._data && messagePayload._data.body && typeof messagePayload._data.body === 'string' && messagePayload._data.body.startsWith('data:')) {
+             if (messagePayload._data.body.startsWith('data:image')) {
+                imageUrls.push(messagePayload._data.body);
+             } else if (messagePayload._data.body.startsWith('data:audio')) {
+                audioUrls.push(messagePayload._data.body);
+             }
+        }
+        // 4. Try jpegThumbnail (Last Resort for Images - User request)
+        else if (messagePayload._data && messagePayload._data.jpegThumbnail) {
+             console.log('[WA] Using jpegThumbnail as fallback for image.');
+             // jpegThumbnail is usually just the base64 string without prefix
+             const base64 = `data:image/jpeg;base64,${messagePayload._data.jpegThumbnail}`;
+             imageUrls.push(base64);
+        }
+        else {
             messageText += " [User sent media]";
+            console.log('[WA] Media detected but no URL or Data found. WAHA config "downloadMedia: true" might be missing.');
         }
     }
 

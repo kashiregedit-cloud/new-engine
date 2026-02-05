@@ -393,18 +393,32 @@ Rules:
 }
 
 // --- HELPER: Process Image (Vision) ---
-async function processImageWithVision(imageUrl, config) {
+async function processImageWithVision(imageUrl, pageConfig = {}) {
     try {
-        logDebug(`[Vision] Processing: ${imageUrl}`);
-        console.log(`[Vision] Processing: ${imageUrl.substring(0, 50)}...`);
-        // 1. Download Image to Base64
-        const response = await axios.get(imageUrl, { 
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        const base64Image = Buffer.from(response.data).toString('base64');
-        const mimeType = response.headers['content-type'] || 'image/jpeg';
-        logDebug(`[Vision] Image Downloaded. Mime: ${mimeType}, Size: ${base64Image.length}`);
+        let base64Image;
+        let mimeType;
+
+        // Check if input is already a Data URI (Base64)
+        if (imageUrl.startsWith('data:')) {
+            console.log(`[Vision] Processing Base64 Data URI...`);
+            const matches = imageUrl.match(/^data:(.+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+                mimeType = matches[1];
+                base64Image = matches[2];
+            } else {
+                throw new Error("Invalid Data URI format");
+            }
+        } else {
+            // 1. Download Image from URL
+            console.log(`[Vision] Downloading image from URL: ${imageUrl.substring(0, 50)}...`);
+            const response = await axios.get(imageUrl, { 
+                responseType: 'arraybuffer',
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            base64Image = Buffer.from(response.data).toString('base64');
+            mimeType = response.headers['content-type'] || 'image/jpeg';
+            logDebug(`[Vision] Image Downloaded. Mime: ${mimeType}, Size: ${base64Image.length}`);
+        }
 
         // 2. Use Gemini Flash (Multimodal) - It's fast and free/cheap
         const keyData = await keyService.getSmartKey('google', 'gemini-1.5-flash');
@@ -418,6 +432,7 @@ async function processImageWithVision(imageUrl, config) {
         // Use Native Gemini API via Axios (More reliable than OpenAI compat for Vision)
         // Try gemini-2.5-flash (User Preference & Available in Models)
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        logDebug(`[Vision] Requesting URL: ${url.replace(apiKey, '***')}`);
         
         const payload = {
             contents: [{
