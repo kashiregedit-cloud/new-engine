@@ -1,8 +1,16 @@
-const dbService = require('../services/dbService');
-const aiService = require('../services/aiService');
 const whatsappService = require('../services/whatsappService');
+const aiService = require('../services/aiService');
+const dbService = require('../services/dbService');
 const fs = require('fs');
 const path = require('path');
+
+function logDebug(msg) {
+    try {
+        fs.appendFileSync(path.join(__dirname, '../../ai_debug.log'), new Date().toISOString() + ' [WA] ' + msg + '\n');
+    } catch (e) {
+        console.error("Failed to write debug log:", e);
+    }
+}
 
 // Helper to log to file
 function logToFile(message) {
@@ -33,6 +41,7 @@ const botMessageIds = new Set();
 
 // Step 1: Webhook Trigger
 const handleWebhook = async (req, res) => {
+    logDebug("Webhook Hit!");
     const body = req.body;
     // console.log('WAHA Webhook:', JSON.stringify(body, null, 2));
 

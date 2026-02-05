@@ -4,6 +4,16 @@ const axios = require('axios');
 const OpenAI = require('openai');
 const FormData = require('form-data');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+function logDebug(msg) {
+    try {
+        fs.appendFileSync(path.join(__dirname, '../../ai_debug.log'), new Date().toISOString() + ' ' + msg + '\n');
+    } catch (e) {
+        console.error("Failed to write debug log:", e);
+    }
+}
 
 // --- IN-MEMORY CACHE FOR ZERO COST ---
 // Map<hash, { reply: string, timestamp: number }>
@@ -121,6 +131,29 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     const promptPreview = pagePrompts?.text_prompt ? pagePrompts.text_prompt.substring(0, 30) : "DEFAULT";
     console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | CheapEngine: ${useCheapEngine} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
     // ----------------------------------
+
+    // 0. Pre-process Media (Images/Audio) -> Text
+    // This ensures the AI "sees" the images/audio as text descriptions
+    let mediaContext = "";
+    
+    if (imageUrls && imageUrls.length > 0) {
+        console.log(`[AI] Processing ${imageUrls.length} images...`);
+        const imagePromises = imageUrls.map(url => processImageWithVision(url, pageConfig));
+        const imageResults = await Promise.all(imagePromises);
+        mediaContext += "\n[System Note: User sent images. Analysis below:]\n" + imageResults.map((desc, i) => `Image ${i+1}: ${desc}`).join("\n");
+    }
+
+    if (audioUrls && audioUrls.length > 0) {
+        console.log(`[AI] Processing ${audioUrls.length} audio files...`);
+        const audioPromises = audioUrls.map(url => transcribeAudio(url, pageConfig));
+        const audioResults = await Promise.all(audioPromises);
+        mediaContext += "\n[System Note: User sent audio messages:]\n" + audioResults.join("\n");
+    }
+
+    if (mediaContext) {
+        userMessage += "\n" + mediaContext;
+        console.log(`[AI] Added media context to user message.`);
+    }
 
     // 1. Prepare Configuration
     let dynamicProvider = 'openrouter'; 
@@ -362,6 +395,7 @@ Rules:
 // --- HELPER: Process Image (Vision) ---
 async function processImageWithVision(imageUrl, config) {
     try {
+        logDebug(`[Vision] Processing: ${imageUrl}`);
         console.log(`[Vision] Processing: ${imageUrl.substring(0, 50)}...`);
         // 1. Download Image to Base64
         const response = await axios.get(imageUrl, { 
@@ -370,34 +404,42 @@ async function processImageWithVision(imageUrl, config) {
         });
         const base64Image = Buffer.from(response.data).toString('base64');
         const mimeType = response.headers['content-type'] || 'image/jpeg';
+        logDebug(`[Vision] Image Downloaded. Mime: ${mimeType}, Size: ${base64Image.length}`);
 
         // 2. Use Gemini Flash (Multimodal) - It's fast and free/cheap
         const keyData = await keyService.getSmartKey('google', 'gemini-1.5-flash');
-        if (!keyData || !keyData.key) return "Image found but analysis unavailable.";
+        if (!keyData || !keyData.key) {
+            logDebug(`[Vision] No Key Found.`);
+            return "Image found but analysis unavailable.";
+        }
         const apiKey = keyData.key;
+        logDebug(`[Vision] Using Key: ${apiKey.substring(0, 5)}...`);
 
-        const openai = new OpenAI({ 
-            apiKey: apiKey, 
-            baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/' 
+        // Use Native Gemini API via Axios (More reliable than OpenAI compat for Vision)
+        // Try gemini-2.5-flash (User Preference & Available in Models)
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        
+        const payload = {
+            contents: [{
+                parts: [
+                    { text: "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." },
+                    { inline_data: { mime_type: mimeType, data: base64Image } }
+                ]
+            }]
+        };
+
+        const visionResponse = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' }
         });
 
-        const completion = await openai.chat.completions.create({
-            model: "gemini-1.5-flash",
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." },
-                        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-                    ]
-                }
-            ],
-            max_tokens: 100
-        });
-
-        return completion.choices[0].message.content || "Image content unclear.";
-
+        const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text || "Image content unclear.";
+        logDebug(`[Vision] Result: ${result}`);
+        return result;
     } catch (error) {
+        logDebug(`[Vision] Error: ${error.message}`);
+        if (error.response) {
+            logDebug(`[Vision] API Error: ${JSON.stringify(error.response.data)}`);
+        }
         console.error(`[Vision] Error:`, error.message);
         return "Image processing failed.";
     }
