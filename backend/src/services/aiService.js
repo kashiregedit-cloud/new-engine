@@ -436,6 +436,59 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
     // Determine System Prompt
     const systemPrompt = customOptions?.prompt || "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any.";
 
+    // --- PRIORITY ATTEMPT (Custom Options) ---
+    if (customOptions?.provider === 'openrouter' && customOptions?.model) {
+        try {
+            const provider = 'openrouter';
+            const model = customOptions.model;
+            console.log(`[Vision] Priority Attempt: ${model} (${provider})`);
+
+            let keyData = await keyService.getSmartKey(provider, model);
+            if (!keyData || !keyData.key) {
+                 keyData = await keyService.getSmartKey(provider, 'default');
+            }
+            
+            if (!keyData || !keyData.key) throw new Error("No Key found for OpenRouter");
+            const apiKey = keyData.key;
+            const url = 'https://openrouter.ai/api/v1/chat/completions';
+            
+            const payload = {
+                model: model,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: [
+                            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                        ]
+                    }
+                ]
+            };
+
+            const response = await axios.post(url, payload, {
+                headers: { 
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': 'https://orderly-conversations.com', 
+                    'X-Title': 'Orderly Conversations'
+                }
+            });
+
+            const result = response.data?.choices?.[0]?.message?.content;
+            if (!result) throw new Error("Empty response from OpenRouter");
+
+            logDebug(`[Vision] Success with Priority ${model}: ${result.substring(0, 30)}...`);
+            return result;
+
+        } catch (error) {
+            const errMsg = error.response?.data?.error?.message || error.message;
+            console.warn(`[Vision] Priority Attempt (${customOptions.model}) Failed: ${errMsg}`);
+            errors.push(`Priority OpenRouter: ${errMsg}`);
+            logDebug(`[Vision] Priority Error: ${errMsg}`);
+            // Continue to fallbacks...
+        }
+    }
+
     // --- FALLBACK STRATEGY ---
     // Priority 1: Gemini 2.5 Flash
     // Priority 2: Gemini 2.0 Flash Lite (Preview)

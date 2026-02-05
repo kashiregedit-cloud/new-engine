@@ -400,7 +400,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         try {
             // Process all images
             // Use OpenRouter Qwen 2.5 VL as requested by user
-            const productAnalysisPrompt = "You are a smart image analzer . you can detect product colour, product name . try to send product name :  ,  prodocut color :  . You can Analyze Multiple Product image at once dynamically . Try to make it very shorter ans like name and  color only . Must add this line with the result 'Based the image this is + Result' this is mandetory  ";
+            const productAnalysisPrompt = "Analyze this image to identify the Product Name, Color, and any visible text (like Price or Model). Output format: 'Based on the image, this is [Product Name] in [Color] color. Model: [Model], Price: [Price]'. If details are not clear, state 'Not identifiable'. Keep it concise.";
             
             const analysisResults = await Promise.all(allImages.map(img => aiService.processImageWithVision(img, {}, {
                 provider: 'openrouter',
