@@ -365,4 +365,43 @@ router.delete('/session/delete', async (req, res) => {
     }
 });
 
+// Get Contacts (Only Locked Ones for Performance)
+router.get('/contacts/:sessionName', async (req, res) => {
+    try {
+        const { sessionName } = req.params;
+        const { data, error } = await dbService.supabase
+            .from('whatsapp_contacts')
+            .select('phone_number, is_locked')
+            .eq('session_name', sessionName)
+            .eq('is_locked', true);
+            
+        if (error) throw error;
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Toggle Lock Status (Handover)
+router.post('/toggle-lock', async (req, res) => {
+    try {
+        const { sessionName, phoneNumber, isLocked } = req.body;
+        
+        if (!sessionName || !phoneNumber || typeof isLocked !== 'boolean') {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
+
+        const success = await dbService.toggleWhatsAppLock(sessionName, phoneNumber, isLocked);
+        
+        if (success) {
+            res.json({ success: true, isLocked });
+        } else {
+            res.status(500).json({ error: "Failed to update lock status" });
+        }
+    } catch (err) {
+        console.error("Toggle Lock Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

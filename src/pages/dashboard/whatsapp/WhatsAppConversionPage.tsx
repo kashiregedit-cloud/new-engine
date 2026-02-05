@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { MessageSquare, RefreshCw, AlertCircle, Calendar as CalendarIcon, Zap } from "lucide-react";
+import { MessageSquare, RefreshCw, AlertCircle, Calendar as CalendarIcon, Zap, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Link } from "react-router-dom";
@@ -36,6 +36,7 @@ export default function WhatsAppConversionPage() {
     message_id?: string;
     timestamp: number | string;
     sender_id: string;
+    recipient_id?: string;
     text?: string;
     reply_by?: string;
     status?: string;
@@ -51,6 +52,53 @@ export default function WhatsAppConversionPage() {
   const [tokenBreakdown, setTokenBreakdown] = useState<Record<string, number>>({});
   const [activeSessionName, setActiveSessionName] = useState<string | null>(null);
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string | number>>(new Set());
+  const [lockedContacts, setLockedContacts] = useState<Record<string, boolean>>({});
+
+  const fetchContacts = async (sessionName: string) => {
+    try {
+        // Assuming backend is on localhost:5000 - Adjust if using env vars
+        const res = await fetch(`http://localhost:5000/api/whatsapp/contacts/${sessionName}`);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+            const map: Record<string, boolean> = {};
+            data.forEach((c: any) => map[c.phone_number] = c.is_locked);
+            setLockedContacts(map);
+        }
+    } catch (e) { console.error("Error fetching contacts:", e); }
+  };
+
+  const handleToggleLock = async (phoneNumber: string) => {
+      if (!activeSessionName) return;
+      const currentStatus = !!lockedContacts[phoneNumber];
+      const newStatus = !currentStatus;
+      
+      try {
+          // Optimistic update
+          setLockedContacts(prev => ({ ...prev, [phoneNumber]: newStatus }));
+          
+          const res = await fetch(`http://localhost:5000/api/whatsapp/toggle-lock`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                  sessionName: activeSessionName, 
+                  phoneNumber, 
+                  isLocked: newStatus 
+              })
+          });
+          
+          if (!res.ok) {
+              // Revert if failed
+              setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
+              toast.error("Failed to update lock status");
+          } else {
+              toast.success(newStatus ? "Conversation Locked (Handover)" : "Conversation Unlocked (AI Active)");
+          }
+      } catch (e) {
+          console.error(e);
+          setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
+          toast.error("Error toggling lock");
+      }
+  };
 
   const toggleExpand = (id: string | number) => {
     const newSet = new Set(expandedMessageIds);
@@ -121,6 +169,7 @@ export default function WhatsAppConversionPage() {
     // Fetch messages whenever date or sessionName changes
     if (activeSessionName && date?.from && date?.to) {
         fetchMessages(activeSessionName, date.from, date.to);
+        fetchContacts(activeSessionName);
     }
   }, [activeSessionName, date]);
 
@@ -367,6 +416,7 @@ export default function WhatsAppConversionPage() {
                 <TableHead>Reply By</TableHead>
                 <TableHead>Usage (Tokens/Model)</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -412,6 +462,28 @@ export default function WhatsAppConversionPage() {
                       <span className={`px-2 py-1 rounded-full text-xs ${msg.status === 'sent' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'}`}>
                         {msg.status}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                        {(() => {
+                            const contactId = msg.reply_by === 'user' ? msg.sender_id : msg.recipient_id;
+                            if (!contactId || contactId === activeSessionName) return null;
+                            const isLocked = !!lockedContacts[contactId];
+                            
+                            return (
+                                <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => handleToggleLock(contactId)}
+                                    className="h-8 w-8 p-0"
+                                    title={isLocked ? "Unlock AI" : "Lock AI (Handover)"}
+                                >
+                                    {isLocked ? 
+                                        <Lock className="h-4 w-4 text-red-500" /> : 
+                                        <Unlock className="h-4 w-4 text-green-500" />
+                                    }
+                                </Button>
+                            );
+                        })()}
                     </TableCell>
                   </TableRow>
                 ))

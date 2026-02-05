@@ -151,6 +151,26 @@ const handleWebhook = async (req, res) => {
                  }
                  
                  const textToSave = messageText.trim() || '[Media Sent]';
+                 
+                 // --- BOT ECHO CHECK ---
+                 // Verify if this 'Admin' message is actually just an echo of the last Bot Reply
+                 try {
+                     const lastMsg = await dbService.getLastWhatsAppMessage(sessionName, payload.to);
+                     if (lastMsg && lastMsg.reply_by === 'bot') {
+                         // Normalize strings for comparison (ignore small whitespace diffs)
+                         const cleanLast = (lastMsg.text || '').trim();
+                         const cleanNew = textToSave.trim();
+                         
+                         if (cleanLast === cleanNew) {
+                             console.log(`[WA] Ignoring Bot Echo (Duplicate Admin Event): "${cleanNew.substring(0, 30)}..."`);
+                             return;
+                         }
+                     }
+                 } catch (err) {
+                     console.warn(`[WA] Echo check failed: ${err.message}`);
+                 }
+                 // ----------------------
+
                  console.log(`[WA] Saving ADMIN message (fromMe): ${textToSave.substring(0,30)}...`);
                  
                  await dbService.saveWhatsAppChat({
@@ -257,12 +277,25 @@ async function queueMessage(session, messagePayload) {
 
     // Handover guard: if admin takeover active for this chat, skip
     const chatKey = `${sessionName}_${senderId}`;
+    
+    // 1. Check Memory (Fast) - for temporary pauses after admin reply
     const handoverUntil = handoverMap.get(chatKey);
     if (handoverUntil && handoverUntil > Date.now()) {
-        console.log(`[WA] Handover active for ${chatKey}. Skipping AI.`);
+        console.log(`[WA] Handover active (Memory) for ${chatKey}. Skipping AI.`);
         return;
     } else if (handoverUntil && handoverUntil <= Date.now()) {
         handoverMap.delete(chatKey);
+    }
+
+    // 2. Check DB (Persistent Lock) - for manual Lock/Unlock
+    try {
+        const contact = await dbService.getWhatsAppContact(sessionName, senderId);
+        if (contact && contact.is_locked) {
+            console.log(`[WA] Handover active (DB Lock) for ${chatKey}. Skipping AI.`);
+            return;
+        }
+    } catch (err) {
+        console.warn(`[WA] Failed to check lock status: ${err.message}`);
     }
 
     // Handle Images/Media (If WAHA exposes URL)

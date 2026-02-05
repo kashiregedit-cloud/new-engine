@@ -490,6 +490,22 @@ async function getWhatsAppChatHistory(sessionName, senderId, limit = 10) {
     }));
 }
 
+// --- Helper: Get Last WhatsApp Message (Raw) for Duplicate Check ---
+async function getLastWhatsAppMessage(sessionName, recipientId) {
+    const { data, error } = await supabase
+        .from('whatsapp_chats')
+        .select('*')
+        .eq('session_name', sessionName)
+        // We want the last message in this conversation, regardless of sender
+        .or(`and(sender_id.eq.${recipientId},recipient_id.eq.${sessionName}),and(sender_id.eq.${sessionName},recipient_id.eq.${recipientId})`)
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single();
+
+    if (error) return null;
+    return data;
+}
+
 // 18. Deduct WhatsApp Credit (Shared User Balance)
 async function deductWhatsAppCredit(sessionName, amount = 1) {
     // 1. Get User ID from Session
@@ -553,6 +569,37 @@ async function saveWhatsAppContact(data) {
         }, { onConflict: 'session_name, phone_number' });
 
     if (error) console.error("Error saving WA contact:", error.message);
+}
+
+// 20. Toggle WhatsApp Lock (Handover)
+async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
+    const { error } = await supabase
+        .from('whatsapp_contacts')
+        .upsert({
+            session_name: sessionName,
+            phone_number: phoneNumber,
+            is_locked: isLocked,
+            last_interaction: new Date().toISOString() // Update timestamp to keep it fresh
+        }, { onConflict: 'session_name, phone_number' });
+
+    if (error) {
+        console.error("Error toggling WA lock:", error.message);
+        return false;
+    }
+    return true;
+}
+
+// 21. Get WhatsApp Contact (Check Lock Status)
+async function getWhatsAppContact(sessionName, phoneNumber) {
+    const { data, error } = await supabase
+        .from('whatsapp_contacts')
+        .select('*')
+        .eq('session_name', sessionName)
+        .eq('phone_number', phoneNumber)
+        .single();
+
+    if (error) return null;
+    return data;
 }
 
 
@@ -1001,6 +1048,9 @@ module.exports = {
     saveWhatsAppContact,
     updateWhatsAppEntry,
     updateWhatsAppEntryByName,
+    getLastWhatsAppMessage,
+    toggleWhatsAppLock,
+    getWhatsAppContact,
     renewWhatsAppSession,
     getExpiredWhatsAppSessions,
     deductUserBalance,
