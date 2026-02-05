@@ -242,15 +242,23 @@ async function queueMessage(session, messagePayload) {
              }
         }
         // 4. Try jpegThumbnail (Last Resort for Images - User request)
-        else if (messagePayload._data && messagePayload._data.jpegThumbnail) {
-             console.log('[WA] Using jpegThumbnail as fallback for image.');
-             // jpegThumbnail is usually just the base64 string without prefix
-             const base64 = `data:image/jpeg;base64,${messagePayload._data.jpegThumbnail}`;
+        else if (messagePayload._data && (messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail)) {
+             console.log('[WA] Using jpegThumbnail/thumbnail as fallback for image.');
+             const thumb = messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail;
+             const base64 = `data:image/jpeg;base64,${thumb}`;
+             imageUrls.push(base64);
+        }
+        // 5. Try raw body as Base64 (Some versions send raw base64 in body without prefix)
+        else if (messagePayload.body && messagePayload.body.length > 100 && /^[A-Za-z0-9+/=]+$/.test(messagePayload.body.replace(/\s/g, ''))) {
+             console.log('[WA] Body looks like raw Base64. Using as image.');
+             const base64 = `data:image/jpeg;base64,${messagePayload.body}`;
              imageUrls.push(base64);
         }
         else {
             messageText += " [User sent media]";
-            console.log('[WA] Media detected but no URL or Data found. WAHA config "downloadMedia: true" might be missing.');
+            console.log('[WA] Media detected but no URL or Data found. Payload keys:', Object.keys(messagePayload));
+            if (messagePayload._data) console.log('[WA] _data keys:', Object.keys(messagePayload._data));
+            console.log('[WA] Full Payload (Debug):', JSON.stringify(messagePayload).substring(0, 500)); // Log first 500 chars
         }
     }
 
