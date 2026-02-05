@@ -9,7 +9,10 @@ const path = require('path');
 
 function logDebug(msg) {
     try {
-        fs.appendFileSync(path.join(__dirname, '../../ai_debug.log'), new Date().toISOString() + ' ' + msg + '\n');
+        const logDir = path.join(__dirname, '../../logs');
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        
+        fs.appendFileSync(path.join(logDir, 'ai.log'), new Date().toISOString() + ' ' + msg + '\n');
     } catch (e) {
         console.error("Failed to write debug log:", e);
     }
@@ -684,6 +687,7 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
 async function transcribeAudio(audioUrl, config) {
     try {
         console.log(`[Audio] Processing: ${audioUrl.substring(0, 50)}...`);
+        logDebug(`[Audio] Starting transcription for URL: ${audioUrl}`);
         
         // 1. Download Audio
         // WAHA Authentication Check
@@ -695,12 +699,14 @@ async function transcribeAudio(audioUrl, config) {
         // Check both configured Base URL and the hardcoded domain the user is using
         if (audioUrl.includes(WAHA_BASE_URL) || audioUrl.includes('wahubbd.salesmanchatbot.online')) {
             console.log('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
+            logDebug('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
             headers['X-Api-Key'] = WAHA_API_KEY;
         } else if (audioUrl.includes('graph.facebook.com') && config.page_access_token) {
             console.log('[Audio] Detected Facebook Graph URL. Injecting Access Token.');
             headers['Authorization'] = `Bearer ${config.page_access_token}`;
         }
 
+        logDebug(`[Audio] Downloading...`);
         const response = await axios.get(audioUrl, { 
             responseType: 'arraybuffer',
             headers: headers,
@@ -709,10 +715,14 @@ async function transcribeAudio(audioUrl, config) {
         
         const contentType = response.headers['content-type'] || 'audio/ogg';
         console.log(`[Audio] Downloaded. Size: ${response.data.length}, Type: ${contentType}`);
+        logDebug(`[Audio] Downloaded. Size: ${response.data.length}, Type: ${contentType}`);
 
         // 2. Use Groq Whisper (Fastest)
         const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
-        if (!keyData || !keyData.key) return "[Audio Message]";
+        if (!keyData || !keyData.key) {
+            logDebug(`[Audio] No Groq Key found for transcription.`);
+            return "[Audio Message]";
+        }
         const apiKey = keyData.key;
 
         // OpenAI/Groq require FormData for file uploads
@@ -734,6 +744,7 @@ async function transcribeAudio(audioUrl, config) {
         formData.append('language', 'bn'); // Bengali Hint
         // formData.append('temperature', '0'); // Deterministic
 
+        logDebug(`[Audio] Sending to Groq Whisper...`);
         const transcriptionResponse = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
             headers: {
                 ...formData.getHeaders(),
@@ -743,14 +754,22 @@ async function transcribeAudio(audioUrl, config) {
         });
 
         const text = transcriptionResponse.data.text;
-        if (!text || !text.trim()) return "[Audio Message (Empty/Silence)]";
+        if (!text || !text.trim()) {
+            logDebug(`[Audio] Transcription empty.`);
+            return "[Audio Message (Empty/Silence)]";
+        }
 
         console.log(`[Audio] Transcription: "${text.substring(0, 30)}..."`);
+        logDebug(`[Audio] Success: "${text}"`);
         return `[User Audio Message: "${text}"]`;
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
         console.error(`[Audio] Transcription Error:`, errMsg);
+        logDebug(`[Audio] Failed: ${errMsg}`);
+        if (error.response) {
+            logDebug(`[Audio] Response Data: ${JSON.stringify(error.response.data)}`);
+        }
         return `[Audio Message (Transcription Failed: ${errMsg})]`;
     }
 }

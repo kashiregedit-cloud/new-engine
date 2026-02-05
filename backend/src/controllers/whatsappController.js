@@ -6,7 +6,10 @@ const path = require('path');
 
 function logDebug(msg) {
     try {
-        fs.appendFileSync(path.join(__dirname, '../../ai_debug.log'), new Date().toISOString() + ' [WA] ' + msg + '\n');
+        const logDir = path.join(__dirname, '../../logs');
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        
+        fs.appendFileSync(path.join(logDir, 'whatsapp.log'), new Date().toISOString() + ' [WA] ' + msg + '\n');
     } catch (e) {
         console.error("Failed to write debug log:", e);
     }
@@ -14,13 +17,7 @@ function logDebug(msg) {
 
 // Helper to log to file
 function logToFile(message) {
-    const logPath = path.join(__dirname, '../../debug.log');
-    const timestamp = new Date().toISOString();
-    try {
-        fs.appendFileSync(logPath, `[${timestamp}] [WA] ${message}\n`);
-    } catch (e) {
-        console.error('Log Error:', e);
-    }
+    logDebug(message);
 }
 
 // Global Debounce Map (In-Memory)
@@ -414,14 +411,66 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
     // If this is a swipe-reply, fetch quoted message text by ID for context
     if (replyToId) {
+        logDebug(`[Swipe] Detected replyToId: ${replyToId}. Fetching context...`);
         try {
             const quotedText = await dbService.getMessageById(replyToId);
+            logDebug(`[Swipe] Context fetch result: "${quotedText ? quotedText.substring(0,50) : 'null'}"`);
+            
             if (quotedText && quotedText.trim()) {
                 combinedText = `[Replying to] ${quotedText.trim()}\n\n${combinedText}`;
+            } else {
+                logDebug(`[Swipe] Warning: Context was empty or null for ID ${replyToId}`);
             }
         } catch (e) {
             console.warn(`[WA] Failed to fetch quoted message ${replyToId}: ${e.message}`);
+            logDebug(`[Swipe] Error fetching context: ${e.message}`);
         }
+    }
+
+    // --- AUDIO TRANSCRIPTION (Per-Message) ---
+    // Added to fix Voice Message Reply & Swipe Reply Context
+    let audioTranscriptText = null;
+    if (messages.some(m => m.audios && m.audios.length > 0)) {
+        logDebug(`[WA] Found audio messages. Starting transcription...`);
+        let collectedTranscripts = [];
+        
+        // Fetch Config for API Keys (needed for Transcription)
+        const pageConfig = await dbService.getWhatsAppConfig(sessionName);
+
+        for (const msg of messages) {
+            if (msg.audios && msg.audios.length > 0) {
+                for (const audioUrl of msg.audios) {
+                    try {
+                        // Transcribe
+                        const transcript = await aiService.transcribeAudio(audioUrl, pageConfig || {});
+                        logDebug(`[WA] Transcribed msg ${msg.id}: ${transcript}`);
+                        
+                        if (transcript) {
+                            collectedTranscripts.push(transcript);
+                            
+                            // SAVE Transcription to DB (Critical for Swipe Reply)
+                            await dbService.saveWhatsAppChat({
+                                session_name: sessionName,
+                                sender_id: senderId,
+                                recipient_id: pageId || sessionName,
+                                message_id: msg.id,
+                                text: transcript, // Update text in DB
+                                timestamp: Date.now(),
+                                status: 'received',
+                                reply_by: 'user',
+                                is_group: isGroup,
+                                group_id: null,
+                                group_name: null
+                            });
+                        }
+                    } catch (e) {
+                        console.error(`[WA] Transcription failed for ${msg.id}:`, e.message);
+                        logDebug(`[WA] Transcription error: ${e.message}`);
+                    }
+                }
+            }
+        }
+        audioTranscriptText = collectedTranscripts.join("\n").trim();
     }
 
     // --- IMAGE ANALYSIS (Per-Message) ---
@@ -479,7 +528,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     }
 
     // --- MERGE LOGIC (n8n Style) ---
-    // Priority: Combined Text + Image Analysis (Merged)
+    // Priority: Combined Text + Image Analysis + Audio Transcripts
     let finalOutput = "";
     if (combinedText && combinedText.trim() !== "") {
         finalOutput += combinedText.trim();
@@ -487,6 +536,10 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     if (imageAnalyzeText && imageAnalyzeText.trim() !== "") {
         if (finalOutput) finalOutput += "\n\n";
         finalOutput += imageAnalyzeText;
+    }
+    if (audioTranscriptText && audioTranscriptText.trim() !== "") {
+        if (finalOutput) finalOutput += "\n\n";
+        finalOutput += audioTranscriptText;
     }
 
     // Remove legacy combined analysis save (we now save per message_id)
@@ -650,10 +703,10 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         const aiResponse = await aiService.generateResponse({
             pageId: pageId, 
             userId: senderId,
-            userMessage: finalOutput, // Use the resolved output (Analysis or Text)
+            userMessage: finalOutput, // Use the resolved output (Analysis, Text, Audio)
             history: history,
             imageUrls: imagesToPass, 
-            audioUrls: allAudios, // Pass accumulated audios
+            audioUrls: [], // Handled manually in controller
             config: pageConfig,
             platform: 'whatsapp',
             extraTokenUsage: totalVisionTokens // Pass vision tokens to sum up
@@ -736,8 +789,15 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
 
         // Send Text First
+        let sentMessageId = `bot_${Date.now()}`;
+        
         if (finalReplyText) {
-             await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
+             const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
+             if (sentData && sentData.id) {
+                 // WAHA returns { id: "...", ... } or { id: { _serialized: "..." } } depending on version
+                 // Usually sentData.id is the ID string
+                 sentMessageId = (typeof sentData.id === 'object') ? sentData.id._serialized : sentData.id;
+             }
         }
 
         // Send Images
@@ -760,7 +820,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             session_name: sessionName,
             sender_id: pageId || sessionName, // Bot (Page) is sender
             recipient_id: senderId, // User is recipient
-            message_id: `bot_${Date.now()}`,
+            message_id: sentMessageId,
             text: replyText, // Save full original text including image tags for context
             timestamp: Date.now(),
             status: 'sent',
