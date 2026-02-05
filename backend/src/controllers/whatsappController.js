@@ -217,8 +217,26 @@ async function queueMessage(session, messagePayload) {
     const audioUrls = [];
     
     if (messagePayload.hasMedia) {
-        // 0. Try media.url (WAHA Standard Structure)
-        if (messagePayload.media && messagePayload.media.url) {
+        // 0. Try deep nested jpegThumbnail (User Specific Request - HIGHEST PRIORITY to avoid 404)
+        if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
+             console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as primary source.');
+             const thumb = messagePayload._data.message.imageMessage.jpegThumbnail;
+             // Clean Base64 string (remove newlines/spaces)
+             const cleanThumb = thumb.replace(/\s/g, '');
+             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
+             imageUrls.push(base64);
+        }
+        // 0.1 Try jpegThumbnail (Standard - HIGHEST PRIORITY to avoid 404)
+        else if (messagePayload._data && (messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail)) {
+             console.log('[WA] Using jpegThumbnail/thumbnail as primary source.');
+             const thumb = messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail;
+             // Clean Base64 string (remove newlines/spaces)
+             const cleanThumb = thumb.replace(/\s/g, '');
+             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
+             imageUrls.push(base64);
+        }
+        // 1. Try media.url (WAHA Standard Structure)
+        else if (messagePayload.media && messagePayload.media.url) {
             console.log(`[WA] Found media.url: ${messagePayload.media.url}`);
             if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('image/')) {
                 imageUrls.push(messagePayload.media.url);
@@ -226,7 +244,7 @@ async function queueMessage(session, messagePayload) {
                 audioUrls.push(messagePayload.media.url);
             }
         }
-        // 1. Try mediaUrl (Legacy/Alternative)
+        // 2. Try mediaUrl (Legacy/Alternative)
         else if (messagePayload.mediaUrl) {
             if (messagePayload.mimetype && messagePayload.mimetype.startsWith('image/')) {
                 imageUrls.push(messagePayload.mediaUrl);
@@ -234,7 +252,7 @@ async function queueMessage(session, messagePayload) {
                 audioUrls.push(messagePayload.mediaUrl);
             }
         } 
-        // 2. Try body (if Base64 Data URI)
+        // 3. Try body (if Base64 Data URI)
         else if (messagePayload.body && messagePayload.body.startsWith('data:')) {
              if (messagePayload.body.startsWith('data:image')) {
                 imageUrls.push(messagePayload.body);
@@ -242,29 +260,13 @@ async function queueMessage(session, messagePayload) {
                 audioUrls.push(messagePayload.body);
              }
         }
-        // 3. Try _data.body (if Base64 Data URI - raw data often here)
+        // 4. Try _data.body (if Base64 Data URI - raw data often here)
         else if (messagePayload._data && messagePayload._data.body && typeof messagePayload._data.body === 'string' && messagePayload._data.body.startsWith('data:')) {
              if (messagePayload._data.body.startsWith('data:image')) {
                 imageUrls.push(messagePayload._data.body);
              } else if (messagePayload._data.body.startsWith('data:audio')) {
                 audioUrls.push(messagePayload._data.body);
              }
-        }
-        // 4. Try jpegThumbnail (Last Resort for Images - User request)
-        else if (messagePayload._data && (messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail)) {
-             console.log('[WA] Using jpegThumbnail/thumbnail as fallback for image.');
-             const thumb = messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail;
-             const base64 = `data:image/jpeg;base64,${thumb}`;
-             imageUrls.push(base64);
-        }
-        // 4.1 Try deep nested jpegThumbnail (User Specific Request)
-        else if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
-             console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as fallback.');
-             const thumb = messagePayload._data.message.imageMessage.jpegThumbnail;
-             // Clean Base64 string (remove newlines/spaces)
-             const cleanThumb = thumb.replace(/\s/g, '');
-             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
-             imageUrls.push(base64);
         }
         // 5. Try raw body as Base64 (Some versions send raw base64 in body without prefix)
         else if (messagePayload.body && messagePayload.body.length > 100 && /^[A-Za-z0-9+/=]+$/.test(messagePayload.body.replace(/\s/g, ''))) {
