@@ -73,7 +73,7 @@ async function fetchOgImage(url) {
 }
 
 // Wrapper for Controller Consistency
-async function generateResponse({ pageId, userId, userMessage, history, imageUrls, audioUrls, config, platform }) {
+async function generateResponse({ pageId, userId, userMessage, history, imageUrls, audioUrls, config, platform, extraTokenUsage = 0 }) {
     // 1. Fetch Prompts if needed
     let pagePrompts = config;
     
@@ -115,12 +115,13 @@ async function generateResponse({ pageId, userId, userMessage, history, imageUrl
         senderName,
         null, // senderGender (optional)
         imageUrls,
-        audioUrls
+        audioUrls,
+        extraTokenUsage // Pass initial usage (e.g. from Vision API in Controller)
     );
 }
 
 // Step 2: Business Logic / AI Brain
-async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer', senderGender = null, imageUrls = [], audioUrls = []) {
+async function generateReply(userMessage, pageConfig, pagePrompts, history = [], senderName = 'Customer', senderGender = null, imageUrls = [], audioUrls = [], extraTokenUsage = 0) {
     
     // --- MULTI-TENANCY SAFETY CHECK ---
     const pageId = pageConfig.page_id;
@@ -132,15 +133,26 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     console.log(`[AI Isolation Check] Generating for Page ID: ${pageId} | CheapEngine: ${useCheapEngine} | Sender: ${senderName} | Prompt: "${promptPreview}..."`);
     // ----------------------------------
 
+    let totalTokenUsage = extraTokenUsage || 0;
+
     // 0. Pre-process Media (Images/Audio) -> Text
     // This ensures the AI "sees" the images/audio as text descriptions
     let mediaContext = "";
     
     if (imageUrls && imageUrls.length > 0) {
         console.log(`[AI] Processing ${imageUrls.length} images...`);
-        const imagePromises = imageUrls.map(url => processImageWithVision(url, pageConfig));
-        const imageResults = await Promise.all(imagePromises);
-        mediaContext += "\n[System Note: User sent images. Analysis below:]\n" + imageResults.map((desc, i) => `Image ${i+1}: ${desc}`).join("\n");
+        const imageResults = await Promise.all(imageUrls.map(url => processImageWithVision(url, pageConfig)));
+        
+        // Extract text and usage
+        const imageDescriptions = imageResults.map(res => {
+            if (typeof res === 'object') {
+                totalTokenUsage += (res.usage || 0);
+                return res.text;
+            }
+            return res; // Fallback string
+        });
+
+        mediaContext += "\n[System Note: User sent images. Analysis below:]\n" + imageDescriptions.map((desc, i) => `Image ${i+1}: ${desc}`).join("\n");
     }
 
     if (audioUrls && audioUrls.length > 0) {
@@ -269,7 +281,11 @@ Rules:
 5. STRICT DOMAIN CONTROL: Answer ONLY about business/products in 'Ctx'. Ignore unrelated topics.
 6. PHONE VALIDATION: If user gives phone, ensure it's valid (11-digit BD).
 7. SENDING IMAGES: If user asks for pics and you have URL in 'Ctx', send it as "IMAGE: Name | URL".
-8. Output RAW JSON:
+8. DYNAMIC ACTIONS:
+   - If user requests ADMIN/SUPPORT/CALL or specific action defined in 'Ctx', append "[ADD_LABEL: label_name]" to your reply.
+   - Example: "I will connect you to admin. [ADD_LABEL: admincall]"
+   - Supported Labels: adminhandle, admincall, support, order.
+9. Output RAW JSON:
 {
   "reply": "Bengali text"|null,
   "sentiment": "pos|neu|neg",
@@ -330,9 +346,9 @@ Rules:
                     try {
                         const parsed = JSON.parse(rawContent);
                         if (!parsed.reply) parsed.reply = parsed.response || parsed.text;
-                        return { ...parsed, token_usage: tokenUsage, model: defaultModel };
+                        return { ...parsed, token_usage: tokenUsage + totalTokenUsage, model: defaultModel };
                     } catch (e) {
-                        return { reply: rawContent, sentiment: 'neutral', model: defaultModel };
+                        return { reply: rawContent, sentiment: 'neutral', model: defaultModel, token_usage: tokenUsage + totalTokenUsage };
                     }
                 }
             } catch (error) {
@@ -372,12 +388,14 @@ Rules:
 
             if (completion.choices && completion.choices.length > 0) {
                 const rawContent = completion.choices[0].message.content;
+                const tokenUsage = completion.usage ? completion.usage.total_tokens : 0;
+                
                 try {
                     const parsed = JSON.parse(rawContent);
                     if (!parsed.reply) parsed.reply = parsed.response || parsed.text;
-                    return { ...parsed, model: modelToUse };
+                    return { ...parsed, model: modelToUse, token_usage: tokenUsage + totalTokenUsage };
                 } catch (e) {
-                    return { reply: rawContent, sentiment: 'neutral', model: modelToUse };
+                    return { reply: rawContent, sentiment: 'neutral', model: modelToUse, token_usage: tokenUsage + totalTokenUsage };
                 }
             }
         } catch (error) {
@@ -391,6 +409,9 @@ Rules:
 
     return null;
 }
+
+const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'https://wahubbd.salesmanchatbot.online';
+const WAHA_API_KEY = process.env.WAHA_API_KEY || 'e9457ca133cc4d73854ee0d43cee3bc5';
 
 // --- HELPER: Process Image (Vision) with Smart Fallback ---
 async function processImageWithVision(imageUrl, pageConfig = {}, customOptions = null) {
@@ -417,9 +438,20 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
             }
         } else {
             console.log(`[Vision] Downloading image from URL: ${imageUrl.substring(0, 50)}...`);
+            
+            // WAHA Authentication Check
+            const headers = { 'User-Agent': 'Mozilla/5.0' };
+            if (imageUrl.includes(WAHA_BASE_URL) || imageUrl.includes('wahubbd.salesmanchatbot.online')) {
+                console.log('[Vision] Detected WAHA URL. Injecting X-Api-Key.');
+                headers['X-Api-Key'] = WAHA_API_KEY;
+            } else if (imageUrl.includes('graph.facebook.com') && pageConfig.page_access_token) {
+                console.log('[Vision] Detected Facebook Graph URL. Injecting Access Token.');
+                headers['Authorization'] = `Bearer ${pageConfig.page_access_token}`;
+            }
+
             const response = await axios.get(imageUrl, { 
                 responseType: 'arraybuffer',
-                headers: { 'User-Agent': 'Mozilla/5.0' },
+                headers: headers,
                 timeout: 10000 // 10s timeout
             });
             base64Image = Buffer.from(response.data).toString('base64');
@@ -434,7 +466,8 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
     }
 
     // Determine System Prompt
-    const systemPrompt = customOptions?.prompt || "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any.";
+    // UPDATE: Enhanced prompt for Product/Price detection (Messenger specific improvement)
+    const systemPrompt = customOptions?.prompt || "Analyze this image in Bengali. Identify the Product Name, Color, Model, and Price (if visible in text). If it's a screenshot, extract product details. If it's a sticker/emoji, ignore it.";
 
     // --- PRIORITY ATTEMPT (Custom Options) ---
     if (customOptions?.provider === 'openrouter' && customOptions?.model) {
@@ -475,10 +508,12 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
             });
 
             const result = response.data?.choices?.[0]?.message?.content;
+            const usage = response.data?.usage?.total_tokens || 0;
+
             if (!result) throw new Error("Empty response from OpenRouter");
 
-            logDebug(`[Vision] Success with Priority ${model}: ${result.substring(0, 30)}...`);
-            return result;
+            logDebug(`[Vision] Success with Priority ${model}: ${result.substring(0, 30)}... Usage: ${usage}`);
+            return { text: result, usage: usage };
 
         } catch (error) {
             const errMsg = error.response?.data?.error?.message || error.message;
@@ -507,8 +542,8 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         
         // Gemini doesn't strictly separate system prompt in generateContent
-        const textPrompt = systemPrompt === "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." 
-            ? "Describe this image in Bengali. Keep it short (1-2 sentences). Focus on product details if any." 
+        const textPrompt = systemPrompt === "Analyze this image in Bengali. Identify the Product Name, Color, Model, and Price (if visible in text). If it's a screenshot, extract product details. If it's a sticker/emoji, ignore it." 
+            ? "Analyze this image in Bengali. Identify the Product Name, Color, Model, and Price (if visible in text). If it's a screenshot, extract product details. If it's a sticker/emoji, ignore it." 
             : systemPrompt;
 
         const payload = {
@@ -525,10 +560,12 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         });
 
         const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const usage = visionResponse.data?.usageMetadata?.totalTokenCount || 0;
+
         if (!result) throw new Error("Empty response from Gemini");
         
-        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
-        return result;
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}... Usage: ${usage}`);
+        return { text: result, usage: usage };
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
@@ -564,10 +601,12 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         });
 
         const result = visionResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const usage = visionResponse.data?.usageMetadata?.totalTokenCount || 0;
+
         if (!result) throw new Error("Empty response from Gemini Lite");
 
-        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
-        return result;
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}... Usage: ${usage}`);
+        return { text: result, usage: usage };
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
@@ -619,10 +658,12 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
         });
 
         const result = response.data?.choices?.[0]?.message?.content;
+        const usage = response.data?.usage?.total_tokens || 0;
+
         if (!result) throw new Error("Empty response from OpenRouter");
 
-        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}...`);
-        return result;
+        logDebug(`[Vision] Success with ${model}: ${result.substring(0, 30)}... Usage: ${usage}`);
+        return { text: result, usage: usage };
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
@@ -636,7 +677,7 @@ async function processImageWithVision(imageUrl, pageConfig = {}, customOptions =
     console.error(`[Vision] All attempts failed. Logs: ${failureReason}`);
     logDebug(`[Vision] FATAL: ${failureReason}`);
     
-    return "Image found but analysis unavailable due to technical errors.";
+    return { text: "Image found but analysis unavailable due to technical errors.", usage: 0 };
 }
 
 // --- HELPER: Transcribe Audio (Whisper) ---
@@ -645,9 +686,16 @@ async function transcribeAudio(audioUrl, config) {
         console.log(`[Audio] Processing: ${audioUrl.substring(0, 50)}...`);
         
         // 1. Download Audio
+        // WAHA Authentication Check
+        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        if (audioUrl.includes(WAHA_BASE_URL) || audioUrl.includes('wahubbd.salesmanchatbot.online')) {
+            console.log('[Audio] Detected WAHA URL. Injecting X-Api-Key.');
+            headers['X-Api-Key'] = WAHA_API_KEY;
+        }
+
         const response = await axios.get(audioUrl, { 
             responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: headers
         });
         
         // 2. Use Groq Whisper (Fastest)

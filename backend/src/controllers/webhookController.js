@@ -280,8 +280,15 @@ async function queueMessage(event) {
     const sessionData = debounceMap.get(sessionId);
     
     // Extract URLs for this specific message (EXCLUDING STICKERS)
+    // FIX: Removed event.message.sticker_id check to allow Screenshots/Images that might trigger false positives
+    // UPDATE: Also removing att.payload.sticker_id check to ensure NO product images are missed. 
+    // If a sticker is analyzed, AI will just describe it, which is better than missing a product.
+    if (event.message?.attachments) {
+        console.log(`[Webhook] Raw Attachments for ${sessionId}:`, JSON.stringify(event.message.attachments.map(a => ({ type: a.type, sticker_id: a.payload?.sticker_id, url: a.payload?.url?.substring(0, 30) }))));
+    }
+
     const thisMsgImages = event.message?.attachments?.filter(att => 
-        att.type === 'image' && !event.message.sticker_id && !att.payload.sticker_id
+        att.type === 'image'
     ).map(att => att.payload.url) || [];
     
     const thisMsgAudios = event.message?.attachments?.filter(att => att.type === 'audio').map(att => att.payload.url) || [];

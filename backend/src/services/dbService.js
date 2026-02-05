@@ -343,6 +343,16 @@ async function getWhatsAppConfig(sessionName) {
     // Default credit if fetch failed (should handle gracefully)
     if (data.message_credit === undefined) data.message_credit = 0;
 
+    // --- Label Actions ---
+    const { data: labelActions, error: labelError } = await supabase
+        .from('label_actions')
+        .select('label_name, ai_action')
+        .eq('page_id', sessionName);
+
+    if (labelActions) {
+        data.label_actions = labelActions;
+    }
+
     return data;
 }
 

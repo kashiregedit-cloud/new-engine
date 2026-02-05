@@ -105,13 +105,31 @@ const handleWebhook = async (req, res) => {
 
             const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
             if (!isDuplicate) {
-                 console.log(`[WA] Saving ADMIN message (fromMe): ${messageText.substring(0,30)}...`);
+                 // Prevent saving empty messages (avoids blank rows in UI)
+                 // Check for Reactions, Protocol messages, etc.
+                 const msgType = payload.type || payload.subtype || 'chat';
+                 if (['reaction', 'e2e_notification', 'protocol', 'ciphertext', 'revoked'].includes(msgType)) {
+                     console.log(`[WA] Ignoring Admin message of type: ${msgType}`);
+                     return;
+                 }
+
+                 const hasText = messageText && messageText.trim().length > 0;
+                 const hasMedia = payload.hasMedia || (payload.media && Object.keys(payload.media).length > 0) || (payload._data && (payload._data.jpegThumbnail || payload._data.thumbnail));
+
+                 if (!hasText && !hasMedia) {
+                     console.log('[WA] Ignoring empty Admin message (no text/media).');
+                     return;
+                 }
+                 
+                 const textToSave = messageText.trim() || '[Media Sent]';
+                 console.log(`[WA] Saving ADMIN message (fromMe): ${textToSave.substring(0,30)}...`);
+                 
                  await dbService.saveWhatsAppChat({
                     session_name: sessionName,
                     sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
                     recipient_id: payload.to, // User is the recipient
                     message_id: messageId,
-                    text: messageText,
+                    text: textToSave,
                     timestamp: Date.now(),
                     status: 'sent',
                     reply_by: 'admin' // Trigger stop logic
@@ -217,34 +235,35 @@ async function queueMessage(session, messagePayload) {
     const audioUrls = [];
     
     if (messagePayload.hasMedia) {
-        // 0. Try deep nested jpegThumbnail (User Specific Request - HIGHEST PRIORITY to avoid 404)
-        if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
-             console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as primary source.');
+        // 0. Try media.url (User request: Prioritize Direct Link if available)
+        // User confirmed WAHA URL is fixed.
+        if (messagePayload.media && messagePayload.media.url && messagePayload.media.url.startsWith('http')) {
+             console.log(`[WA] Found media.url: ${messagePayload.media.url}`);
+             if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('image/')) {
+                 imageUrls.push(messagePayload.media.url);
+             } else if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('audio/')) {
+                 audioUrls.push(messagePayload.media.url);
+             }
+        }
+        // 1. Try deep nested jpegThumbnail (Backup if URL fails or is missing)
+        else if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
+             console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as backup source.');
              const thumb = messagePayload._data.message.imageMessage.jpegThumbnail;
              // Clean Base64 string (remove newlines/spaces)
              const cleanThumb = thumb.replace(/\s/g, '');
              const base64 = `data:image/jpeg;base64,${cleanThumb}`;
              imageUrls.push(base64);
         }
-        // 0.1 Try jpegThumbnail (Standard - HIGHEST PRIORITY to avoid 404)
+        // 2. Try jpegThumbnail (Standard Backup)
         else if (messagePayload._data && (messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail)) {
-             console.log('[WA] Using jpegThumbnail/thumbnail as primary source.');
+             console.log('[WA] Using jpegThumbnail/thumbnail as backup source.');
              const thumb = messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail;
              // Clean Base64 string (remove newlines/spaces)
              const cleanThumb = thumb.replace(/\s/g, '');
              const base64 = `data:image/jpeg;base64,${cleanThumb}`;
              imageUrls.push(base64);
         }
-        // 1. Try media.url (WAHA Standard Structure)
-        else if (messagePayload.media && messagePayload.media.url) {
-            console.log(`[WA] Found media.url: ${messagePayload.media.url}`);
-            if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('image/')) {
-                imageUrls.push(messagePayload.media.url);
-            } else if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('audio/')) {
-                audioUrls.push(messagePayload.media.url);
-            }
-        }
-        // 2. Try mediaUrl (Legacy/Alternative)
+        // 3. Try mediaUrl (Legacy/Alternative)
         else if (messagePayload.mediaUrl) {
             if (messagePayload.mimetype && messagePayload.mimetype.startsWith('image/')) {
                 imageUrls.push(messagePayload.mediaUrl);
@@ -394,6 +413,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
     // --- IMAGE ANALYSIS (User Request: OpenRouter qwen/qwen-2.5-vl-7b-instruct:free) ---
     let imageAnalyzeText = null;
+    let totalVisionTokens = 0;
+
     if (allImages.length > 0) {
         console.log(`[WA] Analyzing ${allImages.length} images via Vision API...`);
         // We only process the first image for now as per n8n logic, or map all
@@ -408,20 +429,30 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                 prompt: productAnalysisPrompt
             })));
             
-            imageAnalyzeText = analysisResults.join("\n");
-            console.log(`[WA] Image Analysis Result: ${imageAnalyzeText.substring(0, 50)}...`);
+            // Handle { text, usage } objects
+            imageAnalyzeText = analysisResults.map(res => {
+                if (typeof res === 'object') {
+                    totalVisionTokens += (res.usage || 0);
+                    return res.text;
+                }
+                return res;
+            }).join("\n");
+
+            console.log(`[WA] Image Analysis Result: ${imageAnalyzeText.substring(0, 50)}... Total Tokens: ${totalVisionTokens}`);
         } catch (err) {
             console.error(`[WA] Image Analysis Failed:`, err.message);
         }
     }
 
     // --- MERGE LOGIC (n8n Style) ---
-    // Priority: Image Analysis > Webhook Text
+    // Priority: Combined Text + Image Analysis (Merged)
     let finalOutput = "";
+    if (combinedText && combinedText.trim() !== "") {
+        finalOutput += combinedText.trim();
+    }
     if (imageAnalyzeText && imageAnalyzeText.trim() !== "") {
-        finalOutput = imageAnalyzeText;
-    } else if (combinedText && combinedText.trim() !== "") {
-        finalOutput = combinedText;
+        if (finalOutput) finalOutput += "\n\n";
+        finalOutput += imageAnalyzeText;
     }
 
     // If we have new content from Analysis, SAVE it to DB so Human Agent sees it
@@ -541,19 +572,32 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Ensure Page ID is correctly identified (Session Name = Page ID for WhatsApp)
         const pageId = sessionName; 
 
-        // --- CHECK LABELS (Admin Handover) ---
+        // --- CHECK LABELS (Admin Handover & Dynamic Actions) ---
         try {
             const contact = await whatsappService.getContact(sessionName, senderId);
             // WAHA Labels can be strings or objects. Check both.
-            // Example: ["adminhandle", "new_customer"] or [{id: "...", name: "adminhandle"}]
             if (contact && contact.labels && Array.isArray(contact.labels)) {
-                const hasAdminLabel = contact.labels.some(l => 
-                    (typeof l === 'string' && l.toLowerCase() === 'adminhandle') ||
-                    (l.name && l.name.toLowerCase() === 'adminhandle')
-                );
+                // Fetch Configured Label Actions from DB
+                const labelActions = pageConfig.label_actions || [];
                 
-                if (hasAdminLabel) {
-                    console.log(`[WA] User ${senderId} has 'adminhandle' label. Blocking AI.`);
+                // Hardcoded defaults (Legacy Support)
+                const hardcodedStops = ['adminhandle', 'admincall'];
+
+                const shouldStop = contact.labels.some(l => {
+                    const labelName = (typeof l === 'string' ? l : l.name || '').toLowerCase();
+                    
+                    // 1. Check Hardcoded
+                    if (hardcodedStops.includes(labelName)) return true;
+
+                    // 2. Check Dynamic DB Configuration
+                    const actionConfig = labelActions.find(la => la.label_name.toLowerCase() === labelName);
+                    if (actionConfig && actionConfig.ai_action === 'stop') return true;
+
+                    return false;
+                });
+                
+                if (shouldStop) {
+                    console.log(`[WA] User ${senderId} has Blocking Label. Stopping AI.`);
                     // Ensure handover lock is active
                     const chatKey = `${sessionName}_${senderId}`;
                     handoverMap.set(chatKey, Date.now() + 60 * 60 * 1000); // 1 Hour Lock
@@ -562,7 +606,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                     // Label removed? Unblock immediately.
                     const chatKey = `${sessionName}_${senderId}`;
                     if (handoverMap.has(chatKey)) {
-                        console.log(`[WA] 'adminhandle' label removed for ${senderId}. Unblocking AI.`);
+                        console.log(`[WA] Blocking label removed for ${senderId}. Unblocking AI.`);
                         handoverMap.delete(chatKey);
                     }
                 }
@@ -597,7 +641,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             imageUrls: imagesToPass, 
             audioUrls: allAudios, // Pass accumulated audios
             config: pageConfig,
-            platform: 'whatsapp'
+            platform: 'whatsapp',
+            extraTokenUsage: totalVisionTokens // Pass vision tokens to sum up
         });
 
         if (!aiResponse) {
@@ -614,10 +659,45 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Mark as Seen (User Experience)
         await whatsappService.sendSeen(sessionName, senderId);
 
+        // --- HANDLE DYNAMIC LABELS ([ADD_LABEL: x]) ---
+        // Format: [ADD_LABEL: admincall]
+        const labelRegex = /\[ADD_LABEL:\s*([a-zA-Z0-9_]+)\]/gi;
+        let labelMatch;
+        let finalReplyText = replyText;
+
+        while ((labelMatch = labelRegex.exec(finalReplyText)) !== null) {
+            const fullTag = labelMatch[0];
+            const labelName = labelMatch[1].toLowerCase();
+            
+            console.log(`[WA] AI requested to add label: ${labelName}`);
+            
+            try {
+                // Call WAHA to add label
+                await whatsappService.addLabel(sessionName, senderId, labelName);
+                
+                // If label is 'admincall' or 'adminhandle' or has 'stop' action, lock immediately
+                // This prevents AI from replying to its own label action in next loop if user replies fast
+                const labelActions = pageConfig.label_actions || [];
+                const actionConfig = labelActions.find(la => la.label_name.toLowerCase() === labelName);
+                const isHardcodedStop = ['adminhandle', 'admincall'].includes(labelName);
+                
+                if (isHardcodedStop || (actionConfig && actionConfig.ai_action === 'stop')) {
+                     console.log(`[WA] Blocking Label applied (${labelName}). Locking conversation.`);
+                     const chatKey = `${sessionName}_${senderId}`;
+                     handoverMap.set(chatKey, Date.now() + 60 * 60 * 1000);
+                }
+
+            } catch (lblErr) {
+                console.error(`[WA] Failed to add label ${labelName}:`, lblErr.message);
+            }
+
+            // Remove tag from user-facing text
+            finalReplyText = finalReplyText.replace(fullTag, '').trim();
+        }
+
         // Handle Strict Image Sending (IMAGE: Title | URL)
         // Extracted images are removed from replyText
         const extractedImages = [];
-        let finalReplyText = replyText;
         
         const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s,]+)/gi;
         let strictMatch;
@@ -671,7 +751,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             timestamp: Date.now(),
             status: 'sent',
             reply_by: 'assistant',
-            model_used: aiResponse.model // Save Model Name
+            model_used: aiResponse.model, // Save Model Name
+            token_usage: aiResponse.token_usage // Save Total Token Usage (Vision + Chat)
         });
 
     } catch (err) {

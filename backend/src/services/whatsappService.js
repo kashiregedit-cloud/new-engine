@@ -322,6 +322,40 @@ async function getContact(session, chatId) {
     }
 }
 
+/**
+ * Add Label to Contact (WAHA)
+ * @param {string} session 
+ * @param {string} chatId 
+ * @param {string} labelName 
+ */
+async function addLabel(session, chatId, labelName) {
+    try {
+        // PUT /api/contacts/label
+        // Body: { "label": "string", "contactId": "string", "session": "string" }
+        await apiClient.put('/api/contacts/label', {
+            label: labelName,
+            contactId: chatId,
+            session: session
+        });
+        console.log(`[WhatsApp] Added label '${labelName}' to ${chatId}`);
+        return true;
+    } catch (error) {
+        // Fallback: Try newer WAHA endpoint format if above fails
+        // Some versions use POST /api/{session}/labels
+        console.warn(`[WhatsApp] Add Label (Method 1) failed: ${error.message}. Trying Method 2...`);
+        try {
+             await apiClient.post(`/api/${session}/labels`, {
+                name: labelName,
+                chatId: chatId
+             });
+             return true;
+        } catch (err2) {
+             console.error(`[WhatsApp] Add Label (Method 2) failed:`, err2.message);
+             return false;
+        }
+    }
+}
+
 module.exports = {
     sendMessage,
     sendImage,
@@ -338,5 +372,6 @@ module.exports = {
     logoutSession,
     getScreenshot,
     getPairingCode,
-    getContact
+    getContact,
+    addLabel
 };
