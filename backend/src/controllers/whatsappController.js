@@ -35,6 +35,8 @@ const sessionStartTimeMap = new Map();
 const recentMessageIds = new Set();
 // Bot Message IDs (to distinguish Bot vs Admin replies)
 const botMessageIds = new Set();
+// Sent Message History (Fuzzy Match Guard)
+const sentMessageHistory = new Map(); // Key: recipient_body, Value: { ts: number }
 
 // Step 1: Webhook Trigger
 const handleWebhook = async (req, res) => {
@@ -80,11 +82,35 @@ const handleWebhook = async (req, res) => {
 
         // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
         if (payload.fromMe) {
-            // Check if this is a BOT message we just sent
+            // Check if this is a BOT message we just sent (ID Match)
             if (botMessageIds.has(payload.id)) {
-                // It's the Bot. Remove from set and Ignore.
                 botMessageIds.delete(payload.id);
-                // console.log(`[WA] Ignoring Bot's own echo message: ${payload.id}`);
+                return;
+            }
+            
+            // SECONDARY CHECK: Check if ID._serialized is in Set (WAHA sometimes returns object ID)
+            if (payload.id && payload.id._serialized && botMessageIds.has(payload.id._serialized)) {
+                botMessageIds.delete(payload.id._serialized);
+                return;
+            }
+            
+            // TERTIARY CHECK: Recent History Check (Fuzzy Match)
+            // If we recently sent a message with SAME content to SAME user within 5 seconds, ignore it.
+            // This catches cases where ID format differs completely (e.g. true_... vs false_...)
+            const targetRecipient = payload.to;
+            const targetBody = (payload.body || '').trim();
+            const now = Date.now();
+            
+            // Clean up old sent history
+            for (const [key, val] of sentMessageHistory.entries()) {
+                if (now - val.ts > 10000) sentMessageHistory.delete(key);
+            }
+            
+            // Check
+            const historyKey = `${targetRecipient}_${targetBody}`;
+            if (sentMessageHistory.has(historyKey)) {
+                console.log(`[WA] Ignoring fromMe message (Fuzzy Match): ${historyKey}`);
+                sentMessageHistory.delete(historyKey);
                 return;
             }
 
@@ -355,10 +381,28 @@ async function queueMessage(session, messagePayload) {
     const sessionData = debounceMap.get(sessionId);
     
     // Push Object
+    // Extract Quoted Message Data (Lightweight System - Webhook Data)
+    let quotedContent = null;
+    try {
+        if (messagePayload._data && messagePayload._data.quotedMsg) {
+            const q = messagePayload._data.quotedMsg;
+            if (q.body) quotedContent = q.body; // Text
+            else if (q.caption) quotedContent = q.caption; // Image with caption
+            else if (q.type === 'ptt' || q.type === 'audio') quotedContent = '[Voice Message]';
+            else if (q.type === 'image') quotedContent = '[Image Message]';
+            else if (q.type === 'sticker') quotedContent = '[Sticker]';
+        } else if (messagePayload.replyTo && messagePayload.replyTo.body) {
+             quotedContent = messagePayload.replyTo.body;
+        }
+    } catch (e) {
+        console.error('[WA] Failed to extract quoted content:', e);
+    }
+
     sessionData.messages.push({
         id: messageId,
         text: messageText,
         reply_to: messagePayload.replyTo?.id || null, // WAHA reply info
+        quoted_text: quotedContent, // <-- NEW: Store quoted text from webhook
         images: imageUrls,
         audios: audioUrls
     });
@@ -387,6 +431,7 @@ async function queueMessage(session, messagePayload) {
 
 // Core Logic Function (Debounced)
 async function processBufferedMessages(sessionId, sessionName, senderId, messages, pageId = null) {
+    let replyToTextFallback = null;
     let combinedText = "";
     let replyToId = null;
     let allImages = [];
@@ -395,7 +440,10 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
     for (const msg of messages) {
         if (msg.text) combinedText += msg.text + "\n";
-        if (msg.reply_to) replyToId = msg.reply_to; 
+        if (msg.reply_to) {
+            replyToId = msg.reply_to; 
+            if (msg.quoted_text) replyToTextFallback = msg.quoted_text;
+        }
         if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
         if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
     }
@@ -413,11 +461,19 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     if (replyToId) {
         logDebug(`[Swipe] Detected replyToId: ${replyToId}. Fetching context...`);
         try {
-            const quotedText = await dbService.getMessageById(replyToId);
+            let quotedText = await dbService.getMessageById(replyToId);
+            
+            // Fallback to Webhook Data (Lightweight System) - Handles Old Messages / Not in DB
+            if ((!quotedText || !quotedText.trim()) && replyToTextFallback) {
+                logDebug(`[Swipe] DB miss. Using Webhook quoted text: "${replyToTextFallback.substring(0,30)}..."`);
+                quotedText = replyToTextFallback;
+            }
+
             logDebug(`[Swipe] Context fetch result: "${quotedText ? quotedText.substring(0,50) : 'null'}"`);
             
             if (quotedText && quotedText.trim()) {
-                combinedText = `[Replying to] ${quotedText.trim()}\n\n${combinedText}`;
+                // Formatting Context like SMS/Messenger style
+                combinedText = `[Replying to: "${quotedText.trim()}"]\n${combinedText}`;
             } else {
                 logDebug(`[Swipe] Warning: Context was empty or null for ID ${replyToId}`);
             }
@@ -797,6 +853,10 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                  // WAHA returns { id: "...", ... } or { id: { _serialized: "..." } } depending on version
                  // Usually sentData.id is the ID string
                  sentMessageId = (typeof sentData.id === 'object') ? sentData.id._serialized : sentData.id;
+                 
+                 // Add to Fuzzy Match History
+                 const historyKey = `${senderId}_${finalReplyText.trim()}`;
+                 sentMessageHistory.set(historyKey, { ts: Date.now() });
              }
         }
 

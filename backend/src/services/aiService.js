@@ -761,7 +761,8 @@ async function transcribeAudio(audioUrl, config) {
 
         console.log(`[Audio] Transcription: "${text.substring(0, 30)}..."`);
         logDebug(`[Audio] Success: "${text}"`);
-        return `[User Audio Message: "${text}"]`;
+        // Return raw text to simulate SMS-like behavior as per user request
+        return text;
 
     } catch (error) {
         const errMsg = error.response?.data?.error?.message || error.message;
