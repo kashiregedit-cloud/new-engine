@@ -421,7 +421,7 @@ async function processImageWithVision(imageUrl, pageConfig = {}) {
         }
 
         // 2. Use Gemini Flash (Multimodal) - It's fast and free/cheap
-        const keyData = await keyService.getSmartKey('google', 'gemini-1.5-flash');
+        const keyData = await keyService.getSmartKey('google', 'gemini-2.5-flash');
         if (!keyData || !keyData.key) {
             logDebug(`[Vision] No Key Found.`);
             return "Image found but analysis unavailable.";
