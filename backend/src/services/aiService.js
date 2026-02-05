@@ -741,8 +741,9 @@ async function transcribeAudio(audioUrl, config) {
         });
         
         formData.append('model', 'whisper-large-v3');
-        formData.append('language', 'bn'); // Bengali Hint
-        // formData.append('temperature', '0'); // Deterministic
+        formData.append('language', 'bn'); // Force Bengali
+        formData.append('prompt', 'This audio is in Bengali language. Transcribe it exactly as spoken in Bengali script.'); // Context Prompt
+        formData.append('temperature', '0'); // Deterministic for accuracy
 
         logDebug(`[Audio] Sending to Groq Whisper...`);
         const transcriptionResponse = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {

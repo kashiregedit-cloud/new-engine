@@ -384,15 +384,28 @@ async function queueMessage(session, messagePayload) {
     // Extract Quoted Message Data (Lightweight System - Webhook Data)
     let quotedContent = null;
     try {
-        if (messagePayload._data && messagePayload._data.quotedMsg) {
-            const q = messagePayload._data.quotedMsg;
-            if (q.body) quotedContent = q.body; // Text
-            else if (q.caption) quotedContent = q.caption; // Image with caption
+        // Search in multiple possible locations
+        const q = messagePayload._data?.quotedMsg || messagePayload.quotedMsg || messagePayload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        
+        if (q) {
+            if (q.body) quotedContent = q.body; // Standard Text
+            else if (q.caption) quotedContent = q.caption; // Image/Video with caption
+            else if (q.conversation) quotedContent = q.conversation; // Direct conversation text (some payloads)
             else if (q.type === 'ptt' || q.type === 'audio') quotedContent = '[Voice Message]';
             else if (q.type === 'image') quotedContent = '[Image Message]';
             else if (q.type === 'sticker') quotedContent = '[Sticker]';
-        } else if (messagePayload.replyTo && messagePayload.replyTo.body) {
+            else if (q.type === 'video') quotedContent = '[Video Message]';
+            // Deep nested text check
+            else if (q.extendedTextMessage && q.extendedTextMessage.text) quotedContent = q.extendedTextMessage.text;
+        } 
+        
+        // Fallback to standard replyTo object
+        if (!quotedContent && messagePayload.replyTo && messagePayload.replyTo.body) {
              quotedContent = messagePayload.replyTo.body;
+        }
+        
+        if (quotedContent) {
+            logDebug(`[WA] Extracted Quoted Content: "${quotedContent.substring(0,30)}..."`);
         }
     } catch (e) {
         console.error('[WA] Failed to extract quoted content:', e);
