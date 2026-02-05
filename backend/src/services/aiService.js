@@ -249,9 +249,18 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // ----------------------------------
 
     let totalTokenUsage = extraTokenUsage || 0;
+    let cleanUserMessage = userMessage;
 
     // 0. Pre-process Media (Images/Audio) -> Text
-    // This ensures the AI "sees" the images/audio as text descriptions
+    
+    // Extract images from User Message if any
+    const imageMatch = userMessage.match(/\[User sent images: (.*?)\]/);
+    if (imageMatch && imageMatch[1]) {
+         const extracted = imageMatch[1].split(',').map(url => url.trim());
+         imageUrls = [...imageUrls, ...extracted];
+         cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); 
+    }
+
     let mediaContext = "";
     
     if (imageUrls && imageUrls.length > 0) {
@@ -272,14 +281,20 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     if (audioUrls && audioUrls.length > 0) {
         console.log(`[AI] Processing ${audioUrls.length} audio files...`);
-        const audioPromises = audioUrls.map(url => transcribeAudio(url, pageConfig));
-        const audioResults = await Promise.all(audioPromises);
+        const audioResults = await Promise.all(audioUrls.map(async url => {
+            const res = await transcribeAudio(url, pageConfig);
+            if (typeof res === 'object') {
+                totalTokenUsage += (res.usage || 0);
+                return res.text;
+            }
+            return res;
+        }));
         mediaContext += "\n[System Note: User sent audio messages:]\n" + audioResults.join("\n");
     }
 
     if (mediaContext) {
-        userMessage += "\n" + mediaContext;
-        console.log(`[AI] Added media context to user message.`);
+        cleanUserMessage += "\n" + mediaContext;
+        console.log(`[AI] Added media context to user message. Total Tokens so far: ${totalTokenUsage}`);
     }
 
     // 1. Prepare Configuration
@@ -363,37 +378,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     }
     // -------------------------------------------------
     
-    // --- MEDIA HANDLING (Images & Audio) ---
-    let cleanUserMessage = userMessage;
-
-    // 1. Process Images
-    const imageMatch = userMessage.match(/\[User sent images: (.*?)\]/);
-    if (imageMatch && imageMatch[1]) {
-         const extracted = imageMatch[1].split(',').map(url => url.trim());
-         imageUrls = [...imageUrls, ...extracted];
-         cleanUserMessage = userMessage.replace(imageMatch[0], '').trim(); 
-    }
-
-    if (imageUrls.length > 0) {
-        console.log(`[AI] Processing ${imageUrls.length} images...`);
-        const imageDescriptions = await Promise.all(
-            imageUrls.map(url => processImageWithVision(url, pageConfig))
-        );
-        
-        const visionText = imageDescriptions.map((desc, i) => `[Image ${i+1} Analysis: ${desc}]`).join('\n');
-        cleanUserMessage += `\n\n${visionText}`;
-    }
-
-    // 2. Process Audio
-    if (audioUrls.length > 0) {
-        console.log(`[AI] Processing ${audioUrls.length} audio messages...`);
-        const audioTranscriptions = await Promise.all(
-            audioUrls.map(url => transcribeAudio(url, pageConfig))
-        );
-        
-        const audioText = audioTranscriptions.join('\n');
-        cleanUserMessage += `\n\n${audioText}`;
-    }
+    // --- MEDIA HANDLING COMPLETED ABOVE ---
+    // (Consolidated into Pre-process Media step to ensure correct token tracking)
     // ----------------------------------------
 
     // --- PROMPT & MESSAGE CONSTRUCTION ---
@@ -940,17 +926,12 @@ async function transcribeAudio(audioUrl, config) {
     const priorityChain = [
         { provider: 'google', model: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { provider: 'google', model: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
-        // Only try OpenRouter if it's a known multimodal model that might support audio (Gemini/Qwen usually don't via standard chat API for audio)
-        // But we will try if bestFreeModels.voice is set to a Gemini model
         { provider: 'openrouter', model: bestFreeModels.voice, name: `OpenRouter Voice (${bestFreeModels.voice})` }
     ];
 
     for (const option of priorityChain) {
         try {
-            // Skip OpenRouter if it's just a text model (not mapped to Gemini/Multimodal)
             if (option.provider === 'openrouter' && !option.model.includes('gemini') && !option.model.includes('claude')) {
-                // Most OpenRouter models don't support audio input via Chat API yet.
-                // We skip to avoid errors, unless we are sure.
                 continue; 
             }
 
@@ -963,11 +944,6 @@ async function transcribeAudio(audioUrl, config) {
             // GEMINI DIRECT API
             if (option.provider === 'google' || option.model.includes('google/gemini')) {
                 const baseUrl = option.provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://generativelanguage.googleapis.com/v1beta';
-                
-                // If OpenRouter, we need to check if they support 'inline_data' or OpenAI 'image_url' (audio?)
-                // OpenRouter Gemini support usually follows OpenAI spec or Google spec.
-                // Safest is to use Google Direct for Google models. 
-                // If OpenRouter, we might skip for now as audio input support is experimental there.
                 if (option.provider === 'openrouter') continue; 
 
                 const url = `${baseUrl}/models/${option.model}:generateContent?key=${apiKey}`;
@@ -982,10 +958,11 @@ async function transcribeAudio(audioUrl, config) {
                 
                 const res = await axios.post(url, payload);
                 const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                const usage = res.data?.usageMetadata?.totalTokenCount || 0;
                 
                 if (text) {
-                    console.log(`[Audio] Success with ${option.name}: "${text.substring(0, 30)}..."`);
-                    return text.trim();
+                    console.log(`[Audio] Success with ${option.name}: "${text.substring(0, 30)}..." Usage: ${usage}`);
+                    return { text: text.trim(), usage: usage };
                 }
             }
             
@@ -998,7 +975,7 @@ async function transcribeAudio(audioUrl, config) {
     try {
         console.log(`[Audio] Falling back to Groq Whisper...`);
         const keyData = await keyService.getSmartKey('groq', 'whisper-large-v3');
-        if (!keyData || !keyData.key) return "[Audio Message]";
+        if (!keyData || !keyData.key) return { text: "[Audio Message]", usage: 0 };
         const apiKey = keyData.key;
 
         const formData = new FormData();
@@ -1013,13 +990,19 @@ async function transcribeAudio(audioUrl, config) {
             timeout: 10000
         });
 
-        if (res.data.text) return res.data.text;
+        if (res.data.text) {
+            // Estimate usage: 1 min ~ 100 tokens? Or just 0 for now as it's not token-based
+            // Let's use 0 to be safe, or we can add a nominal fee if user insists.
+            // User said "token ba cost consume kore". 
+            // Since Groq is free (mostly) or cheap, 0 is fine.
+            return { text: res.data.text, usage: 0 };
+        }
 
     } catch (e) {
         console.error(`[Audio] Groq Fallback Failed:`, e.message);
     }
 
-    return "[Audio Message (Transcription Failed)]";
+    return { text: "[Audio Message (Transcription Failed)]", usage: 0 };
 }
 
 module.exports = {

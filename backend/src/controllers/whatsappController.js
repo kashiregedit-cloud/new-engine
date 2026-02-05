@@ -53,6 +53,18 @@ const handleWebhook = async (req, res) => {
         return res.sendStatus(400);
     }
 
+    // NORMALIZE MESSAGE ID (Critical for Upsert & Duplicate Check)
+    // WAHA sometimes returns id as object { fromMe: ..., remote: ..., id: ..., _serialized: ... }
+    // We ALWAYS want the string version (_serialized)
+    let messageIdRaw = payload.id;
+    if (typeof messageIdRaw === 'object' && messageIdRaw !== null) {
+        messageIdRaw = messageIdRaw._serialized || messageIdRaw.id; // Fallback
+    }
+    // Update payload.id to be the string version for downstream consistency
+    if (payload.id && typeof payload.id === 'object') {
+        payload.id = messageIdRaw;
+    }
+
     // Acknowledge immediately
     res.send('OK');
 
@@ -83,14 +95,9 @@ const handleWebhook = async (req, res) => {
         // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
         if (payload.fromMe) {
             // Check if this is a BOT message we just sent (ID Match)
-            if (botMessageIds.has(payload.id)) {
-                botMessageIds.delete(payload.id);
-                return;
-            }
-            
-            // SECONDARY CHECK: Check if ID._serialized is in Set (WAHA sometimes returns object ID)
-            if (payload.id && payload.id._serialized && botMessageIds.has(payload.id._serialized)) {
-                botMessageIds.delete(payload.id._serialized);
+            // Uses Normalized ID
+            if (botMessageIds.has(messageIdRaw)) {
+                botMessageIds.delete(messageIdRaw);
                 return;
             }
             
@@ -117,16 +124,15 @@ const handleWebhook = async (req, res) => {
             // If NOT in botMessageIds, it's the ADMIN (via Phone/Web)
             // Save Admin message to DB & Activate Handover
             
-            const messageId = payload.id;
             const messageText = payload.body || '';
             const sessionName = session;
             
             // In-memory duplicate check
-            if (recentMessageIds.has(messageId)) return;
-            recentMessageIds.add(messageId);
-            setTimeout(() => recentMessageIds.delete(messageId), 10 * 60 * 1000); // Clear after 10 mins
+            if (recentMessageIds.has(messageIdRaw)) return;
+            recentMessageIds.add(messageIdRaw);
+            setTimeout(() => recentMessageIds.delete(messageIdRaw), 10 * 60 * 1000); // Clear after 10 mins
 
-            const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
+            const isDuplicate = await dbService.checkWhatsAppDuplicate(messageIdRaw);
             if (!isDuplicate) {
                  // Prevent saving empty messages (avoids blank rows in UI)
                  // Check for Reactions, Protocol messages, etc.
@@ -151,7 +157,7 @@ const handleWebhook = async (req, res) => {
                     session_name: sessionName,
                     sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
                     recipient_id: payload.to, // User is the recipient
-                    message_id: messageId,
+                    message_id: messageIdRaw,
                     text: textToSave,
                     timestamp: Date.now(),
                     status: 'sent',
@@ -234,7 +240,13 @@ async function queueMessage(session, messagePayload) {
     const senderId = messagePayload.from; // e.g., 12345678@c.us
     const sessionName = session; // Using WAHA Session as Session Name
     let messageText = messagePayload.body || '';
-    const messageId = messagePayload.id;
+    
+    // Normalized ID
+    let messageId = messagePayload.id;
+    if (typeof messageId === 'object' && messageId !== null) {
+        messageId = messageId._serialized || messageId.id;
+    }
+
     const isGroup = typeof senderId === 'string' && senderId.includes('@g.us');
     const groupId = messagePayload.chatId || (isGroup ? senderId : null);
     const groupName = messagePayload.chatName || null;
@@ -322,6 +334,11 @@ async function queueMessage(session, messagePayload) {
             if (messagePayload._data) console.log('[WA] _data keys:', Object.keys(messagePayload._data));
             console.log('[WA] Full Payload (Debug):', JSON.stringify(messagePayload).substring(0, 500)); // Log first 500 chars
         }
+    }
+
+    // VOICE MESSAGE NULL FIX
+    if ((!messageText || messageText.trim() === "") && audioUrls.length > 0) {
+        messageText = "[Voice Message - Transcribing...]";
     }
 
     // Check Duplicate immediately (WhatsApp specific)
@@ -499,6 +516,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     // --- AUDIO TRANSCRIPTION (Per-Message) ---
     // Added to fix Voice Message Reply & Swipe Reply Context
     let audioTranscriptText = null;
+    let totalAudioTokens = 0; // Track Audio Tokens
+
     if (messages.some(m => m.audios && m.audios.length > 0)) {
         logDebug(`[WA] Found audio messages. Starting transcription...`);
         let collectedTranscripts = [];
@@ -511,11 +530,23 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                 for (const audioUrl of msg.audios) {
                     try {
                         // Transcribe
-                        const transcript = await aiService.transcribeAudio(audioUrl, pageConfig || {});
-                        logDebug(`[WA] Transcribed msg ${msg.id}: ${transcript}`);
+                        const transcriptData = await aiService.transcribeAudio(audioUrl, pageConfig || {});
+                        
+                        let transcript = "";
+                        let usage = 0;
+
+                        if (typeof transcriptData === 'object') {
+                            transcript = transcriptData.text;
+                            usage = transcriptData.usage || 0;
+                        } else {
+                            transcript = transcriptData; // Fallback for legacy string return
+                        }
+
+                        logDebug(`[WA] Transcribed msg ${msg.id}: ${transcript} (Tokens: ${usage})`);
                         
                         if (transcript) {
                             collectedTranscripts.push(transcript);
+                            totalAudioTokens += usage;
                             
                             // SAVE Transcription to DB (Critical for Swipe Reply)
                             await dbService.saveWhatsAppChat({
@@ -778,7 +809,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             audioUrls: [], // Handled manually in controller
             config: pageConfig,
             platform: 'whatsapp',
-            extraTokenUsage: totalVisionTokens // Pass vision tokens to sum up
+            extraTokenUsage: totalVisionTokens + totalAudioTokens // Pass vision + audio tokens
         });
 
         if (!aiResponse) {
@@ -905,7 +936,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             text: replyText, // Save full original text including image tags for context
             timestamp: Date.now(),
             status: 'sent',
-            reply_by: 'assistant',
+            reply_by: 'bot',
             model_used: aiResponse.model, // Save Model Name
             token_usage: aiResponse.token_usage // Save Total Token Usage (Vision + Chat)
         });

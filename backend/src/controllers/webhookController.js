@@ -502,6 +502,10 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         // --- BATCH PROCESSING: IMAGES & AUDIO ---
         // Now we process all media together BEFORE generating the reply.
         
+        // Track Token Usage for Aggregation
+        let totalVisionTokens = 0;
+        let totalAudioTokens = 0;
+        
         // A. Process Images (Vision)
         const allVideos = [];
         const TOO_MANY_IMAGES_THRESHOLD = 10;
@@ -521,10 +525,15 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
                     try {
                         const imagePromises = msg.images.map(url => aiService.processImageWithVision(url, pageConfig));
                         const imageResults = await Promise.all(imagePromises);
+                        
+                        // Extract text and usage
                         const perMsgText = imageResults.map((result, index) => {
                             const text = typeof result === 'object' ? (result.text || '') : String(result || '');
+                            const usage = typeof result === 'object' ? (result.usage || 0) : 0;
+                            totalVisionTokens += usage;
                             return `[Image ${index + 1} Analysis]: ${text}`;
                         }).join("\n").trim();
+                        
                         if (perMsgText) {
                             combinedImageAnalysis += `\n${perMsgText}\n`;
                             // Save analysis under original message_id
@@ -560,9 +569,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             console.log(`[Batch] Transcribing ${allAudios.length} voice messages...`);
             // Process in parallel
             const audioPromises = allAudios.map(url => aiService.transcribeAudio(url, pageConfig));
-            const audioResults = await Promise.all(audioPromises);
+            const audioResultsRaw = await Promise.all(audioPromises);
             
-            const combinedAudioTranscript = audioResults.join('\n');
+            // Extract text and usage
+            const audioTranscripts = audioResultsRaw.map(res => {
+                const text = typeof res === 'object' ? (res.text || '') : String(res || '');
+                const usage = typeof res === 'object' ? (res.usage || 0) : 0;
+                totalAudioTokens += usage;
+                return text;
+            });
+
+            const combinedAudioTranscript = audioTranscripts.join('\n');
             combinedText += `\n\n[System: User sent ${allAudios.length} voice messages. Transcripts follow:]\n${combinedAudioTranscript}`;
         }
         
@@ -734,7 +751,17 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
         }
         // -----------------------------------------------------------------------
 
-        const aiResponse = await aiService.generateReply(finalUserMessage, pageConfig, pagePrompts, effectiveHistory, senderName, senderGender);
+        const aiResponse = await aiService.generateReply(
+            finalUserMessage, 
+            pageConfig, 
+            pagePrompts, 
+            effectiveHistory, 
+            senderName, 
+            senderGender,
+            [], // imageUrls (Already processed)
+            [], // audioUrls (Already processed)
+            totalVisionTokens + totalAudioTokens // Pass aggregated token usage
+        );
         
         if (!aiResponse) {
              console.error(`[Webhook] AI generation failed for ${senderId}. No response generated.`);
