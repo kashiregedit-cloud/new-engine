@@ -217,9 +217,10 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
     const MODEL_ALIASES = {
+        'gemini-2.5-flash': 'gemini-2.0-flash', // User Alias
+        'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // User Alias
         'gemini-2.0-flash-exp': 'gemini-2.0-flash', 
         'gemini-2.5-pro': 'gemini-2.5-pro-preview', 
-        'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05',
         'groq-fast': 'llama-3.3-70b-versatile', 
         'groq-speed': 'llama-3.1-8b-instant', 
         'grok-4.1-fast': 'llama-3.3-70b-versatile',
@@ -227,6 +228,21 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     if (MODEL_ALIASES[defaultModel]) {
         defaultModel = MODEL_ALIASES[defaultModel];
+    }
+
+    // Dynamic Best Model Logic (Cache every 2 hours)
+    // User Request: gemini 2.5 flash > 2.5 flash lite > openrouter free
+    if (!userModel) {
+        // If user didn't specify, we use our smart defaults
+        // 1. Try Gemini 2.0 Flash (aka 2.5 Flash alias)
+        // 2. Try Gemini 2.0 Flash Lite
+        // 3. Fallback to OpenRouter Free
+        
+        // This is handled in Phase 2 loop below if we set the sequence right.
+        // We set 'defaultModel' to the Primary Choice.
+        defaultModel = 'gemini-2.5-flash';
+        dynamicModel = 'gemini-2.5-flash-lite';
+        fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // OpenRouter Free Version
     }
     // -------------------------------------------------
     

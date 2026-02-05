@@ -95,21 +95,21 @@ const handleWebhook = async (req, res) => {
             }
             
             // TERTIARY CHECK: Recent History Check (Fuzzy Match)
-            // If we recently sent a message with SAME content to SAME user within 5 seconds, ignore it.
+            // If we recently sent a message with SAME content to SAME user within 10 seconds, ignore it.
             // This catches cases where ID format differs completely (e.g. true_... vs false_...)
             const targetRecipient = payload.to;
-            const targetBody = (payload.body || '').trim();
+            const targetBody = (payload.body || '').trim().toLowerCase(); // Normalize
             const now = Date.now();
             
             // Clean up old sent history
             for (const [key, val] of sentMessageHistory.entries()) {
-                if (now - val.ts > 10000) sentMessageHistory.delete(key);
+                if (now - val.ts > 15000) sentMessageHistory.delete(key); // Increased to 15s
             }
             
             // Check
             const historyKey = `${targetRecipient}_${targetBody}`;
             if (sentMessageHistory.has(historyKey)) {
-                console.log(`[WA] Ignoring fromMe message (Fuzzy Match): ${historyKey}`);
+                console.log(`[WA] Ignoring fromMe message (Fuzzy Match): ${historyKey.substring(0,50)}...`);
                 sentMessageHistory.delete(historyKey);
                 return;
             }
@@ -867,8 +867,16 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                  // Usually sentData.id is the ID string
                  sentMessageId = (typeof sentData.id === 'object') ? sentData.id._serialized : sentData.id;
                  
+                 // Add to Bot Message IDs (Critical for preventing Double Messages in Dashboard)
+                 if (sentMessageId) {
+                     botMessageIds.add(sentMessageId);
+                     // Auto-clear after 2 minutes to save memory
+                     setTimeout(() => botMessageIds.delete(sentMessageId), 2 * 60 * 1000);
+                 }
+
                  // Add to Fuzzy Match History
-                 const historyKey = `${senderId}_${finalReplyText.trim()}`;
+                 // Normalize key for consistency
+                 const historyKey = `${senderId}_${finalReplyText.trim().toLowerCase()}`;
                  sentMessageHistory.set(historyKey, { ts: Date.now() });
              }
         }
