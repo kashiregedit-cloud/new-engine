@@ -573,17 +573,39 @@ async function saveWhatsAppContact(data) {
 
 // 20. Toggle WhatsApp Lock (Handover)
 async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
-    const { error } = await supabase
+    // 1. Try UPDATE first (Works without Unique Constraint if row exists)
+    const { data, error } = await supabase
+        .from('whatsapp_contacts')
+        .update({ 
+            is_locked: isLocked,
+            last_interaction: new Date().toISOString()
+        })
+        .eq('session_name', sessionName)
+        .eq('phone_number', phoneNumber)
+        .select();
+
+    if (error) {
+        console.error("Error updating WA lock:", error.message);
+        return false;
+    }
+
+    // If update succeeded (row existed), we are done.
+    if (data && data.length > 0) return true;
+
+    // 2. If no row found, Try UPSERT/INSERT
+    // This handles the "New Contact" case, but requires Unique Constraint for Upsert.
+    // We'll try standard Upsert here as fallback.
+    const { error: upsertError } = await supabase
         .from('whatsapp_contacts')
         .upsert({
             session_name: sessionName,
             phone_number: phoneNumber,
             is_locked: isLocked,
-            last_interaction: new Date().toISOString() // Update timestamp to keep it fresh
+            last_interaction: new Date().toISOString()
         }, { onConflict: 'session_name, phone_number' });
 
-    if (error) {
-        console.error("Error toggling WA lock:", error.message);
+    if (upsertError) {
+        console.error("Error upserting WA lock:", upsertError.message);
         return false;
     }
     return true;

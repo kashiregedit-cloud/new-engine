@@ -183,9 +183,32 @@ const handleWebhook = async (req, res) => {
                     status: 'sent',
                     reply_by: 'admin' // Trigger stop logic
                 });
-                // Activate handover lock for this chat for 5 minutes
-                const chatKey = `${sessionName}_${payload.to || payload.chatId || 'unknown'}`;
-                handoverMap.set(chatKey, Date.now() + 5 * 60 * 1000);
+
+                // --- EMOJI HANDOVER LOGIC (Admin) ---
+                const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+                const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+                
+                let command = null;
+                for (const e of LOCK_EMOJIS) if (textToSave.includes(e)) command = 'LOCK';
+                for (const e of UNLOCK_EMOJIS) if (textToSave.includes(e)) command = 'UNLOCK';
+                
+                if (command) {
+                     const isLocked = command === 'LOCK';
+                     console.log(`[WA] Emoji Command Detected (${command}) from Admin. Updating Lock Status...`);
+                     await dbService.toggleWhatsAppLock(sessionName, payload.to, isLocked);
+                     
+                     // Update Memory Map
+                     const chatKey = `${sessionName}_${payload.to}`;
+                     if (isLocked) {
+                         handoverMap.set(chatKey, Date.now() + 24 * 60 * 60 * 1000); // 24h Lock
+                     } else {
+                         handoverMap.delete(chatKey);
+                     }
+                } else {
+                    // Default Handover (5 mins) if no command
+                    const chatKey = `${sessionName}_${payload.to || payload.chatId || 'unknown'}`;
+                    handoverMap.set(chatKey, Date.now() + 5 * 60 * 1000);
+                }
             }
             return; // STOP Processing
         }
@@ -919,6 +942,25 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             
             // Remove from text
             finalReplyText = finalReplyText.replace(fullMatch, '').trim();
+        }
+
+        // --- EMOJI HANDOVER LOGIC (AI Reply) ---
+        {
+            const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+            const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+            let aiCommand = null;
+            for (const e of LOCK_EMOJIS) if (finalReplyText.includes(e)) aiCommand = 'LOCK';
+            for (const e of UNLOCK_EMOJIS) if (finalReplyText.includes(e)) aiCommand = 'UNLOCK';
+            
+            if (aiCommand) {
+                 const isLocked = aiCommand === 'LOCK';
+                 console.log(`[WA] Emoji Command Detected (${aiCommand}) from AI. Updating Lock Status...`);
+                 await dbService.toggleWhatsAppLock(sessionName, senderId, isLocked);
+                 
+                 const chatKey = `${sessionName}_${senderId}`;
+                 if (isLocked) handoverMap.set(chatKey, Date.now() + 24 * 60 * 60 * 1000);
+                 else handoverMap.delete(chatKey);
+            }
         }
 
         // Send Text First
