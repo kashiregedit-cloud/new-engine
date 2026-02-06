@@ -581,7 +581,58 @@ export default function MessengerIntegrationPage() {
                             Use this if the automatic Facebook Login button doesn't work. You'll need your Page ID and Access Token.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-4 py-4">
+
+                    {/* Webhook Configuration Details */}
+                    <div className="bg-muted/50 p-4 rounded-md space-y-3 mb-4 border">
+                        <h4 className="font-semibold text-sm flex items-center gap-2">
+                            <Database className="h-4 w-4 text-blue-600" />
+                            Webhook Configuration
+                        </h4>
+                        <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Callback URL</Label>
+                            <div className="flex gap-2">
+                                <Input 
+                                    readOnly 
+                                    value={`${BACKEND_URL}/webhook`} 
+                                    className="h-8 font-mono text-xs bg-background" 
+                                />
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(`${BACKEND_URL}/webhook`);
+                                        toast.success("Copied Callback URL");
+                                    }}
+                                >
+                                    <Copy className="h-3 w-3" />
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Verify Token</Label>
+                            <div className="flex gap-2">
+                                <Input 
+                                    readOnly 
+                                    value="123456" 
+                                    className="h-8 font-mono text-xs bg-background" 
+                                />
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText("123456");
+                                        toast.success("Copied Verify Token");
+                                    }}
+                                >
+                                    <Copy className="h-3 w-3" />
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 py-4 border-t">
                         <div className="space-y-2">
                             <Label>Page Name</Label>
                             <Input 

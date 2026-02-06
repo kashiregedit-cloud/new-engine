@@ -56,8 +56,8 @@ export default function WhatsAppConversionPage() {
 
   const fetchContacts = async (sessionName: string) => {
     try {
-        // Assuming backend is on localhost:5000 - Adjust if using env vars
-        const res = await fetch(`http://localhost:5000/api/whatsapp/contacts/${sessionName}`);
+        // Assuming backend is on localhost:3001 - Adjust if using env vars
+        const res = await fetch(`http://localhost:3001/api/whatsapp/contacts/${sessionName}`);
         const data = await res.json();
         if (Array.isArray(data)) {
             const map: Record<string, boolean> = {};

@@ -23,8 +23,6 @@ function logToFile(message) {
 // Global Debounce Map (In-Memory)
 // Key: sessionId (session_chatId)
 const debounceMap = new Map();
-// Recent reply guard (avoid double answers)
-const recentReplyMap = new Map();
 // Last user message guard (avoid reprocessing identical short texts)
 const lastUserMessageMap = new Map();
 // Admin handover map (stop AI after admin label or intervention)
@@ -35,10 +33,6 @@ const sessionStartTimeMap = new Map();
 const recentMessageIds = new Set();
 // Bot Message IDs (to distinguish Bot vs Admin replies)
 const botMessageIds = new Set();
-// Sent Message History (Fuzzy Match Guard)
-const sentMessageHistory = new Map(); // Key: recipient_body, Value: { ts: number }
-// Recent Bot Replies (Strong Echo Guard) - Stores Array of recent replies
-const recentBotReplies = new Map(); // Key: recipient_id, Value: [{ text: string, ts: number }]
 
 // Helper to normalize text for comparison
 const normalizeText = (text) => {
@@ -115,45 +109,31 @@ const handleWebhook = async (req, res) => {
                 return;
             }
             
-            // TERTIARY CHECK: Recent History Check (Fuzzy Match)
-            // If we recently sent a message with SAME content to SAME user within 10 seconds, ignore it.
-            // This catches cases where ID format differs completely (e.g. true_... vs false_...)
+            // TERTIARY CHECK: DB-Based Echo Guard (5s Wait + 20 Msg Check)
+            // User Instruction: Wait 5s, then check last 20 messages in DB for 100% match from 'bot'
             const targetRecipient = payload.to;
             const targetBody = normalizeText(payload.body);
-            const now = Date.now();
             
-            // 1. Check Strong Echo Guard (recentBotReplies)
-            // Iterate through ALL recent bot replies for this user
-            const botReplies = recentBotReplies.get(targetRecipient) || [];
-            // Filter out old ones (keep only last 20s)
-            const validBotReplies = botReplies.filter(r => now - r.ts < 20000);
-            
-            // Update Map if we filtered out old ones
-            if (validBotReplies.length !== botReplies.length) {
-                if (validBotReplies.length > 0) recentBotReplies.set(targetRecipient, validBotReplies);
-                else recentBotReplies.delete(targetRecipient);
-            }
+            // Wait 5 seconds to ensure any concurrent bot reply is saved to DB via its own flow
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
-            const isEcho = validBotReplies.some(lastBotReply => {
-                return lastBotReply.text === targetBody || targetBody.includes(lastBotReply.text) || lastBotReply.text.includes(targetBody);
-            });
+            try {
+                // Fetch last 20 messages from DB
+                const lastMessages = await dbService.getLastNWhatsAppMessages(session, targetRecipient, 20);
+                
+                // Check if ANY of them match our current message AND were sent by 'bot'
+                const isEcho = lastMessages.some(msg => {
+                    if (msg.reply_by !== 'bot') return false;
+                    const dbBody = normalizeText(msg.text);
+                    return dbBody === targetBody; // 100% Match
+                });
 
-            if (isEcho) {
-                console.log(`[WA] Ignoring fromMe message (Strong Echo Match): "${targetBody.substring(0, 30)}..."`);
-                return;
-            }
-
-            // Clean up old sent history
-            for (const [key, val] of sentMessageHistory.entries()) {
-                if (now - val.ts > 15000) sentMessageHistory.delete(key); // Increased to 15s
-            }
-            
-            // Check Fuzzy History
-            const historyKey = `${targetRecipient}_${targetBody}`;
-            if (sentMessageHistory.has(historyKey)) {
-                console.log(`[WA] Ignoring fromMe message (Fuzzy Match): ${historyKey.substring(0,50)}...`);
-                sentMessageHistory.delete(historyKey);
-                return;
+                if (isEcho) {
+                    console.log(`[WA] Ignoring fromMe message (DB Echo Match): "${targetBody.substring(0, 30)}..."`);
+                    return;
+                }
+            } catch (err) {
+                console.warn(`[WA] DB Echo check failed: ${err.message}`);
             }
 
             // If NOT in botMessageIds, it's the ADMIN (via Phone/Web)
@@ -187,25 +167,6 @@ const handleWebhook = async (req, res) => {
                  
                  const textToSave = messageText.trim() || '[Media Sent]';
                  
-                 // --- BOT ECHO CHECK (Fallback to DB) ---
-                 // Verify if this 'Admin' message is actually just an echo of the last Bot Reply
-                 try {
-                     const lastMsg = await dbService.getLastWhatsAppMessage(sessionName, payload.to);
-                     if (lastMsg && lastMsg.reply_by === 'bot') {
-                         // Normalize strings for comparison (ignore small whitespace diffs)
-                         const cleanLast = normalizeText(lastMsg.text);
-                         const cleanNew = normalizeText(textToSave);
-                         
-                         if (cleanLast === cleanNew) {
-                             console.log(`[WA] Ignoring Bot Echo (Duplicate Admin Event via DB): "${cleanNew.substring(0, 30)}..."`);
-                             return;
-                         }
-                     }
-                 } catch (err) {
-                     console.warn(`[WA] Echo check failed: ${err.message}`);
-                 }
-                 // ----------------------
-
                  console.log(`[WA] Saving ADMIN message (fromMe): ${textToSave.substring(0,30)}...`);
                  
                  await dbService.saveWhatsAppChat({
@@ -1069,17 +1030,6 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         let sentMessageId = `bot_${Date.now()}`;
         
         if (finalReplyText) {
-             // Register Strong Echo Guard BEFORE Sending
-             // This covers the race condition where Webhook arrives before Send completes
-             const normalizedReply = normalizeText(finalReplyText);
-             
-             // Add to List (Initialize if not exists)
-             const existingReplies = recentBotReplies.get(senderId) || [];
-             existingReplies.push({ text: normalizedReply, ts: Date.now() });
-             // Keep only last 10 replies to prevent memory leak
-             if (existingReplies.length > 10) existingReplies.shift();
-             recentBotReplies.set(senderId, existingReplies);
-
              const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
              if (sentData && sentData.id) {
                  // WAHA returns { id: "...", ... } or { id: { _serialized: "..." } } depending on version
@@ -1092,11 +1042,6 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                      // Auto-clear after 2 minutes to save memory
                      setTimeout(() => botMessageIds.delete(sentMessageId), 2 * 60 * 1000);
                  }
-
-                 // Add to Fuzzy Match History
-                 // Normalize key for consistency
-                 const historyKey = `${senderId}_${normalizedReply}`;
-                 sentMessageHistory.set(historyKey, { ts: Date.now() });
              }
         }
 

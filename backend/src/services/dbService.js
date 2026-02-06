@@ -1088,6 +1088,24 @@ async function checkWhatsAppLockStatus(sessionName, senderId) {
     }
 }
 
+// --- Helper: Get Last N WhatsApp Messages (Raw) for Echo Check ---
+async function getLastNWhatsAppMessages(sessionName, recipientId, limit = 20) {
+    const { data, error } = await supabase
+        .from('whatsapp_chats')
+        .select('*')
+        .eq('session_name', sessionName)
+        // We want messages in this conversation
+        .or(`and(sender_id.eq.${recipientId},recipient_id.eq.${sessionName}),and(sender_id.eq.${sessionName},recipient_id.eq.${recipientId})`)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.warn(`[WA DB] Failed to fetch last ${limit} messages: ${error.message}`);
+        return [];
+    }
+    return data;
+}
+
 module.exports = {
     supabase,
     getPageConfig,
@@ -1118,6 +1136,7 @@ module.exports = {
     updateWhatsAppEntry,
     updateWhatsAppEntryByName,
     getLastWhatsAppMessage,
+    getLastNWhatsAppMessages,
     toggleWhatsAppLock,
     getWhatsAppContact,
     renewWhatsAppSession,
