@@ -85,6 +85,8 @@ function SwitcherUI({ context }: { context: any }) {
   const showSwitcher = isTeamMember || availableTeams.length > 0;
 
   if (!showSwitcher) return null;
+
+  return (
     <div className="px-2 mb-2 relative z-50">
         <Popover open={open} onOpenChange={setOpen} modal={true}>
         <PopoverTrigger asChild>
