@@ -64,7 +64,7 @@ export default function MessengerIntegrationPage() {
         refreshPages, 
         pages: contextPages, 
         isTeamMember, 
-        teamOwnerEmail, 
+        activeTeam, 
         viewMode, 
         switchViewMode 
     } = useMessenger();
@@ -99,8 +99,8 @@ export default function MessengerIntegrationPage() {
             if (user?.email) {
                 setUserId(user.id);
                 // Determine effective email based on viewMode
-                if (viewMode === 'team' && isTeamMember && teamOwnerEmail) {
-                    setUserEmail(teamOwnerEmail);
+                if (viewMode === 'team' && isTeamMember && activeTeam) {
+                    setUserEmail(activeTeam.owner_email);
                 } else {
                     setUserEmail(user.email);
                 }

@@ -293,12 +293,13 @@ const handleWebhook = async (req, res) => {
                         const config = await dbService.getWhatsAppConfig(sessionName);
                         if (config) {
                             // Update: Use 'lock_emojis' and 'unlock_emojis' directly
+                            // Split by comma or space to be flexible
                             if (config.lock_emojis && config.lock_emojis.trim()) {
-                                LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                                LOCK_EMOJIS = config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
                             }
                             
                             if (config.unlock_emojis && config.unlock_emojis.trim()) {
-                                UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                                UNLOCK_EMOJIS = config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
                             }
                         }
                         console.log(`[WA Handover] Config Loaded. Lock: ${LOCK_EMOJIS.join('|')}, Unlock: ${UNLOCK_EMOJIS.join('|')}`);
@@ -306,17 +307,18 @@ const handleWebhook = async (req, res) => {
                         console.warn(`[WA] Failed to fetch config for emoji check: ${e.message}`);
                     }
                     
-                    // Helper to strip variation selectors (VS16) which cause mismatch
-                    const stripVS = (str) => (str || '').replace(/\uFE0F/g, '');
+                    // Helper to strip variation selectors (VS16) and normalize
+                    const normalizeText = (str) => (str || '').replace(/\uFE0F/g, '').normalize('NFC');
 
                     let command = null;
                     // Check if textToSave contains any of the emojis
                     // Use standard includes, but debug what we are checking
-                    console.log(`[WA Handover] Checking text: "${textToSave}" (Hex: ${Buffer.from(textToSave).toString('hex')})`);
-                    console.log(`[WA Handover] Lock Emojis: ${LOCK_EMOJIS.join('|')} (Hex: ${LOCK_EMOJIS.map(e => Buffer.from(e).toString('hex')).join('|')})`);
+                    console.log(`[WA Handover] Checking text: "${textToSave}"`);
                     
+                    const cleanText = normalizeText(textToSave);
+
                     for (const e of LOCK_EMOJIS) {
-                        if (stripVS(textToSave).includes(stripVS(e))) {
+                        if (cleanText.includes(normalizeText(e))) {
                             command = 'LOCK';
                             console.log(`[WA Handover] Matched Lock Emoji: ${e}`);
                             break;
@@ -324,7 +326,7 @@ const handleWebhook = async (req, res) => {
                     }
                     if (!command) {
                         for (const e of UNLOCK_EMOJIS) {
-                            if (stripVS(textToSave).includes(stripVS(e))) {
+                            if (cleanText.includes(normalizeText(e))) {
                                 command = 'UNLOCK';
                                 console.log(`[WA Handover] Matched Unlock Emoji: ${e}`);
                                 break;
