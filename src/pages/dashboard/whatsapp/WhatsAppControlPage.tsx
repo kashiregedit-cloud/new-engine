@@ -20,6 +20,7 @@ interface WhatsAppConfig {
   group_reply: boolean;
   lock_emojis: string;
   unlock_emojis: string;
+  image_prompt: string;
   [key: string]: boolean | string; // Allow index access for updates
 }
 
@@ -41,7 +42,8 @@ export default function WhatsAppControlPage() {
     file_upload: false,
     group_reply: false,
     lock_emojis: "",
-    unlock_emojis: ""
+    unlock_emojis: "",
+    image_prompt: ""
   });
   const [stats, setStats] = useState({
     todayTokens: 0,
@@ -113,7 +115,8 @@ export default function WhatsAppControlPage() {
           file_upload: row.file_upload ?? false,
           group_reply: row.group_reply ?? false,
           lock_emojis: row.lock_emojis ?? "",
-          unlock_emojis: row.unlock_emojis ?? ""
+          unlock_emojis: row.unlock_emojis ?? "",
+          image_prompt: row.image_prompt ?? ""
         });
 
         fetchMetrics(row.session_name);
@@ -424,6 +427,21 @@ export default function WhatsAppControlPage() {
               onCheckedChange={(c) => setConfig({...config, image_detection: c})}
             />
           </CardContent>
+           {config.image_detection && (
+                <div className="px-6 pb-6 pt-0">
+                    <Label className="text-sm font-semibold mb-2 block">Custom Image Detection Prompt</Label>
+                    <textarea 
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        placeholder="E.g., Analyze this image and identify the product name, price, and color. Ignore selfies."
+                        value={config.image_prompt || ""}
+                        onChange={(e) => setConfig({...config, image_prompt: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                        Customize how the AI analyzes images (e.g., for Cosmetics, Education, Health pages). 
+                        Leave empty for default behavior.
+                    </p>
+                </div>
+            )}
         </Card>
 
         {/* Image Send */}

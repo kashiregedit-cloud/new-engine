@@ -265,7 +265,11 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     
     if (imageUrls && imageUrls.length > 0) {
         console.log(`[AI] Processing ${imageUrls.length} images...`);
-        const imageResults = await Promise.all(imageUrls.map(url => processImageWithVision(url, pageConfig)));
+        // Use per-page vision prompt if available
+        const visionPrompt = (pagePrompts && (pagePrompts.image_prompt || pagePrompts.vision_prompt)) 
+            ? (pagePrompts.image_prompt || pagePrompts.vision_prompt) 
+            : "Analyze this image in Bengali. Identify the Product Name, Color, Model, and Price (if visible in text). If it's a screenshot, extract product details. If it's a sticker/emoji, ignore it.";
+        const imageResults = await Promise.all(imageUrls.map(url => processImageWithVision(url, pageConfig, { prompt: visionPrompt })));
         
         // Extract text and usage
         const imageDescriptions = imageResults.map(res => {

@@ -99,7 +99,16 @@ const handleWebhook = async (req, res) => {
         }
         // -----------------------------------
 
-        // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
+    // --- IGNORE @lid (Linked Devices / Internal) ---
+    // User Report: "124532744531973@lid" getting replies.
+    // These are usually internal messages or other devices.
+    if (payload.from && payload.from.includes('@lid')) {
+        console.log(`[WA] Ignoring @lid message (Internal/Linked Device): ${payload.from}`);
+        return;
+    }
+    // -----------------------------------------------
+
+    // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
         if (payload.fromMe) {
             // Check if this is a BOT message we just sent (ID Match)
             // Uses Normalized ID
@@ -121,8 +130,12 @@ const handleWebhook = async (req, res) => {
                  // 10 Seconds Window for Echo
                  if (timeDiff < 10000) { 
                      // Compare Text (Simple Include or Exact Match)
+                     // Update: Use Normalize for Robustness
                      const incomingText = (payload.body || '').trim();
-                     const isMatch = incomingText === recentReply.text || incomingText.includes(recentReply.text) || recentReply.text.includes(incomingText);
+                     const normalizedIncoming = normalizeText(incomingText);
+                     const normalizedStored = recentReply.text; // Stored as normalized
+
+                     const isMatch = normalizedIncoming === normalizedStored || normalizedIncoming.includes(normalizedStored) || normalizedStored.includes(normalizedIncoming);
                      
                      if (isMatch) {
                          console.log(`[WA] Ignoring fromMe message (Text Match): "${incomingText.substring(0,30)}..."`);
@@ -583,7 +596,15 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     let imageAnalyzeText = null;
     let totalVisionTokens = 0;
     if (messages.some(m => m.images && m.images.length > 0)) {
-        const productAnalysisPrompt = "Analyze this image to identify the Product Name, Color, and any visible text (like Price or Model). Output format: 'Based on the image, this is [Product Name] in [Color] color. Model: [Model], Price: [Price]'. If details are not clear, state 'Not identifiable'. Keep it concise.";
+        let productAnalysisPrompt = "Analyze this image to identify the Product Name, Color, and any visible text (like Price or Model). Output format: 'Based on the image, this is [Product Name] in [Color] color. Model: [Model], Price: [Price]'. If details are not clear, state 'Not identifiable'. Keep it concise.";
+        try {
+            const pagePrompts = await dbService.getPagePrompts(sessionName);
+            if (pagePrompts && (pagePrompts.image_prompt || pagePrompts.vision_prompt)) {
+                productAnalysisPrompt = pagePrompts.image_prompt || pagePrompts.vision_prompt;
+            }
+        } catch (e) {
+            console.warn(`[WA] Failed to fetch vision prompt: ${e.message}`);
+        }
         let collectedTexts = [];
         for (const msg of messages) {
             if (msg.images && msg.images.length > 0) {
@@ -725,6 +746,31 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
 
         // --- FAILURE LOCK CHECK ---
+        
+        // SAVE USER MESSAGE (Persistence Guarantee)
+        // User Requirement: Save message to Supabase even if locked (Handover).
+        if (finalOutput && finalOutput.trim() !== "") {
+             try {
+                 // Use the ID of the first message in the batch for consistency
+                 const primaryMsgId = messages.length > 0 ? messages[0].id : `usr_${Date.now()}`;
+                 
+                 await dbService.saveWhatsAppChat({
+                    session_name: sessionName,
+                    sender_id: senderId,
+                    recipient_id: sessionName, // Page is recipient
+                    message_id: primaryMsgId,
+                    text: finalOutput, // Save the FULL processed text (including image analysis)
+                    timestamp: Date.now(),
+                    status: 'received',
+                    reply_by: 'user',
+                    is_group: isGroup,
+                    group_id: isGroup ? senderId : null
+                });
+             } catch (e) {
+                 console.warn(`[WA] Failed to save user message (Persistence): ${e.message}`);
+             }
+        }
+
         const isLocked = await dbService.checkWhatsAppLockStatus(sessionName, senderId);
         if (isLocked) {
             console.log(`[WA] Conversation with ${senderId} locked due to repeated failures.`);
@@ -939,7 +985,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                      botMessageIds.add(sentMessageId);
                      
                      // Add to Recent Bot Replies (Text Guard)
-                     recentBotReplies.set(senderId, { text: finalReplyText.trim(), timestamp: Date.now() });
+                     // Update: Store NORMALIZED text for robust matching
+                     recentBotReplies.set(senderId, { text: normalizeText(finalReplyText), timestamp: Date.now() });
                      
                      // Auto-clear after 2 minutes to save memory
                      setTimeout(() => {

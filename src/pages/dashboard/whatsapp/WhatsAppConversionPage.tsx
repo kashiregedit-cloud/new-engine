@@ -56,49 +56,46 @@ export default function WhatsAppConversionPage() {
 
   const fetchContacts = async (sessionName: string) => {
     try {
-        // Assuming backend is on localhost:3001 - Adjust if using env vars
-        const res = await fetch(`http://localhost:3001/api/whatsapp/contacts/${sessionName}`);
-        const data = await res.json();
-        if (Array.isArray(data)) {
-            const map: Record<string, boolean> = {};
-            data.forEach((c: any) => map[c.phone_number] = c.is_locked);
-            setLockedContacts(map);
-        }
-    } catch (e) { console.error("Error fetching contacts:", e); }
+      const { data, error } = await supabase
+        .from('whatsapp_contacts')
+        .select('phone_number, is_locked')
+        .eq('session_name', sessionName)
+        .eq('is_locked', true);
+      if (error) throw error;
+      const map: Record<string, boolean> = {};
+      (data || []).forEach((c: any) => { map[c.phone_number] = c.is_locked; });
+      setLockedContacts(map);
+    } catch (e) {
+      console.error("Error fetching contacts:", e);
+    }
   };
 
   const handleToggleLock = async (phoneNumber: string) => {
-      if (!activeSessionName) return;
-      const currentStatus = !!lockedContacts[phoneNumber];
-      const newStatus = !currentStatus;
-      
-      try {
-          // Optimistic update
-        setLockedContacts(prev => ({ ...prev, [phoneNumber]: newStatus }));
-        
-        // Use port 3001 (Backend Default) instead of 5000
-        const res = await fetch(`http://localhost:3001/api/whatsapp/toggle-lock`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                sessionName: activeSessionName, 
-                phoneNumber, 
-                isLocked: newStatus 
-            })
-        });
-          
-          if (!res.ok) {
-              // Revert if failed
-              setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
-              toast.error("Failed to update lock status");
-          } else {
-              toast.success(newStatus ? "Conversation Locked (Handover)" : "Conversation Unlocked (AI Active)");
-          }
-      } catch (e) {
-          console.error(e);
-          setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
-          toast.error("Error toggling lock");
+    if (!activeSessionName) return;
+    const currentStatus = !!lockedContacts[phoneNumber];
+    const newStatus = !currentStatus;
+    try {
+      // Optimistic UI update
+      setLockedContacts(prev => ({ ...prev, [phoneNumber]: newStatus }));
+      const { error } = await (supabase
+        .from('whatsapp_contacts') as any)
+        .upsert({
+          session_name: activeSessionName,
+          phone_number: phoneNumber,
+          is_locked: newStatus,
+          last_interaction: new Date().toISOString()
+        }, { onConflict: 'session_name,phone_number' });
+      if (error) {
+        setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
+        toast.error("Failed to update lock status");
+      } else {
+        toast.success(newStatus ? "Conversation Locked (Handover)" : "Conversation Unlocked (AI Active)");
       }
+    } catch (e) {
+      console.error(e);
+      setLockedContacts(prev => ({ ...prev, [phoneNumber]: currentStatus }));
+      toast.error("Error toggling lock");
+    }
   };
 
   const toggleExpand = (id: string | number) => {
