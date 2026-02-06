@@ -74,17 +74,18 @@ export default function WhatsAppConversionPage() {
       
       try {
           // Optimistic update
-          setLockedContacts(prev => ({ ...prev, [phoneNumber]: newStatus }));
-          
-          const res = await fetch(`http://localhost:5000/api/whatsapp/toggle-lock`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                  sessionName: activeSessionName, 
-                  phoneNumber, 
-                  isLocked: newStatus 
-              })
-          });
+        setLockedContacts(prev => ({ ...prev, [phoneNumber]: newStatus }));
+        
+        // Use port 3001 (Backend Default) instead of 5000
+        const res = await fetch(`http://localhost:3001/api/whatsapp/toggle-lock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                sessionName: activeSessionName, 
+                phoneNumber, 
+                isLocked: newStatus 
+            })
+        });
           
           if (!res.ok) {
               // Revert if failed

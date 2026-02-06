@@ -223,8 +223,8 @@ export default function WhatsAppControlPage() {
         fetchMetrics(sessionName);
         fetchRecent(sessionName);
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error";
+    } catch (error: any) {
+      const message = error.message || (typeof error === 'string' ? error : "Unknown error");
       toast.error("Failed to save settings: " + message);
       console.error(error);
     } finally {
