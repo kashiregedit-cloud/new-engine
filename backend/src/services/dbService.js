@@ -281,7 +281,7 @@ async function getMessageById(messageId) {
 }
 
 // 12. Create WhatsApp Entry (whatsapp_message_database)
-async function createWhatsAppEntry(sessionName, userId, planDays = 30, initialStatus = 'connected') {
+async function createWhatsAppEntry(sessionName, userId, planDays = 30, initialStatus = 'connected', userEmail = null) {
     // Check if it already exists
     const { data: existing } = await supabase
         .from('whatsapp_message_database')
@@ -300,6 +300,7 @@ async function createWhatsAppEntry(sessionName, userId, planDays = 30, initialSt
         .insert({
             session_name: sessionName,
             user_id: userId,
+            email: userEmail,              // Save Email for Team Sharing
             active: true,
             status: initialStatus,         // Use detected status
             reply_message: true,           // Auto-enable bot

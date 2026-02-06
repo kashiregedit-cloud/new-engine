@@ -34,7 +34,8 @@ const recentMessageIds = new Set();
 // Bot Message IDs (to distinguish Bot vs Admin replies)
 const botMessageIds = new Set();
 // Recent Bot Replies (Text-based Echo Guard)
-const recentBotReplies = new Map(); // Key: recipientId, Value: { text, timestamp }
+// Key: recipientId, Value: Array of { text, timestamp }
+const recentBotReplies = new Map();
 
 // --- MEMORY GARBAGE COLLECTOR (Safety for 100+ Users) ---
 // Runs every 5 minutes to clean stale data and prevent memory leaks.
@@ -43,10 +44,14 @@ setInterval(() => {
     let cleaned = 0;
 
     // 1. Clean recentBotReplies (Older than 3 mins)
-    for (const [key, val] of recentBotReplies.entries()) {
-        if (now - val.timestamp > 3 * 60 * 1000) {
+    for (const [key, replies] of recentBotReplies.entries()) {
+        // Filter out old replies
+        const validReplies = replies.filter(r => now - r.timestamp < 3 * 60 * 1000);
+        if (validReplies.length === 0) {
             recentBotReplies.delete(key);
             cleaned++;
+        } else if (validReplies.length !== replies.length) {
+            recentBotReplies.set(key, validReplies);
         }
     }
 
@@ -158,25 +163,28 @@ const handleWebhook = async (req, res) => {
 
             // 2. Text-Based Echo Guard (In-Memory)
             const recipient = payload.to;
-            const recentReply = recentBotReplies.get(recipient);
-            if (recentReply) {
-                    const timeDiff = Date.now() - recentReply.timestamp;
-                    // 10 Seconds Window for Echo
-                    if (timeDiff < 10000) { 
-                        // Compare Text (Simple Include or Exact Match)
-                        // Update: Use Normalize for Robustness
-                        const incomingText = (payload.body || '').trim();
-                        const normalizedIncoming = normalizeText(incomingText);
-                        const normalizedStored = recentReply.text; // Stored as normalized
+            const recentReplies = recentBotReplies.get(recipient);
+            if (recentReplies && Array.isArray(recentReplies)) {
+                const incomingText = (payload.body || '').trim();
+                const normalizedIncoming = normalizeText(incomingText);
+                
+                // Check against ALL recent replies in the window
+                const match = recentReplies.find(reply => {
+                    const timeDiff = Date.now() - reply.timestamp;
+                    if (timeDiff >= 20000) return false; // 20s Window (Increased)
+                    
+                    const normalizedStored = reply.text;
+                    // Robust Check: Exact, Includes, or 80% Similarity
+                    return normalizedIncoming === normalizedStored || 
+                           normalizedIncoming.includes(normalizedStored) || 
+                           normalizedStored.includes(normalizedIncoming);
+                });
 
-                        const isMatch = normalizedIncoming === normalizedStored || normalizedIncoming.includes(normalizedStored) || normalizedStored.includes(normalizedIncoming);
-                        
-                        if (isMatch) {
-                            console.log(`[WA] Ignoring fromMe message (Text Match): "${incomingText.substring(0,30)}..."`);
-                            return;
-                        }
-                    }
+                if (match) {
+                    console.log(`[WA] Ignoring fromMe message (Text Match): "${incomingText.substring(0,30)}..."`);
+                    return;
                 }
+            }
 
                 // 4. TERTIARY CHECK: DB-Based Echo Guard (3s Wait + 20 Msg Check)
                 // User Instruction: Wait 3s, then check last 20 messages in DB for 100% match from 'bot'
@@ -320,20 +328,24 @@ const handleWebhook = async (req, res) => {
         // Checks if we just sent this exact text to this user.
         // Solves "Infinite Loop" if WAHA echoes bot messages as incoming user messages.
         const sender = payload.from;
-        if (sender && recentBotReplies.has(sender)) {
-            const recent = recentBotReplies.get(sender);
-            const timeDiff = Date.now() - recent.timestamp;
-            
-            if (timeDiff < 15000) { // 15 Seconds Window
-                const incomingText = normalizeText(payload.body || '');
-                const sentText = recent.text; // Already normalized
-                
-                // Check for exact match or strong inclusion
-                if (incomingText && sentText && (incomingText === sentText || incomingText.includes(sentText) || sentText.includes(incomingText))) {
-                    console.log(`[WA] Ignoring INCOMING message (Failsafe Echo Match): "${(payload.body || '').substring(0,30)}..." from ${sender}`);
-                    return;
-                }
-            }
+        const recentReplies = recentBotReplies.get(sender);
+        
+        if (recentReplies && Array.isArray(recentReplies)) {
+             const incomingText = normalizeText(payload.body || '');
+             
+             // Check against ALL recent replies
+             const match = recentReplies.find(reply => {
+                 const timeDiff = Date.now() - reply.timestamp;
+                 if (timeDiff >= 20000) return false;
+                 
+                 const sentText = reply.text;
+                 return incomingText && sentText && (incomingText === sentText || incomingText.includes(sentText) || sentText.includes(incomingText));
+             });
+
+             if (match) {
+                 console.log(`[WA] Ignoring INCOMING message (Failsafe Echo Match): "${(payload.body || '').substring(0,30)}..." from ${sender}`);
+                 return;
+             }
         }
 
         await queueMessage(session, payload);
@@ -396,21 +408,65 @@ async function queueMessage(session, messagePayload) {
     // User Update: Do NOT convert @lid to @c.us. Use as is.
     if (senderId && senderId.includes('@lid')) {
         console.log(`[WA] Processing message from Linked Device (@lid): ${senderId}`);
+        
+        // --- LID ADMIN GUARD (Emoji & Lock Logic) ---
+        // Handles case where WAHA reports fromMe=false for Linked Devices
+        const msgBody = (messageText || '').trim();
+        
+        // 1. Check for Lock/Unlock Commands
+        const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+        const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+        
+        const isLock = LOCK_EMOJIS.some(e => msgBody.includes(e));
+        const isUnlock = UNLOCK_EMOJIS.some(e => msgBody.includes(e));
+        
+        if (isLock || isUnlock) {
+             const command = isLock ? 'LOCK' : 'UNLOCK';
+             console.log(`[WA] LID Admin Command Detected: ${command} from ${senderId}`);
+             
+             // Target is the Recipient (User)
+             const lockTarget = messagePayload.to; 
+             if (lockTarget && !lockTarget.includes('@lid')) { // Don't lock self
+                 try {
+                     await dbService.toggleWhatsAppLock(sessionName, lockTarget, isLock);
+                     const ck = `${sessionName}_${lockTarget}`;
+                     if (isLock) handoverMap.set(ck, Date.now() + 24 * 60 * 60 * 1000);
+                     else handoverMap.delete(ck);
+                     console.log(`[WA] Lock Status Updated for ${lockTarget}`);
+                 } catch (e) {
+                     console.error(`[WA] Failed to toggle lock for LID command: ${e.message}`);
+                 }
+             }
+             return; // STOP Processing (Don't Queue)
+        }
+        
+        // 2. Check for Emoji-Only Reaction (e.g. Thumbs Up)
+        // Regex for string containing ONLY emojis and whitespace (Includes Extended Pictographics)
+        const emojiRegex = /^[\p{Emoji}\p{Extended_Pictographic}\s]+$/u;
+        if (emojiRegex.test(msgBody)) {
+             console.log(`[WA] Ignoring LID Emoji Reaction: "${msgBody}" from ${senderId}`);
+             return; // STOP Processing
+        }
     }
 
     // --- FAILSAFE ECHO GUARD (For "Received" messages that are actually echoes) ---
     // Prevents "Ami Ami Ami" Loop / Spam
-    const recentReply = recentBotReplies.get(senderId);
-    if (recentReply) {
-        const timeDiff = Date.now() - recentReply.timestamp;
-        if (timeDiff < 20000) { // 20s window (increased for safety)
-            const incomingText = normalizeText(messageText);
-            const storedText = recentReply.text;
-            // Check for exact match or strong similarity
-            if (incomingText && storedText && (incomingText === storedText || incomingText.includes(storedText) || storedText.includes(incomingText))) {
-                 console.log(`[WA] Failsafe Echo Guard triggered! Ignoring message from ${senderId} (Matches recent bot reply).`);
-                 return;
-            }
+    const recentReplies = recentBotReplies.get(senderId);
+    if (recentReplies && Array.isArray(recentReplies)) {
+        const incomingText = normalizeText(messageText);
+        
+        // Check against ALL recent replies
+        const match = recentReplies.find(reply => {
+            const timeDiff = Date.now() - reply.timestamp;
+            if (timeDiff >= 20000) return false;
+            
+            const storedText = reply.text;
+            return incomingText && storedText && (incomingText === storedText || incomingText.includes(storedText) || storedText.includes(incomingText));
+        });
+
+        if (match) {
+             console.log(`[WA] Failsafe Echo Guard triggered! Ignoring message from ${senderId} (Matches recent bot reply).`);
+             return;
         }
     }
 
@@ -1072,7 +1128,9 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         if (finalReplyText) {
              // PRE-REGISTER to prevent Race Condition (Echo Guard)
              // We add it to the map BEFORE sending, so if the webhook hits immediately, it's already there.
-             recentBotReplies.set(senderId, { text: normalizeText(finalReplyText), timestamp: Date.now() });
+             const existing = recentBotReplies.get(senderId) || [];
+             existing.push({ text: normalizeText(finalReplyText), timestamp: Date.now() });
+             recentBotReplies.set(senderId, existing);
 
              const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
              if (sentData && sentData.id) {
@@ -1098,6 +1156,14 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Send Images
         for (const img of extractedImages) {
             console.log(`[WA] Sending Extracted Image: ${img.title} -> ${img.url}`);
+            
+            // Register Image Caption for Echo Guard
+            if (img.title && img.title.trim()) {
+                 const existing = recentBotReplies.get(senderId) || [];
+                 existing.push({ text: normalizeText(img.title), timestamp: Date.now() });
+                 recentBotReplies.set(senderId, existing);
+            }
+
             await whatsappService.sendImage(sessionName, senderId, img.url, img.title);
         }
 

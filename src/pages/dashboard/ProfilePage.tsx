@@ -219,10 +219,10 @@ export default function ProfilePage() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Team Management</CardTitle>
-                <CardDescription>Share your account access (Max 10 members)</CardDescription>
+                <CardDescription>Share your account access</CardDescription>
               </div>
-              <Badge variant={teamMembers.length >= 10 ? "destructive" : "secondary"}>
-                {teamMembers.length}/10 Members
+              <Badge variant="secondary">
+                {teamMembers.length} Members
               </Badge>
             </div>
           </CardHeader>

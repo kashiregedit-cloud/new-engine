@@ -196,7 +196,7 @@ router.post('/session/create', async (req, res) => {
         }
         
         // 3. Insert into whatsapp_message_database
-        const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id, duration, detectedStatus);
+        const dbEntry = await dbService.createWhatsAppEntry(finalName, user.id, duration, detectedStatus, user.email);
         
         let qr = null;
 

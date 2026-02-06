@@ -170,7 +170,8 @@ USING (auth.uid()::text = user_id);
 -- NOTE: Table name is 'whatsapp_message_database', NOT 'whatsapp_sessions'
 ALTER TABLE public.whatsapp_message_database 
 ADD COLUMN IF NOT EXISTS expires_at timestamp with time zone,
-ADD COLUMN IF NOT EXISTS plan_days integer DEFAULT 30;
+ADD COLUMN IF NOT EXISTS plan_days integer DEFAULT 30,
+ADD COLUMN IF NOT EXISTS email text;
 
 -- Ensure RLS allows insert/update/delete for backend (or users if needed)
 ALTER TABLE public.whatsapp_message_database ENABLE ROW LEVEL SECURITY;

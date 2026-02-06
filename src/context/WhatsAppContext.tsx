@@ -72,8 +72,10 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
 
       // Determine target email
       let targetEmail = user.email;
+      let isViewingOwner = false;
       if (viewMode === 'team' && isMember && ownerEmail) {
           targetEmail = ownerEmail;
+          if (ownerEmail !== user.email) isViewingOwner = true;
       } else if (viewMode === 'team' && !isMember) {
           targetEmail = user.email;
       }
@@ -87,17 +89,22 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
 
       // 3. Filter by target email from Supabase
       // Note: We switched to whatsapp_message_database which uses user_id
-      // For now, we assume user_id matches the authenticated user.
+      // For shared sessions (Team Mode), we use 'email' column.
+      // For own sessions, we use 'user_id' (to support old sessions without email).
       
-      let targetUserId = user.id;
-      // If team mode and owner email is different, we would need owner's ID.
-      // For now, let's try to find if we can filter by session_name directly or just use current user.
-      
-      const { data: mySessions } = await supabase
+      let query = supabase
           .from('whatsapp_message_database')
-          .select('id, session_name, expires_at')
-          .eq('user_id', targetUserId)
-          .returns<{ id: number; session_name: string; expires_at: string | null }[]>();
+          .select('id, session_name, expires_at');
+        
+      if (isViewingOwner) {
+          // Viewing someone else's sessions -> Must match email
+          query = query.eq('email', targetEmail);
+      } else {
+          // Viewing my own sessions -> Match user_id
+          query = query.eq('user_id', user.id);
+      }
+
+      const { data: mySessions } = await query.returns<{ id: number; session_name: string; expires_at: string | null }[]>();
         
       const dbSessionMap = new Map(mySessions?.map(s => [s.session_name, s]) || []);
       let allowedNames = Array.from(dbSessionMap.keys());

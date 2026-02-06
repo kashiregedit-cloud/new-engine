@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_message_database (
     plan_days INTEGER DEFAULT 30,
     qr_code TEXT,
     api_key TEXT,
+    email TEXT, -- Added for team sharing
     cheap_engine BOOLEAN DEFAULT TRUE,
     block_emoji TEXT,
     unblock_emoji TEXT
@@ -47,6 +48,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'whatsapp_message_database' AND column_name = 'unblock_emoji') THEN
         ALTER TABLE whatsapp_message_database ADD COLUMN unblock_emoji TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'whatsapp_message_database' AND column_name = 'email') THEN
+        ALTER TABLE whatsapp_message_database ADD COLUMN email TEXT;
     END IF;
 END $$;
 
