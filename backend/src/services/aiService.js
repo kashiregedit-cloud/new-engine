@@ -355,7 +355,8 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
     const MODEL_ALIASES = {
-        // 'gemini-2.5-flash': 'gemini-2.0-flash', // REMOVED: User wants explicit control for Own API
+        'gemini-2.5-flash': 'gemini-2.0-flash', // Restored: Maps project standard to actual API model
+        'gemini2.5-flash': 'gemini-2.0-flash', // Handle User Typo
         'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // User Alias
         'groq-fast': 'llama-3.3-70b-versatile', 
         'groq-speed': 'llama-3.1-8b-instant', 
@@ -479,10 +480,14 @@ Rules:
                     baseURL: baseURL,
                     timeout: 25000 // 25s Timeout for User Keys
                 });
-                console.log(`[AI] Phase 1: Calling User Key (${currentProvider}/${defaultModel})...`);
+                // Normalize Model Name for User Keys
+                // User Requirement: Use EXACTLY what user typed. No mapping.
+                let modelToUse = pageConfig.chatmodel || defaultModel;
+
+                console.log(`[AI] Phase 1: Calling User Key (${currentProvider}/${modelToUse})...`);
 
                 const completion = await openai.chat.completions.create({
-                    model: defaultModel,
+                    model: modelToUse,
                     messages: messages,
                     response_format: { type: "json_object" }
                 });
@@ -497,9 +502,9 @@ Rules:
                     try {
                         const parsed = JSON.parse(rawContent);
                         if (!parsed.reply) parsed.reply = parsed.response || parsed.text;
-                        return { ...parsed, token_usage: tokenUsage + totalTokenUsage, model: defaultModel };
+                        return { ...parsed, token_usage: tokenUsage + totalTokenUsage, model: modelToUse };
                     } catch (e) {
-                        return { reply: rawContent, sentiment: 'neutral', model: defaultModel, token_usage: tokenUsage + totalTokenUsage };
+                        return { reply: rawContent, sentiment: 'neutral', model: modelToUse, token_usage: tokenUsage + totalTokenUsage };
                     }
                 }
             } catch (error) {

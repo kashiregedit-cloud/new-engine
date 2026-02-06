@@ -3,7 +3,7 @@ import { BACKEND_URL } from "@/config";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Save, Bot, Lock, Sparkles, Key, Check } from "lucide-react";
+import { Save, Bot, Lock, Sparkles, Key, Check, Image } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -77,10 +77,11 @@ export default function MessengerSettingsPage() {
   const [messageCredit, setMessageCredit] = useState(0);
   const [isOwner, setIsOwner] = useState(true);
   
-  // New State for System Prompt Modal
+  // New State for System// Prompt State
   const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("text"); // Add activeTab state
   const [tempPrompt, setTempPrompt] = useState("");
-  const [tempImagePrompt, setTempImagePrompt] = useState(""); // New State for Image Prompt
+  const [tempImagePrompt, setTempImagePrompt] = useState("");
   const [promptSaving, setPromptSaving] = useState(false);
   
   // New State for Behavior Settings
@@ -424,7 +425,8 @@ export default function MessengerSettingsPage() {
       const { error: dbError } = await (supabase
         .from('fb_message_database') as any)
         .update({
-            text_prompt: values.text_prompt
+            text_prompt: values.text_prompt,
+            image_prompt: tempImagePrompt // Save Image Prompt
         })
         .eq('id', parseInt(dbId));
 
@@ -503,14 +505,24 @@ export default function MessengerSettingsPage() {
              Connect your preferred AI brain for your Facebook Page.
            </p>
         </div>
-        <Button 
-            onClick={() => setIsPromptOpen(true)} 
-            variant="outline"
-            className="border-purple-500 text-purple-600 hover:bg-purple-50"
-        >
-            <Bot className="mr-2 h-4 w-4" />
-            Edit System Prompt
-        </Button>
+        <div className="flex gap-2">
+            <Button 
+                onClick={() => { setActiveTab("text"); setIsPromptOpen(true); }} 
+                variant="outline"
+                className="border-purple-500 text-purple-600 hover:bg-purple-50"
+            >
+                <Bot className="mr-2 h-4 w-4" />
+                Edit System Prompt
+            </Button>
+            <Button 
+                onClick={() => { setActiveTab("image"); setIsPromptOpen(true); }} 
+                variant="outline"
+                className="border-blue-500 text-blue-600 hover:bg-blue-50"
+            >
+                <Image className="mr-2 h-4 w-4" />
+                Edit Image Prompt
+            </Button>
+        </div>
       </div>
 
       {/* System Prompt Full Screen Dialog */}
@@ -523,7 +535,7 @@ export default function MessengerSettingsPage() {
                 </DialogDescription>
             </DialogHeader>
             <div className="flex-1 py-4 overflow-hidden">
-                <Tabs defaultValue="text" className="h-full flex flex-col">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
                     <TabsList>
                         <TabsTrigger value="text">System Prompt (Text)</TabsTrigger>
                         <TabsTrigger value="image">Image Detection Prompt</TabsTrigger>

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload, Users, MessageSquareText } from "lucide-react";
+import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload, Users, MessageSquareText, Hand, StopCircle, RefreshCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -20,8 +20,9 @@ interface WhatsAppConfig {
   group_reply: boolean;
   lock_emojis: string;
   unlock_emojis: string;
+  check_conversion: number; // Added check_conversion
   image_prompt: string;
-  [key: string]: boolean | string; // Allow index access for updates
+  [key: string]: boolean | string | number; // Allow index access for updates
 }
 
 export default function WhatsAppControlPage() {
@@ -43,6 +44,7 @@ export default function WhatsAppControlPage() {
     group_reply: false,
     lock_emojis: "",
     unlock_emojis: "",
+    check_conversion: 20, // Default 20
     image_prompt: ""
   });
   const [stats, setStats] = useState({
@@ -116,6 +118,7 @@ export default function WhatsAppControlPage() {
           group_reply: row.group_reply ?? false,
           lock_emojis: row.lock_emojis ?? "",
           unlock_emojis: row.unlock_emojis ?? "",
+          check_conversion: row.check_conversion ?? 20,
           image_prompt: row.image_prompt ?? ""
         });
 
@@ -196,7 +199,7 @@ export default function WhatsAppControlPage() {
       const validColumns = [
         'reply_message', 'swipe_reply', 'image_detection', 'image_send', 
         'order_tracking', 'audio_detection', 'file_upload', 'group_reply',
-        'lock_emojis', 'unlock_emojis'
+        'lock_emojis', 'unlock_emojis', 'check_conversion'
       ];
 
       const updates: any = {};
@@ -427,21 +430,6 @@ export default function WhatsAppControlPage() {
               onCheckedChange={(c) => setConfig({...config, image_detection: c})}
             />
           </CardContent>
-           {config.image_detection && (
-                <div className="px-6 pb-6 pt-0">
-                    <Label className="text-sm font-semibold mb-2 block">Custom Image Detection Prompt</Label>
-                    <textarea 
-                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                        placeholder="E.g., Analyze this image and identify the product name, price, and color. Ignore selfies."
-                        value={config.image_prompt || ""}
-                        onChange={(e) => setConfig({...config, image_prompt: e.target.value})}
-                    />
-                    <p className="text-xs text-muted-foreground mt-2">
-                        Customize how the AI analyzes images (e.g., for Cosmetics, Education, Health pages). 
-                        Leave empty for default behavior.
-                    </p>
-                </div>
-            )}
         </Card>
 
         {/* Image Send */}
@@ -539,44 +527,69 @@ export default function WhatsAppControlPage() {
           </CardContent>
         </Card>
 
-        {/* Lock Emojis */}
-        <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-red-100 text-red-600 rounded-full">
-                 <Lock size={24} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-lg font-semibold">Lock Emojis</Label>
-                <p className="text-sm text-muted-foreground">Emojis that trigger a lock (comma separated).</p>
-              </div>
-            </div>
-            <Input 
-              placeholder="e.g. 🛑,🔒,⛔" 
-              value={config.lock_emojis}
-              onChange={(e) => setConfig({...config, lock_emojis: e.target.value})}
-            />
-          </CardContent>
-        </Card>
+        {/* Human Handover / Block Logic Section */}
+        <Card className="bg-card border-border shadow-sm col-span-1 lg:col-span-2">
+            <CardHeader>
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-100 text-red-600 rounded-lg">
+                        <Hand size={24} />
+                    </div>
+                    <div>
+                        <CardTitle>Human Handover Settings</CardTitle>
+                        <CardDescription>Configure how and when the AI should pause for a human agent.</CardDescription>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="grid gap-6 md:grid-cols-3">
+                
+                <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                        <StopCircle className="w-4 h-4 text-red-500" />
+                        Lock Emoji
+                    </Label>
+                    <Input 
+                        placeholder="e.g. 🛑,🔒,⛔" 
+                        value={config.lock_emojis}
+                        onChange={(e) => setConfig({...config, lock_emojis: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        AI stops if this emoji is found in recent messages.
+                    </p>
+                </div>
 
-        {/* Unlock Emojis */}
-        <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full">
-                 <Lock size={24} className="text-emerald-600" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-lg font-semibold">Unlock Emojis</Label>
-                <p className="text-sm text-muted-foreground">Emojis that trigger an unlock (comma separated).</p>
-              </div>
-            </div>
-            <Input 
-              placeholder="e.g. 🟢,🔓,✅" 
-              value={config.unlock_emojis}
-              onChange={(e) => setConfig({...config, unlock_emojis: e.target.value})}
-            />
-          </CardContent>
+                <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                        <RefreshCcw className="w-4 h-4 text-green-500" />
+                        Unlock Emoji
+                    </Label>
+                    <Input 
+                        placeholder="e.g. 🟢,🔓,✅" 
+                        value={config.unlock_emojis}
+                        onChange={(e) => setConfig({...config, unlock_emojis: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        AI resumes if this emoji is sent after a block.
+                    </p>
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4 text-blue-500" />
+                        Check Conversion Limit
+                    </Label>
+                    <Input 
+                        type="number" 
+                        min={1}
+                        max={50}
+                        value={config.check_conversion} 
+                        onChange={(e) => setConfig({...config, check_conversion: parseInt(e.target.value) || 20})}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Number of recent messages to check for emojis.
+                    </p>
+                </div>
+
+            </CardContent>
         </Card>
 
       </div>

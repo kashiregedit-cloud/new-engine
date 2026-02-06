@@ -343,7 +343,16 @@ const handleWebhook = async (req, res) => {
 
 // Queue Message for Debounce
 async function queueMessage(session, messagePayload) {
-    const senderId = messagePayload.from; // e.g., 12345678@c.us
+    let senderId = messagePayload.from; // e.g., 12345678@c.us
+    
+    // Fix for Linked Devices (@lid) - Normalize to @c.us for Reply Capability
+    // WAHA/WhatsApp cannot reliably reply to @lid. We must use @c.us (Phone Number).
+    if (senderId && senderId.includes('@lid')) {
+        const originalId = senderId;
+        senderId = senderId.replace('@lid', '@c.us');
+        console.log(`[WA] Normalized @lid sender: ${originalId} -> ${senderId}`);
+    }
+
     const sessionName = session; // Using WAHA Session as Session Name
     let messageText = messagePayload.body || '';
     
@@ -736,6 +745,9 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
 
         // Gatekeeper Logic: Allow if Own API is used, otherwise require Credit
+        // DEBUG LOGGING
+        console.log(`[WA Gatekeeper] Config for ${sessionName}: Credits=${pageConfig.message_credit}, CheapEngine=${pageConfig.cheap_engine}, APIKey=${pageConfig.api_key ? 'YES' : 'NO'}`);
+
         const hasOwnKey = (pageConfig.api_key && pageConfig.api_key.length > 5 && pageConfig.cheap_engine === false);
 
         if (hasOwnKey) {
@@ -744,7 +756,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
              // Use Centralized User Credit (n8n style shared pool)
              // We pass 'sessionName' as pageId, but we need to ensure the DB service handles it
              if (pageConfig.message_credit <= 0) {
-                 console.log(`[WA] Session ${sessionName} blocked by Gatekeeper (No Credit & No Own API).`);
+                 console.log(`[WA] Session ${sessionName} blocked by Gatekeeper (No Credit & No Own API). Credits: ${pageConfig.message_credit}`);
                  // Log System Error
                  await dbService.saveWhatsAppChat({
                     session_name: sessionName,

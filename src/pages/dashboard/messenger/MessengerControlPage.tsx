@@ -233,14 +233,6 @@ export default function MessengerControlPage() {
           </p>
         </div>
         <div className="flex gap-2">
-            <Button 
-                onClick={() => setIsPromptOpen(true)} 
-                variant="outline"
-                className="border-purple-500 text-purple-600 hover:bg-purple-50"
-            >
-                <Bot className="mr-2 h-4 w-4" />
-                Edit System Prompt
-            </Button>
             <Button onClick={handleSave} disabled={saving} size="lg" className="shadow-lg">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save Changes
@@ -430,50 +422,6 @@ export default function MessengerControlPage() {
 
         </CardContent>
       </Card>
-
-      {/* System Prompt Full Screen Dialog */}
-      <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
-        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
-            <DialogHeader>
-                <DialogTitle>Edit System Prompt</DialogTitle>
-                <DialogDescription>
-                    Define your AI's persona, knowledge base, and behavior rules. This update is independent of your plan.
-                </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 py-4">
-                <Textarea 
-                    value={tempPrompt}
-                    onChange={(e) => setTempPrompt(e.target.value)}
-                    className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
-                    placeholder="You are a helpful assistant..."
-                />
-            </div>
-            <DialogFooter className="flex justify-between items-center sm:justify-between w-full">
-                <div className="flex gap-2">
-                    <Button 
-                        variant="secondary" 
-                        onClick={handleOptimizePrompt} 
-                        disabled={optimizing || promptSaving}
-                        className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                    >
-                        {optimizing ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
-                        ) : (
-                            <Sparkles className="mr-2 h-4 w-4" />
-                        )}
-                        Auto-Format for Zero Cost
-                    </Button>
-                </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
-                    <Button onClick={handleSavePrompt} disabled={promptSaving || optimizing}>
-                        {promptSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" /> : <Save className="mr-2 h-4 w-4" />}
-                        Save Prompt Only
-                    </Button>
-                </div>
-            </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { BACKEND_URL } from "@/config";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Save, Bot, Lock, Sparkles, Key, Check, RefreshCw, ArrowLeft, CreditCard } from "lucide-react";
+import { Save, Bot, Lock, Sparkles, Key, Check, RefreshCw, ArrowLeft, CreditCard, Image } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
   CardContent,
@@ -68,7 +69,9 @@ export default function WhatsAppSettingsPage() {
   
   // New State for System Prompt Modal
   const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("text"); // Add activeTab state
   const [tempPrompt, setTempPrompt] = useState("");
+  const [tempImagePrompt, setTempImagePrompt] = useState("");
   const [promptSaving, setPromptSaving] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   
@@ -270,6 +273,7 @@ export default function WhatsAppSettingsPage() {
         });
         
         setTempPrompt(dbRow.text_prompt || "");
+        setTempImagePrompt(dbRow.image_prompt || "");
       }
     } catch (error) {
       console.error("Error fetching config:", error);
@@ -283,15 +287,26 @@ export default function WhatsAppSettingsPage() {
     if (!dbId) return;
     setPromptSaving(true);
     try {
+        const updates: any = {};
+        if (activeTab === "text") {
+            updates.text_prompt = tempPrompt;
+        } else {
+            updates.image_prompt = tempImagePrompt;
+        }
+
         const { error } = await (supabase
             .from('whatsapp_message_database') as any)
-            .update({ text_prompt: tempPrompt })
+            .update(updates)
             .eq('id', parseInt(dbId));
 
         if (error) throw error;
         
-        form.setValue('text_prompt', tempPrompt);
-        toast.success("System prompt updated successfully!");
+        if (activeTab === "text") {
+            form.setValue('text_prompt', tempPrompt);
+            toast.success("System prompt updated successfully!");
+        } else {
+            toast.success("Image prompt updated successfully!");
+        }
         setIsPromptOpen(false);
     } catch (error: any) {
         console.error("Error saving prompt:", error);
@@ -440,34 +455,66 @@ export default function WhatsAppSettingsPage() {
       <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
         <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
             <DialogHeader>
-                <DialogTitle>Edit System Prompt</DialogTitle>
+                <DialogTitle>Edit AI Prompts</DialogTitle>
                 <DialogDescription>
-                    Define your AI's persona, knowledge base, and behavior rules.
+                    Configure the behavior and persona of your WhatsApp AI.
                 </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 py-4">
-                <Textarea 
-                    value={tempPrompt}
-                    onChange={(e) => setTempPrompt(e.target.value)}
-                    className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
-                    placeholder="You are a helpful assistant..."
-                />
-            </div>
-            <DialogFooter className="flex justify-between items-center sm:justify-between w-full">
+            
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+                <TabsList>
+                    <TabsTrigger value="text">System Prompt (Text)</TabsTrigger>
+                    <TabsTrigger value="image">Image Detection Prompt</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="text" className="flex-1 mt-4">
+                    <Textarea 
+                        value={tempPrompt}
+                        onChange={(e) => setTempPrompt(e.target.value)}
+                        className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
+                        placeholder="You are a helpful assistant..."
+                    />
+                </TabsContent>
+
+                <TabsContent value="image" className="flex-1 mt-4">
+                    <div className="flex flex-col h-full gap-4">
+                        <div className="bg-muted/50 p-4 rounded-lg">
+                            <h4 className="font-semibold mb-2 flex items-center gap-2">
+                                <Image size={16} />
+                                About Image Prompts
+                            </h4>
+                            <p className="text-sm text-muted-foreground">
+                                This prompt guides the AI when analyzing images sent by users. 
+                                Tell the AI what to look for (products, text, defects) and how to respond.
+                            </p>
+                        </div>
+                        <Textarea 
+                            value={tempImagePrompt}
+                            onChange={(e) => setTempImagePrompt(e.target.value)}
+                            className="w-full flex-1 font-mono text-sm leading-relaxed p-4 resize-none"
+                            placeholder="E.g., Analyze this image and identify the product name, price, and color. Ignore selfies."
+                        />
+                    </div>
+                </TabsContent>
+            </Tabs>
+
+            <DialogFooter className="flex justify-between items-center sm:justify-between w-full mt-4">
                 <div className="flex gap-2">
-                    <Button 
-                        variant="secondary" 
-                        onClick={handleOptimizePrompt} 
-                        disabled={optimizing || promptSaving}
-                        className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                    >
-                        {optimizing ? (
-                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
-                        ) : (
-                            <Sparkles className="mr-2 h-4 w-4" />
-                        )}
-                        Auto-Format for Zero Cost
-                    </Button>
+                    {activeTab === "text" && (
+                        <Button 
+                            variant="secondary" 
+                            onClick={handleOptimizePrompt} 
+                            disabled={optimizing || promptSaving}
+                            className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                        >
+                            {optimizing ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
+                            ) : (
+                                <Sparkles className="mr-2 h-4 w-4" />
+                            )}
+                            Auto-Format for Zero Cost
+                        </Button>
+                    )}
                 </div>
                 <div className="flex gap-2">
                     <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
@@ -612,15 +659,26 @@ export default function WhatsAppSettingsPage() {
                     </div>
                 )}
               <div className="flex justify-between items-center pt-4 border-t">
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    onClick={() => setIsPromptOpen(true)}
-                    className="gap-2"
-                  >
-                    <Bot size={16} />
-                    Edit System Prompt
-                  </Button>
+                  <div className="flex gap-2">
+                      <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={() => { setActiveTab("text"); setIsPromptOpen(true); }}
+                          className="gap-2 border-purple-500 text-purple-600 hover:bg-purple-50"
+                      >
+                        <Bot size={16} />
+                        Edit System Prompt
+                      </Button>
+                      <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={() => { setActiveTab("image"); setIsPromptOpen(true); }}
+                          className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50"
+                      >
+                        <Image size={16} />
+                        Edit Image Prompt
+                      </Button>
+                  </div>
                   
                   <Button type="submit" disabled={loading} className="gap-2 min-w-[120px]">
                     {loading ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" /> : <Save size={16} />}
