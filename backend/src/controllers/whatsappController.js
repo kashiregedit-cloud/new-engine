@@ -265,22 +265,50 @@ const handleWebhook = async (req, res) => {
                     
                     const textToSave = messageText.trim() || '[Media Sent]';
                     
+                    // --- ECHO GUARD START (Prevent Bot Replies from being saved as Admin) ---
+                    // Check if this "Admin" message is actually a Bot Echo
+                    // Uses 'recentBotReplies' populated in processAI
+                    const recentReplies = recentBotReplies.get(payload.to);
+                    if (recentReplies && Array.isArray(recentReplies)) {
+                         const incomingText = normalizeText(textToSave); // Uses Global normalizeText
+                         
+                         const match = recentReplies.find(reply => {
+                             const timeDiff = Date.now() - reply.timestamp;
+                             if (timeDiff >= 10000) return false; // Check last 10s
+                             
+                             const sentText = reply.text; // already normalized
+                             return incomingText === sentText;
+                         });
+
+                         if (match) {
+                             console.log(`[WA] Ignoring Bot Echo (fromMe=true): "${(textToSave || '').substring(0,30)}..."`);
+                             return; // SKIP SAVING & HANDOVER
+                         }
+                    }
+                    // --- ECHO GUARD END ---
+
                     console.log(`[WA] Admin Message Detected: "${textToSave}"`);
-                    console.log(`[WA] SKIPPING DB SAVE for Admin Message (User Request to prevent duplicates).`);
                     
-                    /* 
-                    // DISABLED PER USER INSTRUCTION (Duplicate Fix)
-                    await dbService.saveWhatsAppChat({
-                        session_name: sessionName,
-                        sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
-                        recipient_id: payload.to, // User is the recipient
-                        message_id: messageIdRaw,
-                        text: textToSave,
-                        timestamp: Date.now(),
-                        status: 'sent',
-                        reply_by: 'admin' // Trigger stop logic
-                    });
-                    */
+                    // RE-ENABLED PER USER INSTRUCTION (Duplicate Fix: Check DB first?)
+                    // For now, we enable it because the lock logic and history depend on it.
+                    // To avoid duplicates, we rely on the fact that this is 'fromMe' handling
+                    // and 'bot' messages are handled separately or filtered by ID.
+                    
+                    try {
+                        await dbService.saveWhatsAppChat({
+                            session_name: sessionName,
+                            sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
+                            recipient_id: payload.to, // User is the recipient
+                            message_id: messageIdRaw,
+                            text: textToSave,
+                            timestamp: Date.now(),
+                            status: 'sent',
+                            reply_by: 'admin' // Trigger stop logic
+                        });
+                        console.log(`[WA] Saved Admin Message: ${messageIdRaw}`);
+                    } catch (e) {
+                        console.error(`[WA] Failed to save Admin Message: ${e.message}`);
+                    }
 
                     // --- EMOJI HANDOVER LOGIC (Admin) ---
                     // Fetch Config for Dynamic Emojis
@@ -306,17 +334,18 @@ const handleWebhook = async (req, res) => {
                     }
                     
                     // Helper to strip variation selectors (VS16) and normalize
-                    const normalizeText = (str) => (str || '').replace(/\uFE0F/g, '').normalize('NFC');
+                    // Renamed to avoid shadowing Global normalizeText
+                    const normalizeEmojiText = (str) => (str || '').replace(/\uFE0F/g, '').normalize('NFC');
 
                     let command = null;
                     // Check if textToSave contains any of the emojis
                     // Use standard includes, but debug what we are checking
                     console.log(`[WA Handover] Checking text: "${textToSave}"`);
                     
-                    const cleanText = normalizeText(textToSave);
+                    const cleanText = normalizeEmojiText(textToSave);
 
                     for (const e of LOCK_EMOJIS) {
-                        if (cleanText.includes(normalizeText(e))) {
+                        if (cleanText.includes(normalizeEmojiText(e))) {
                             command = 'LOCK';
                             console.log(`[WA Handover] Matched Lock Emoji: ${e}`);
                             break;
@@ -324,7 +353,7 @@ const handleWebhook = async (req, res) => {
                     }
                     if (!command) {
                         for (const e of UNLOCK_EMOJIS) {
-                            if (cleanText.includes(normalizeText(e))) {
+                            if (cleanText.includes(normalizeEmojiText(e))) {
                                 command = 'UNLOCK';
                                 console.log(`[WA Handover] Matched Unlock Emoji: ${e}`);
                                 break;
