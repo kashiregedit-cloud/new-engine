@@ -580,7 +580,7 @@ async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
         return false;
     }
 
-    // 1. Try UPDATE first (Works without Unique Constraint if row exists)
+    // 1. Try UPDATE first
     const { data, error } = await supabase
         .from('whatsapp_contacts')
         .update({ 
@@ -593,14 +593,13 @@ async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
 
     if (error) {
         console.error(`[WA Lock] Update failed: ${error.message}. Trying Upsert...`);
-        // Don't return false yet, try upsert/insert as fallback
     } else if (data && data.length > 0) {
         console.log(`[WA Lock] Update successful for ${phoneNumber}`);
         return true;
     }
 
     // 2. If no row found, Try UPSERT/INSERT
-    // We include 'name' as 'Unknown' to satisfy potential non-null constraints
+    // Note: onConflict requires a unique constraint on 'session_name, phone_number'
     const { error: upsertError } = await supabase
         .from('whatsapp_contacts')
         .upsert({
@@ -609,10 +608,11 @@ async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
             is_locked: isLocked,
             name: 'Unknown', // Default name
             last_interaction: new Date().toISOString()
-        }, { onConflict: 'session_name, phone_number' });
+        }, { onConflict: 'session_name,phone_number' }); // Removed space to be safe
 
     if (upsertError) {
         console.error(`[WA Lock] Upsert failed: ${upsertError.message}`);
+        // Fallback: Check if we can just insert?
         return false;
     }
     
@@ -633,7 +633,12 @@ async function checkWhatsAppEmojiLock(sessionName, phoneNumber, lockEmojis, unlo
             .order('timestamp', { ascending: false })
             .limit(10);
 
-        if (error || !data || data.length === 0) return null;
+        if (error) {
+            console.error("Error fetching chat history for lock check:", error);
+            return null;
+        }
+        
+        if (!data || data.length === 0) return null;
 
         // Iterate from newest to oldest
         for (const msg of data) {
@@ -642,12 +647,18 @@ async function checkWhatsAppEmojiLock(sessionName, phoneNumber, lockEmojis, unlo
 
             // Check for Lock Emojis
             for (const emoji of lockEmojis) {
-                if (text.includes(emoji)) return { locked: true, timestamp: msg.timestamp };
+                if (text.includes(emoji)) {
+                    console.log(`[WA Lock] Found Lock Emoji '${emoji}' in message: "${text}"`);
+                    return { locked: true, timestamp: msg.timestamp };
+                }
             }
 
             // Check for Unlock Emojis
             for (const emoji of unlockEmojis) {
-                if (text.includes(emoji)) return { locked: false, timestamp: msg.timestamp };
+                if (text.includes(emoji)) {
+                     console.log(`[WA Lock] Found Unlock Emoji '${emoji}' in message: "${text}"`);
+                     return { locked: false, timestamp: msg.timestamp };
+                }
             }
         }
 

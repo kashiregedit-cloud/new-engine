@@ -102,9 +102,10 @@ const handleWebhook = async (req, res) => {
             // Check if this is a BOT message we just sent (ID Match)
             // Uses Normalized ID
             // [DEBUG] Log IDs to debug the mismatch issue
-            // console.log(`[WA Debug] Checking fromMe ID: ${messageIdRaw}. BotIDs: ${Array.from(botMessageIds).join(', ')}`);
+            console.log(`[WA Debug] Checking fromMe ID: ${messageIdRaw}. BotIDs count: ${botMessageIds.size}`);
 
             if (botMessageIds.has(messageIdRaw)) {
+                console.log(`[WA] Ignoring fromMe message (BotID Match): ${messageIdRaw}`);
                 botMessageIds.delete(messageIdRaw);
                 return;
             }
@@ -112,6 +113,10 @@ const handleWebhook = async (req, res) => {
             // TERTIARY CHECK: DB-Based Echo Guard (5s Wait + 20 Msg Check)
             // User Instruction: Wait 5s, then check last 20 messages in DB for 100% match from 'bot'
             const targetRecipient = payload.to;
+            // Use a more lenient normalization for comparison (keep emojis if possible, or strip for both)
+            // But we must be consistent. 'normalizeText' removes emojis.
+            // If we want to support Emoji-only messages, we need a better normalizer.
+            // For now, let's use the same normalizer.
             const targetBody = normalizeText(payload.body);
             
             // Wait 5 seconds to ensure any concurrent bot reply is saved to DB via its own flow
@@ -125,12 +130,18 @@ const handleWebhook = async (req, res) => {
                 const isEcho = lastMessages.some(msg => {
                     if (msg.reply_by !== 'bot') return false;
                     const dbBody = normalizeText(msg.text);
-                    return dbBody === targetBody; // 100% Match
+                    const match = dbBody === targetBody;
+                    if (match) {
+                         console.log(`[WA Debug] Echo Match Found! DB: "${msg.text}" vs Incoming: "${payload.body}"`);
+                    }
+                    return match; // 100% Match
                 });
 
                 if (isEcho) {
                     console.log(`[WA] Ignoring fromMe message (DB Echo Match): "${targetBody.substring(0, 30)}..."`);
                     return;
+                } else {
+                    console.log(`[WA Debug] Echo Check Failed. Incoming: "${targetBody}". Last 5 DB: ${lastMessages.slice(0, 5).map(m => m.reply_by + ':' + normalizeText(m.text)).join(' | ')}`);
                 }
             } catch (err) {
                 console.warn(`[WA] DB Echo check failed: ${err.message}`);
@@ -138,6 +149,7 @@ const handleWebhook = async (req, res) => {
 
             // If NOT in botMessageIds, it's the ADMIN (via Phone/Web)
             // Save Admin message to DB & Activate Handover
+
             
             const messageText = payload.body || '';
             const sessionName = session;
@@ -1038,9 +1050,13 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                  
                  // Add to Bot Message IDs (Critical for preventing Double Messages in Dashboard)
                  if (sentMessageId) {
+                     console.log(`[WA Debug] Adding BotID: ${sentMessageId}`);
                      botMessageIds.add(sentMessageId);
                      // Auto-clear after 2 minutes to save memory
-                     setTimeout(() => botMessageIds.delete(sentMessageId), 2 * 60 * 1000);
+                     setTimeout(() => {
+                         botMessageIds.delete(sentMessageId);
+                         // console.log(`[WA Debug] Cleared BotID: ${sentMessageId}`);
+                     }, 2 * 60 * 1000);
                  }
              }
         }
@@ -1066,7 +1082,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             sender_id: pageId || sessionName, // Bot (Page) is sender
             recipient_id: senderId, // User is recipient
             message_id: sentMessageId,
-            text: replyText, // Save full original text including image tags for context
+            text: finalReplyText, // Save CLEANED text (what was actually sent) to match Webhook Echo Guard
             timestamp: Date.now(),
             status: 'sent',
             reply_by: 'bot',
