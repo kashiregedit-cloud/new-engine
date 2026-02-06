@@ -10,9 +10,9 @@ const path = require('path');
 // --- DYNAMIC FREE MODEL OPTIMIZER (OpenRouter) ---
 // User Request: Dynamically fetch best free models using Gemini (Cheap Engine) to analyze the list.
 let bestFreeModels = {
-    text: 'google/gemini-2.0-flash-lite-preview-02-05:free', // Default fallback
+    text: 'meta-llama/llama-3.1-8b-instruct:free', // Default fallback
     vision: 'qwen/qwen-2.5-vl-7b-instruct:free', 
-    voice: 'google/gemini-2.0-flash-lite-preview-02-05:free' 
+    voice: 'meta-llama/llama-3.1-8b-instruct:free' 
 };
 
 async function updateBestFreeModels() {
@@ -24,10 +24,12 @@ async function updateBestFreeModels() {
         if (!models || !Array.isArray(models)) throw new Error("Invalid response format");
 
         // Filter for Strictly Free Models (Prompt & Completion = 0)
+        // User Update: EXCLUDE Gemini 2.0 models from Cheap Engine
         const freeModels = models.filter(m => 
             m.pricing && 
             (m.pricing.prompt === "0" || m.pricing.prompt === 0) && 
-            (m.pricing.completion === "0" || m.pricing.completion === 0)
+            (m.pricing.completion === "0" || m.pricing.completion === 0) &&
+            !m.id.includes('gemini-2.0') 
         );
 
         if (freeModels.length === 0) {
@@ -47,10 +49,11 @@ async function updateBestFreeModels() {
         }));
 
         // --- GEMINI SELECTION LOGIC (Cheap Engine) ---
-        // We use Gemini 2.0 Flash to pick the best models from the list
+        // We use Gemini 2.5 Flash to pick the best models from the list
         try {
             console.log(`[AI Optimizer] Asking Gemini to select best models from ${candidates.length} candidates...`);
-            const keyData = await keyService.getSmartKey('google', 'gemini-2.0-flash');
+            // Update: Use 'gemini-2.5-flash' key as requested by user (Removing Gemini 2.0 refs)
+            const keyData = await keyService.getSmartKey('google', 'gemini-2.5-flash');
             
             if (keyData && keyData.key) {
                 const prompt = `
@@ -78,7 +81,8 @@ Return ONLY valid JSON:
                 });
 
                 const completion = await openai.chat.completions.create({
-                    model: 'gemini-2.0-flash',
+                    // Use Gemini 2.0 Flash (Internal ID for 2.5 Flash) for the request
+                    model: 'gemini-2.0-flash', 
                     messages: [{ role: 'user', content: prompt }],
                     response_format: { type: "json_object" }
                 });
@@ -101,6 +105,7 @@ Return ONLY valid JSON:
             // Fallback: Rule-based (Previous Logic)
              const reliableProviders = /gemini|llama-3|mistral|qwen/i;
              let bestText = freeModels.find(m => reliableProviders.test(m.id) && !m.id.includes('vision')) || freeModels[0];
+             // Prioritize Gemini 2.5 equivalent for Vision
              let bestVision = freeModels.find(m => m.id.includes('gemini-2.0') || m.id.includes('qwen-2.5')) || freeModels[0];
              let bestVoice = freeModels.find(m => m.id.includes('flash') && m.id.includes('gemini')) || bestText;
 
@@ -304,7 +309,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
     // 1. Prepare Configuration
     let dynamicProvider = 'openrouter'; 
     let dynamicModel = 'arcee-ai/trinity-large-preview'; // Verified Free Model
-    let fallbackModel = 'google/gemini-2.0-flash-lite-preview-02-05:free';
+    let fallbackModel = 'meta-llama/llama-3.1-8b-instruct:free';
 
     if (useCheapEngine) {
         try {
@@ -379,7 +384,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
         // We set 'defaultModel' to the Primary Choice.
         defaultModel = 'gemini-2.5-flash';
         dynamicModel = 'gemini-2.5-flash-lite';
-        fallbackModel = bestFreeModels.text || 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Dynamic Fallback
+        fallbackModel = bestFreeModels.text || 'meta-llama/llama-3.1-8b-instruct:free'; // Dynamic Fallback
     }
     // -------------------------------------------------
     

@@ -488,26 +488,75 @@ async function queueMessage(session, messagePayload) {
         // Handles case where WAHA reports fromMe=false for Linked Devices
         const msgBody = (messageText || '').trim();
         
-        // 1. Check for Lock/Unlock Commands
-        const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
-        const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+        // 1. Fetch Dynamic Config for Emojis
+        let LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+        let UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
         
-        const isLock = LOCK_EMOJIS.some(e => msgBody.includes(e));
-        const isUnlock = UNLOCK_EMOJIS.some(e => msgBody.includes(e));
+        try {
+            // Use sessionName (which is passed as 'session' arg)
+            const config = await dbService.getWhatsAppConfig(session);
+            if (config) {
+                if (config.lock_emojis && config.lock_emojis.trim()) {
+                    LOCK_EMOJIS = config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
+                }
+                if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                    UNLOCK_EMOJIS = config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
+                }
+            }
+        } catch (e) {
+            console.warn(`[WA LID] Failed to fetch config for emoji check: ${e.message}`);
+        }
+
+        // Helper to strip variation selectors (VS16) and normalize
+        const normalizeEmojiText = (str) => (str || '').replace(/\uFE0F/g, '').normalize('NFC');
+        const cleanBody = normalizeEmojiText(msgBody);
+
+        let command = null;
+        for (const e of LOCK_EMOJIS) {
+            if (cleanBody.includes(normalizeEmojiText(e))) {
+                command = 'LOCK';
+                break;
+            }
+        }
+        if (!command) {
+            for (const e of UNLOCK_EMOJIS) {
+                if (cleanBody.includes(normalizeEmojiText(e))) {
+                    command = 'UNLOCK';
+                    break;
+                }
+            }
+        }
         
-        if (isLock || isUnlock) {
-             const command = isLock ? 'LOCK' : 'UNLOCK';
+        if (command) {
+             const isLock = command === 'LOCK';
              console.log(`[WA] LID Admin Command Detected: ${command} from ${senderId}`);
              
              // Target is the Recipient (User)
+             // CAUTION: messagePayload.to might be the LID itself or the group. 
+             // For 1-on-1, 'to' is usually the user if 'from' is LID (wait, if 'from' is LID, 'to' is me? No.)
+             // If I send FROM my phone (LID), 'from' is LID. 'to' is the USER.
              const lockTarget = messagePayload.to; 
-             if (lockTarget && !lockTarget.includes('@lid')) { // Don't lock self
+             
+             if (lockTarget && !lockTarget.includes('@lid')) { 
                  try {
-                     await dbService.toggleWhatsAppLock(sessionName, lockTarget, isLock);
-                     const ck = `${sessionName}_${lockTarget}`;
+                     await dbService.toggleWhatsAppLock(session, lockTarget, isLock);
+                     const ck = `${session}_${lockTarget}`;
                      if (isLock) handoverMap.set(ck, Date.now() + 24 * 60 * 60 * 1000);
                      else handoverMap.delete(ck);
                      console.log(`[WA] Lock Status Updated for ${lockTarget}`);
+                     
+                     // OPTIONAL: Save this "Admin" action to DB so it appears in chat history
+                     await dbService.saveWhatsAppChat({
+                        session_name: session,
+                        sender_id: session, // Treat as Admin/Page
+                        recipient_id: lockTarget,
+                        message_id: messagePayload.id || `lid_${Date.now()}`,
+                        text: msgBody,
+                        timestamp: Date.now(),
+                        status: 'sent',
+                        reply_by: 'admin'
+                    });
+
                  } catch (e) {
                      console.error(`[WA] Failed to toggle lock for LID command: ${e.message}`);
                  }
