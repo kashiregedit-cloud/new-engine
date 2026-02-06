@@ -100,12 +100,12 @@ const handleWebhook = async (req, res) => {
         // -----------------------------------
 
     // --- IGNORE @lid (Linked Devices / Internal) ---
-    // User Report: "124532744531973@lid" getting replies.
-    // These are usually internal messages or other devices.
-    if (payload.from && payload.from.includes('@lid')) {
-        console.log(`[WA] Ignoring @lid message (Internal/Linked Device): ${payload.from}`);
-        return;
-    }
+    // User Update: Removed per user instruction "eta wpp r number system".
+    // Previously blocked 124532744531973@lid, but user says this blocks legitimate replies.
+    // if (payload.from && payload.from.includes('@lid')) {
+    //    console.log(`[WA] Ignoring @lid message (Internal/Linked Device): ${payload.from}`);
+    //    return;
+    // }
     // -----------------------------------------------
 
     // --- HANDLE ADMIN/BOT MESSAGES (fromMe) ---
@@ -144,13 +144,13 @@ const handleWebhook = async (req, res) => {
                  }
             }
 
-            // 3. TERTIARY CHECK: DB-Based Echo Guard (5s Wait + 20 Msg Check)
-            // User Instruction: Wait 5s, then check last 20 messages in DB for 100% match from 'bot'
+            // 3. TERTIARY CHECK: DB-Based Echo Guard (3s Wait + 20 Msg Check)
+            // User Instruction: Wait 3s, then check last 20 messages in DB for 100% match from 'bot'
             const targetRecipient = payload.to;
             const targetBody = normalizeText(payload.body);
             
-            // Wait 5 seconds to ensure any concurrent bot reply is saved to DB via its own flow
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // Wait 3 seconds to ensure any concurrent bot reply is saved to DB via its own flow
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
             try {
                 // Fetch last 20 messages from DB
@@ -486,6 +486,15 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     let allImages = [];
     let allAudios = [];
     const isGroup = typeof senderId === 'string' && senderId.includes('@g.us');
+
+    // Handover guard (Memory) - Late Check (Race Condition Fix)
+    // User Scenario: Admin replies during the buffer delay. We must catch it here.
+    const chatKey = `${sessionName}_${senderId}`;
+    const handoverUntil = handoverMap.get(chatKey);
+    if (handoverUntil && handoverUntil > Date.now()) {
+        console.log(`[WA] Handover active (Memory - Late Check) for ${chatKey}. Skipping AI.`);
+        return;
+    }
 
     for (const msg of messages) {
         if (msg.text) combinedText += msg.text + "\n";
