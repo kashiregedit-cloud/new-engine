@@ -33,6 +33,8 @@ const sessionStartTimeMap = new Map();
 const recentMessageIds = new Set();
 // Bot Message IDs (to distinguish Bot vs Admin replies)
 const botMessageIds = new Set();
+// Recent Bot Replies (Text-based Echo Guard)
+const recentBotReplies = new Map(); // Key: recipientId, Value: { text, timestamp }
 
 // Helper to normalize text for comparison
 const normalizeText = (text) => {
@@ -104,19 +106,34 @@ const handleWebhook = async (req, res) => {
             // [DEBUG] Log IDs to debug the mismatch issue
             console.log(`[WA Debug] Checking fromMe ID: ${messageIdRaw}. BotIDs count: ${botMessageIds.size}`);
 
+            // 1. Strict ID Match (Fastest)
             if (botMessageIds.has(messageIdRaw)) {
                 console.log(`[WA] Ignoring fromMe message (BotID Match): ${messageIdRaw}`);
                 botMessageIds.delete(messageIdRaw);
                 return;
             }
             
-            // TERTIARY CHECK: DB-Based Echo Guard (5s Wait + 20 Msg Check)
+            // 2. Text-Based Echo Guard (In-Memory)
+            const recipient = payload.to;
+            const recentReply = recentBotReplies.get(recipient);
+            if (recentReply) {
+                 const timeDiff = Date.now() - recentReply.timestamp;
+                 // 10 Seconds Window for Echo
+                 if (timeDiff < 10000) { 
+                     // Compare Text (Simple Include or Exact Match)
+                     const incomingText = (payload.body || '').trim();
+                     const isMatch = incomingText === recentReply.text || incomingText.includes(recentReply.text) || recentReply.text.includes(incomingText);
+                     
+                     if (isMatch) {
+                         console.log(`[WA] Ignoring fromMe message (Text Match): "${incomingText.substring(0,30)}..."`);
+                         return;
+                     }
+                 }
+            }
+
+            // 3. TERTIARY CHECK: DB-Based Echo Guard (5s Wait + 20 Msg Check)
             // User Instruction: Wait 5s, then check last 20 messages in DB for 100% match from 'bot'
             const targetRecipient = payload.to;
-            // Use a more lenient normalization for comparison (keep emojis if possible, or strip for both)
-            // But we must be consistent. 'normalizeText' removes emojis.
-            // If we want to support Emoji-only messages, we need a better normalizer.
-            // For now, let's use the same normalizer.
             const targetBody = normalizeText(payload.body);
             
             // Wait 5 seconds to ensure any concurrent bot reply is saved to DB via its own flow
@@ -147,8 +164,8 @@ const handleWebhook = async (req, res) => {
                 console.warn(`[WA] DB Echo check failed: ${err.message}`);
             }
 
-            // If NOT in botMessageIds, it's the ADMIN (via Phone/Web)
-            // Save Admin message to DB & Activate Handover
+            // 3. Fallback: If still not identified as bot, assume Admin
+            // ... (Rest of Admin processing)
 
             
             const messageText = payload.body || '';
@@ -325,165 +342,10 @@ async function queueMessage(session, messagePayload) {
     console.log(logMsg);
     logToFile(logMsg);
 
-    // Handover guard: if admin takeover active for this chat, skip
-    const chatKey = `${sessionName}_${senderId}`;
-    
-    // 1. Check Memory (Fast) - for temporary pauses after admin reply
-    const handoverUntil = handoverMap.get(chatKey);
-    if (handoverUntil && handoverUntil > Date.now()) {
-        console.log(`[WA] Handover active (Memory) for ${chatKey}. Skipping AI.`);
-        return;
-    } else if (handoverUntil && handoverUntil <= Date.now()) {
-        handoverMap.delete(chatKey);
-    }
-
-    // 2. Check DB (Persistent Lock) - for manual Lock/Unlock
-    try {
-        const contact = await dbService.getWhatsAppContact(sessionName, senderId);
-        if (contact && contact.is_locked) {
-            console.log(`[WA] Handover active (DB Lock) for ${chatKey}. Skipping AI.`);
-            return;
-        }
-    } catch (err) {
-        console.warn(`[WA] Failed to check lock status: ${err.message}`);
-    }
-
-    // 3. History Scan (Double Check via Emoji in previous messages)
-    // User Request: Check old conversion for lock emojis (like Messenger)
-    try {
-        let LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
-        let UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
-        
-        const config = await dbService.getWhatsAppConfig(sessionName);
-        if (config) {
-            if (config.lock_emojis && config.lock_emojis.trim()) {
-                LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
-            }
-            if (config.unlock_emojis && config.unlock_emojis.trim()) {
-                UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
-            }
-        }
-
-        const historyCheck = await dbService.checkWhatsAppEmojiLock(sessionName, senderId, LOCK_EMOJIS, UNLOCK_EMOJIS);
-        
-        if (historyCheck) {
-            if (historyCheck.locked) {
-                console.log(`[WA] History Scan: Locked via emoji at ${historyCheck.timestamp}. Stopping AI.`);
-                // Update Memory
-                handoverMap.set(chatKey, Date.now() + 24 * 60 * 60 * 1000);
-                // Update DB (Self-Healing)
-                await dbService.toggleWhatsAppLock(sessionName, senderId, true);
-                return;
-            } else {
-                // Unlocked (Latest emoji was Unlock)
-                // console.log(`[WA] History Scan: Unlocked via emoji at ${historyCheck.timestamp}.`);
-                handoverMap.delete(chatKey);
-                // Ensure DB is clear
-                await dbService.toggleWhatsAppLock(sessionName, senderId, false);
-            }
-        }
-    } catch (err) {
-        console.warn(`[WA] History scan failed: ${err.message}`);
-    }
-
-    // Handle Images/Media (If WAHA exposes URL)
-    const imageUrls = [];
-    const audioUrls = [];
-    
-    if (messagePayload.hasMedia) {
-        // 0. Try media.url (User request: Prioritize Direct Link if available)
-        // User confirmed WAHA URL is fixed.
-        if (messagePayload.media && messagePayload.media.url && messagePayload.media.url.startsWith('http')) {
-             console.log(`[WA] Found media.url: ${messagePayload.media.url}`);
-             if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('image/')) {
-                 imageUrls.push(messagePayload.media.url);
-             } else if (messagePayload.media.mimetype && messagePayload.media.mimetype.startsWith('audio/')) {
-                 audioUrls.push(messagePayload.media.url);
-             }
-        }
-        // 1. Try deep nested jpegThumbnail (Backup if URL fails or is missing)
-        else if (messagePayload._data?.message?.imageMessage?.jpegThumbnail) {
-             console.log('[WA] Using deep nested jpegThumbnail (imageMessage) as backup source.');
-             const thumb = messagePayload._data.message.imageMessage.jpegThumbnail;
-             // Clean Base64 string (remove newlines/spaces)
-             const cleanThumb = thumb.replace(/\s/g, '');
-             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
-             imageUrls.push(base64);
-        }
-        // 2. Try jpegThumbnail (Standard Backup)
-        else if (messagePayload._data && (messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail)) {
-             console.log('[WA] Using jpegThumbnail/thumbnail as backup source.');
-             const thumb = messagePayload._data.jpegThumbnail || messagePayload._data.thumbnail;
-             // Clean Base64 string (remove newlines/spaces)
-             const cleanThumb = thumb.replace(/\s/g, '');
-             const base64 = `data:image/jpeg;base64,${cleanThumb}`;
-             imageUrls.push(base64);
-        }
-        // 3. Try mediaUrl (Legacy/Alternative)
-        else if (messagePayload.mediaUrl) {
-            if (messagePayload.mimetype && messagePayload.mimetype.startsWith('image/')) {
-                imageUrls.push(messagePayload.mediaUrl);
-            } else if (messagePayload.mimetype && messagePayload.mimetype.startsWith('audio/')) {
-                audioUrls.push(messagePayload.mediaUrl);
-            }
-        } 
-        // 3. Try body (if Base64 Data URI)
-        else if (messagePayload.body && messagePayload.body.startsWith('data:')) {
-             if (messagePayload.body.startsWith('data:image')) {
-                imageUrls.push(messagePayload.body);
-             } else if (messagePayload.body.startsWith('data:audio')) {
-                audioUrls.push(messagePayload.body);
-             }
-        }
-        // 4. Try _data.body (if Base64 Data URI - raw data often here)
-        else if (messagePayload._data && messagePayload._data.body && typeof messagePayload._data.body === 'string' && messagePayload._data.body.startsWith('data:')) {
-             if (messagePayload._data.body.startsWith('data:image')) {
-                imageUrls.push(messagePayload._data.body);
-             } else if (messagePayload._data.body.startsWith('data:audio')) {
-                audioUrls.push(messagePayload._data.body);
-             }
-        }
-        // 5. Try raw body as Base64 (Some versions send raw base64 in body without prefix)
-        else if (messagePayload.body && messagePayload.body.length > 100 && /^[A-Za-z0-9+/=]+$/.test(messagePayload.body.replace(/\s/g, ''))) {
-             console.log('[WA] Body looks like raw Base64. Using as image.');
-             const base64 = `data:image/jpeg;base64,${messagePayload.body}`;
-             imageUrls.push(base64);
-        }
-        else {
-            messageText += " [User sent media]";
-            console.log('[WA] Media detected but no URL or Data found. Payload keys:', Object.keys(messagePayload));
-            if (messagePayload._data) console.log('[WA] _data keys:', Object.keys(messagePayload._data));
-            console.log('[WA] Full Payload (Debug):', JSON.stringify(messagePayload).substring(0, 500)); // Log first 500 chars
-        }
-    }
-
-    // VOICE MESSAGE NULL FIX
-    if ((!messageText || messageText.trim() === "") && audioUrls.length > 0) {
-        messageText = "[Voice Message - Transcribing...]";
-    }
-
-    // Check Duplicate immediately (WhatsApp specific)
-    const isDuplicate = await dbService.checkWhatsAppDuplicate(messageId);
-    if (isDuplicate) {
-        console.log(`[WA] Duplicate message ${messageId} ignored.`);
-        return;
-    }
-
-    // Additional n8n-style filter: collapse trivial repeats (e.g., "hi" twice fast)
-    // EXCEPTION: Do NOT filter if media is present (User might send 5 photos in a row)
-    const hasMedia = imageUrls.length > 0 || audioUrls.length > 0;
-    const normalized = (messageText || '').trim().toLowerCase();
-    const lastUser = lastUserMessageMap.get(chatKey);
-    
-    if (!hasMedia && lastUser && lastUser.text === normalized && (Date.now() - lastUser.ts) < 5000) {
-        console.log(`[WA] Ignoring repeated short message from ${chatKey}: "${normalized}"`);
-        return;
-    }
-    lastUserMessageMap.set(chatKey, { text: normalized, ts: Date.now() });
-
     // --- SAVE USER MESSAGE TO whatsapp_chats (Immediate - Raw) ---
+    // User Requirement: Save User Messages even if Locked
     try {
-            await dbService.saveWhatsAppChat({
+        await dbService.saveWhatsAppChat({
             session_name: sessionName,
             sender_id: senderId, // User is the sender (Phone Number)
             recipient_id: messagePayload.to, // Page is the recipient (Page Number)
@@ -507,6 +369,29 @@ async function queueMessage(session, messagePayload) {
 
     } catch (err) {
         console.error("Error saving to whatsapp_chats:", err.message);
+    }
+
+    // Handover guard: if admin takeover active for this chat, skip
+    const chatKey = `${sessionName}_${senderId}`;
+    
+    // 1. Check Memory (Fast) - for temporary pauses after admin reply
+    const handoverUntil = handoverMap.get(chatKey);
+    if (handoverUntil && handoverUntil > Date.now()) {
+        console.log(`[WA] Handover active (Memory) for ${chatKey}. Skipping AI.`);
+        return;
+    } else if (handoverUntil && handoverUntil <= Date.now()) {
+        handoverMap.delete(chatKey);
+    }
+
+    // 2. Check DB (Persistent Lock) - for manual Lock/Unlock
+    try {
+        const contact = await dbService.getWhatsAppContact(sessionName, senderId);
+        if (contact && contact.is_locked) {
+            console.log(`[WA] Handover active (DB Lock) for ${chatKey}. Skipping AI.`);
+            return;
+        }
+    } catch (err) {
+        console.warn(`[WA] Failed to check lock status: ${err.message}`);
     }
 
     const sessionId = `${sessionName}_${senderId}`;
@@ -1052,9 +937,14 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                  if (sentMessageId) {
                      console.log(`[WA Debug] Adding BotID: ${sentMessageId}`);
                      botMessageIds.add(sentMessageId);
+                     
+                     // Add to Recent Bot Replies (Text Guard)
+                     recentBotReplies.set(senderId, { text: finalReplyText.trim(), timestamp: Date.now() });
+                     
                      // Auto-clear after 2 minutes to save memory
                      setTimeout(() => {
                          botMessageIds.delete(sentMessageId);
+                         recentBotReplies.delete(senderId);
                          // console.log(`[WA Debug] Cleared BotID: ${sentMessageId}`);
                      }, 2 * 60 * 1000);
                  }

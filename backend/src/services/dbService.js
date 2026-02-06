@@ -580,44 +580,59 @@ async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
         return false;
     }
 
-    // 1. Try UPDATE first
-    const { data, error } = await supabase
-        .from('whatsapp_contacts')
-        .update({ 
-            is_locked: isLocked,
-            last_interaction: new Date().toISOString()
-        })
-        .eq('session_name', sessionName)
-        .eq('phone_number', phoneNumber)
-        .select();
+    try {
+        // 1. Check if exists
+        const { data: existing, error: fetchError } = await supabase
+            .from('whatsapp_contacts')
+            .select('id')
+            .eq('session_name', sessionName)
+            .eq('phone_number', phoneNumber)
+            .maybeSingle();
 
-    if (error) {
-        console.error(`[WA Lock] Update failed: ${error.message}. Trying Upsert...`);
-    } else if (data && data.length > 0) {
-        console.log(`[WA Lock] Update successful for ${phoneNumber}`);
-        return true;
-    }
+        if (fetchError) {
+             console.error(`[WA Lock] Fetch failed: ${fetchError.message}`);
+        }
 
-    // 2. If no row found, Try UPSERT/INSERT
-    // Note: onConflict requires a unique constraint on 'session_name, phone_number'
-    const { error: upsertError } = await supabase
-        .from('whatsapp_contacts')
-        .upsert({
-            session_name: sessionName,
-            phone_number: phoneNumber,
-            is_locked: isLocked,
-            name: 'Unknown', // Default name
-            last_interaction: new Date().toISOString()
-        }, { onConflict: 'session_name,phone_number' }); // Removed space to be safe
+        if (existing) {
+            // 2. UPDATE
+            const { error: updateError } = await supabase
+                .from('whatsapp_contacts')
+                .update({ 
+                    is_locked: isLocked,
+                    last_interaction: new Date().toISOString()
+                })
+                .eq('session_name', sessionName)
+                .eq('phone_number', phoneNumber);
 
-    if (upsertError) {
-        console.error(`[WA Lock] Upsert failed: ${upsertError.message}`);
-        // Fallback: Check if we can just insert?
+            if (updateError) {
+                console.error(`[WA Lock] Update failed: ${updateError.message}`);
+                return false;
+            }
+            console.log(`[WA Lock] Update successful for ${phoneNumber}`);
+            return true;
+        } else {
+            // 3. INSERT
+            const { error: insertError } = await supabase
+                .from('whatsapp_contacts')
+                .insert({
+                    session_name: sessionName,
+                    phone_number: phoneNumber,
+                    is_locked: isLocked,
+                    name: 'Unknown',
+                    last_interaction: new Date().toISOString()
+                });
+
+            if (insertError) {
+                console.error(`[WA Lock] Insert failed: ${insertError.message}`);
+                return false;
+            }
+            console.log(`[WA Lock] Insert successful for ${phoneNumber}`);
+            return true;
+        }
+    } catch (err) {
+        console.error(`[WA Lock] Unexpected error: ${err.message}`);
         return false;
     }
-    
-    console.log(`[WA Lock] Upsert successful for ${phoneNumber}`);
-    return true;
 }
 
 // 27. Check WhatsApp Emoji Lock (History Scan)
