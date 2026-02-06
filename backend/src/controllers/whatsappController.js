@@ -37,12 +37,13 @@ const recentMessageIds = new Set();
 const botMessageIds = new Set();
 // Sent Message History (Fuzzy Match Guard)
 const sentMessageHistory = new Map(); // Key: recipient_body, Value: { ts: number }
-// Recent Bot Replies (Strong Echo Guard)
-const recentBotReplies = new Map(); // Key: recipient_id, Value: { text: string, ts: number }
+// Recent Bot Replies (Strong Echo Guard) - Stores Array of recent replies
+const recentBotReplies = new Map(); // Key: recipient_id, Value: [{ text: string, ts: number }]
 
 // Helper to normalize text for comparison
 const normalizeText = (text) => {
-    return (text || '').toLowerCase().replace(/\s+/g, '').trim();
+    // Remove all whitespace and special characters to ensure robust matching
+    return (text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 };
 
 // Step 1: Webhook Trigger
@@ -67,6 +68,9 @@ const handleWebhook = async (req, res) => {
     if (typeof messageIdRaw === 'object' && messageIdRaw !== null) {
         messageIdRaw = messageIdRaw._serialized || messageIdRaw.id; // Fallback
     }
+    
+    // [DEBUG] Log fromMe status
+    // console.log(`[WA Debug] Message ${messageIdRaw} - fromMe: ${payload.fromMe}`);
     // Update payload.id to be the string version for downstream consistency
     if (payload.id && typeof payload.id === 'object') {
         payload.id = messageIdRaw;
@@ -103,6 +107,9 @@ const handleWebhook = async (req, res) => {
         if (payload.fromMe) {
             // Check if this is a BOT message we just sent (ID Match)
             // Uses Normalized ID
+            // [DEBUG] Log IDs to debug the mismatch issue
+            // console.log(`[WA Debug] Checking fromMe ID: ${messageIdRaw}. BotIDs: ${Array.from(botMessageIds).join(', ')}`);
+
             if (botMessageIds.has(messageIdRaw)) {
                 botMessageIds.delete(messageIdRaw);
                 return;
@@ -116,12 +123,24 @@ const handleWebhook = async (req, res) => {
             const now = Date.now();
             
             // 1. Check Strong Echo Guard (recentBotReplies)
-            const lastBotReply = recentBotReplies.get(targetRecipient);
-            if (lastBotReply && (now - lastBotReply.ts < 20000)) { // 20s window
-                if (lastBotReply.text === targetBody) {
-                    console.log(`[WA] Ignoring fromMe message (Strong Echo Match): "${targetBody.substring(0, 30)}..."`);
-                    return;
-                }
+            // Iterate through ALL recent bot replies for this user
+            const botReplies = recentBotReplies.get(targetRecipient) || [];
+            // Filter out old ones (keep only last 20s)
+            const validBotReplies = botReplies.filter(r => now - r.ts < 20000);
+            
+            // Update Map if we filtered out old ones
+            if (validBotReplies.length !== botReplies.length) {
+                if (validBotReplies.length > 0) recentBotReplies.set(targetRecipient, validBotReplies);
+                else recentBotReplies.delete(targetRecipient);
+            }
+
+            const isEcho = validBotReplies.some(lastBotReply => {
+                return lastBotReply.text === targetBody || targetBody.includes(lastBotReply.text) || lastBotReply.text.includes(targetBody);
+            });
+
+            if (isEcho) {
+                console.log(`[WA] Ignoring fromMe message (Strong Echo Match): "${targetBody.substring(0, 30)}..."`);
+                return;
             }
 
             // Clean up old sent history
@@ -220,16 +239,20 @@ const handleWebhook = async (req, res) => {
                 }
                 
                 let command = null;
+                // Check if textToSave contains any of the emojis
                 for (const e of LOCK_EMOJIS) if (textToSave.includes(e)) command = 'LOCK';
                 for (const e of UNLOCK_EMOJIS) if (textToSave.includes(e)) command = 'UNLOCK';
                 
                 if (command) {
                      const isLocked = command === 'LOCK';
                      console.log(`[WA] Emoji Command Detected (${command}) from Admin. Updating Lock Status...`);
-                     await dbService.toggleWhatsAppLock(sessionName, payload.to, isLocked);
+                     
+                     // Use payload.to (User's Phone Number) for the lock
+                     const targetUser = payload.to; 
+                     await dbService.toggleWhatsAppLock(sessionName, targetUser, isLocked);
                      
                      // Update Memory Map
-                     const chatKey = `${sessionName}_${payload.to}`;
+                     const chatKey = `${sessionName}_${targetUser}`;
                      if (isLocked) {
                          handoverMap.set(chatKey, Date.now() + 24 * 60 * 60 * 1000); // 24h Lock
                      } else {
@@ -1049,7 +1072,13 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
              // Register Strong Echo Guard BEFORE Sending
              // This covers the race condition where Webhook arrives before Send completes
              const normalizedReply = normalizeText(finalReplyText);
-             recentBotReplies.set(senderId, { text: normalizedReply, ts: Date.now() });
+             
+             // Add to List (Initialize if not exists)
+             const existingReplies = recentBotReplies.get(senderId) || [];
+             existingReplies.push({ text: normalizedReply, ts: Date.now() });
+             // Keep only last 10 replies to prevent memory leak
+             if (existingReplies.length > 10) existingReplies.shift();
+             recentBotReplies.set(senderId, existingReplies);
 
              const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
              if (sentData && sentData.id) {
