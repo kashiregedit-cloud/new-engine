@@ -19,7 +19,9 @@ export interface MessengerContextType {
   loading: boolean;
   // Team Features
   isTeamMember: boolean;
-  teamOwnerEmail: string | null;
+  teams: { owner_email: string; permissions: any }[];
+  activeTeam: { owner_email: string; permissions: any } | null;
+  setActiveTeam: (team: { owner_email: string; permissions: any } | null) => void;
   viewMode: 'personal' | 'team';
   switchViewMode: (mode: 'personal' | 'team') => void;
 }
@@ -33,7 +35,9 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
   
   // Team State
   const [isTeamMember, setIsTeamMember] = useState(false);
-  const [teamOwnerEmail, setTeamOwnerEmail] = useState<string | null>(null);
+  const [teams, setTeams] = useState<{ owner_email: string; permissions: any }[]>([]);
+  const [activeTeam, setActiveTeam] = useState<{ owner_email: string; permissions: any } | null>(null);
+  
   const [viewMode, setViewMode] = useState<'personal' | 'team'>(() => {
     return (localStorage.getItem('messenger_view_mode') as 'personal' | 'team') || 'personal';
   });
@@ -52,29 +56,42 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Check Team Membership first
+      // Check Team Membership (Allow Multiple Teams)
       const { data: teamData } = await (supabase
           .from('team_members') as any)
           .select('owner_email, permissions')
-          .eq('member_email', user.email)
-          .maybeSingle();
+          .eq('member_email', user.email);
       
-      const isMember = !!teamData;
-      const ownerEmail = teamData?.owner_email || null;
+      const foundTeams = teamData || [];
+      setIsTeamMember(foundTeams.length > 0);
+      setTeams(foundTeams);
 
-      setIsTeamMember(isMember);
-      setTeamOwnerEmail(ownerEmail);
+      // Restore active team from storage or default to first
+      let currentActiveTeam = activeTeam;
+      if (viewMode === 'team' && foundTeams.length > 0) {
+          const storedOwner = localStorage.getItem('active_team_owner');
+          if (storedOwner) {
+              const matched = foundTeams.find((t: any) => t.owner_email === storedOwner);
+              if (matched) currentActiveTeam = matched;
+              else currentActiveTeam = foundTeams[0];
+          } else if (!currentActiveTeam) {
+              currentActiveTeam = foundTeams[0];
+          }
+          if (currentActiveTeam !== activeTeam) {
+             setActiveTeam(currentActiveTeam);
+          }
+      }
 
       // Determine target email based on viewMode
       let targetEmail = user.email;
       
       // If in team mode AND is a member, use owner email
-      // Also auto-switch to personal if not a member anymore
-      if (viewMode === 'team' && isMember && ownerEmail) {
-          targetEmail = ownerEmail;
-      } else if (viewMode === 'team' && !isMember) {
+      if (viewMode === 'team' && foundTeams.length > 0 && currentActiveTeam) {
+          targetEmail = currentActiveTeam.owner_email;
+      } else if (viewMode === 'team' && foundTeams.length === 0) {
           // Fallback if removed from team but still in team mode
           targetEmail = user.email;
+          setViewMode('personal'); // Force revert
       }
 
       // 1. Fetch Pages
@@ -111,8 +128,8 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       });
 
       // Filter by Team Permissions
-      if (viewMode === 'team' && isMember && teamData?.permissions?.fb_pages) {
-          const allowedIds = teamData.permissions.fb_pages;
+      if (viewMode === 'team' && currentActiveTeam?.permissions?.fb_pages) {
+          const allowedIds = currentActiveTeam.permissions.fb_pages;
           if (Array.isArray(allowedIds)) {
              mergedPages = mergedPages.filter(p => allowedIds.includes(p.page_id));
           }
@@ -144,7 +161,7 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [viewMode]);
+  }, [viewMode, activeTeam]);
 
   const updateActivePage = (page: MessengerPage | null) => {
     setCurrentPage(page);
@@ -176,7 +193,16 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
         refreshPages, 
         loading,
         isTeamMember,
-        teamOwnerEmail,
+        teams,
+        activeTeam,
+        setActiveTeam: (team) => {
+            setActiveTeam(team);
+            if (team) {
+                localStorage.setItem('active_team_owner', team.owner_email);
+            } else {
+                localStorage.removeItem('active_team_owner');
+            }
+        },
         viewMode,
         switchViewMode
     }}>
