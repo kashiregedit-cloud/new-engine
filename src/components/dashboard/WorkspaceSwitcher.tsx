@@ -54,7 +54,8 @@ function SwitcherUI({ context }: { context: any }) {
   const [open, setOpen] = useState(false);
 
   // If user is not a team member, they don't need a switcher
-  if (!isTeamMember) return null;
+  // Removed early return here to allow later check against availableTeams
+  // if (!isTeamMember) return null; 
 
   // Determine current workspace label
   let currentLabel = "My Workspace";
@@ -79,7 +80,11 @@ function SwitcherUI({ context }: { context: any }) {
       availableTeams = [{ owner_email: teamOwnerEmail }];
   }
 
-  return (
+  // Debug: If teams exist but isTeamMember is false, something is wrong with sync
+  // Force show if teams array has data
+  const showSwitcher = isTeamMember || availableTeams.length > 0;
+
+  if (!showSwitcher) return null;
     <div className="px-2 mb-2 relative z-50">
         <Popover open={open} onOpenChange={setOpen} modal={true}>
         <PopoverTrigger asChild>

@@ -65,6 +65,11 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       const foundTeams = teamData || [];
       setIsTeamMember(foundTeams.length > 0);
       setTeams(foundTeams);
+      
+      // Force UI Update for Context
+      if (foundTeams.length > 0 && !isTeamMember) {
+         // First time detection
+      }
 
       // Restore active team from storage or default to first
       let currentActiveTeam = activeTeam;
