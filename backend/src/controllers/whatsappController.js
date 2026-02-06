@@ -79,8 +79,8 @@ setInterval(() => {
 const normalizeText = (text) => {
     // Remove all whitespace and special characters to ensure robust matching
     // Update: Support Unicode (Bengali) by using unicode property escapes
-    // Removes whitespace, punctuation, and symbols, keeps letters and numbers
-    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+    // Removes whitespace and punctuation, BUT KEEPS SYMBOLS/EMOJIS to prevent "🌸" becoming ""
+    return (text || '').toLowerCase().replace(/[\s\p{P}]/gu, '');
 };
 
 // Step 1: Webhook Trigger
@@ -204,13 +204,13 @@ const handleWebhook = async (req, res) => {
                 }
             }
 
-                // 4. TERTIARY CHECK: DB-Based Echo Guard (3s Wait + 20 Msg Check)
-                // User Instruction: Wait 3s, then check last 20 messages in DB for 100% match from 'bot'
+                // 4. TERTIARY CHECK: DB-Based Echo Guard (1.5s Wait + 20 Msg Check)
+                // User Instruction: Wait 1.5s (Reduced from 3s), then check last 20 messages in DB
                 const targetRecipient = payload.to;
                 const targetBody = normalizeText(payload.body);
                 
-                // Wait 3 seconds to ensure any concurrent bot reply is saved to DB via its own flow
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Wait 1.5 seconds to ensure any concurrent bot reply is saved to DB via its own flow
+                await new Promise(resolve => setTimeout(resolve, 1500));
 
                 try {
                     // Fetch last 20 messages from DB
@@ -220,11 +220,9 @@ const handleWebhook = async (req, res) => {
                     const isEcho = lastMessages.some(msg => {
                         if (msg.reply_by !== 'bot') return false;
                         const dbBody = normalizeText(msg.text);
-                        const match = dbBody === targetBody;
-                        if (match) {
-                            console.log(`[WA Debug] Echo Match Found! DB: "${msg.text}" vs Incoming: "${payload.body}"`);
-                        }
-                        return match; // 100% Match
+                        // Debug log for potential mismatches
+                        // console.log(`[WA Echo Debug] DB: ${dbBody} vs Incoming: ${targetBody}`);
+                        return dbBody === targetBody;
                     });
 
                     if (isEcho) {
@@ -267,7 +265,7 @@ const handleWebhook = async (req, res) => {
                     
                     const textToSave = messageText.trim() || '[Media Sent]';
                     
-                    console.log(`[WA] Admin Message Detected: ${textToSave.substring(0,30)}...`);
+                    console.log(`[WA] Admin Message Detected: "${textToSave}"`);
                     console.log(`[WA] SKIPPING DB SAVE for Admin Message (User Request to prevent duplicates).`);
                     
                     /* 
