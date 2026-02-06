@@ -2,11 +2,26 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Bot, MessageSquare, Loader2, Save, Image, Sparkles, MessageCircle, Lock, PackageSearch, ReplyAll, Mic, Upload, Users, MessageSquareText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+
+interface WhatsAppConfig {
+  reply_message: boolean;
+  swipe_reply: boolean;
+  image_detection: boolean;
+  image_send: boolean;
+  order_tracking: boolean;
+  audio_detection: boolean;
+  file_upload: boolean;
+  group_reply: boolean;
+  lock_emojis: string;
+  unlock_emojis: string;
+  [key: string]: boolean | string; // Allow index access for updates
+}
 
 export default function WhatsAppControlPage() {
   const [loading, setLoading] = useState(true);
@@ -16,7 +31,7 @@ export default function WhatsAppControlPage() {
   const [expiryDays, setExpiryDays] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<WhatsAppConfig>({
     reply_message: false,
     swipe_reply: false,
     image_detection: false,
@@ -24,7 +39,9 @@ export default function WhatsAppControlPage() {
     order_tracking: false,
     audio_detection: false,
     file_upload: false,
-    group_reply: false
+    group_reply: false,
+    lock_emojis: "",
+    unlock_emojis: ""
   });
   const [stats, setStats] = useState({
     todayTokens: 0,
@@ -94,7 +111,9 @@ export default function WhatsAppControlPage() {
           order_tracking: row.order_tracking ?? false,
           audio_detection: row.audio_detection ?? false,
           file_upload: row.file_upload ?? false,
-          group_reply: row.group_reply ?? false
+          group_reply: row.group_reply ?? false,
+          lock_emojis: row.lock_emojis ?? "",
+          unlock_emojis: row.unlock_emojis ?? ""
         });
 
         fetchMetrics(row.session_name);
@@ -173,7 +192,8 @@ export default function WhatsAppControlPage() {
       // We know these columns exist from whatsapp_tables.sql
       const validColumns = [
         'reply_message', 'swipe_reply', 'image_detection', 'image_send', 
-        'order_tracking', 'audio_detection', 'file_upload', 'group_reply'
+        'order_tracking', 'audio_detection', 'file_upload', 'group_reply',
+        'lock_emojis', 'unlock_emojis'
       ];
 
       const updates: any = {};
@@ -497,6 +517,46 @@ export default function WhatsAppControlPage() {
             <Switch 
               checked={config.file_upload}
               onCheckedChange={(c) => setConfig({...config, file_upload: c})}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Lock Emojis */}
+        <Card className="bg-card border-border shadow-sm">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-red-100 text-red-600 rounded-full">
+                 <Lock size={24} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-lg font-semibold">Lock Emojis</Label>
+                <p className="text-sm text-muted-foreground">Emojis that trigger a lock (comma separated).</p>
+              </div>
+            </div>
+            <Input 
+              placeholder="e.g. 🛑,🔒,⛔" 
+              value={config.lock_emojis}
+              onChange={(e) => setConfig({...config, lock_emojis: e.target.value})}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Unlock Emojis */}
+        <Card className="bg-card border-border shadow-sm">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-emerald-100 text-emerald-600 rounded-full">
+                 <Lock size={24} className="text-emerald-600" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-lg font-semibold">Unlock Emojis</Label>
+                <p className="text-sm text-muted-foreground">Emojis that trigger an unlock (comma separated).</p>
+              </div>
+            </div>
+            <Input 
+              placeholder="e.g. 🟢,🔓,✅" 
+              value={config.unlock_emojis}
+              onChange={(e) => setConfig({...config, unlock_emojis: e.target.value})}
             />
           </CardContent>
         </Card>

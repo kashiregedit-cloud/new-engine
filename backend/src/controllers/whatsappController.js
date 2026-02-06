@@ -185,8 +185,23 @@ const handleWebhook = async (req, res) => {
                 });
 
                 // --- EMOJI HANDOVER LOGIC (Admin) ---
-                const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
-                const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+                // Fetch Config for Dynamic Emojis
+                let LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+                let UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+                
+                try {
+                    const config = await dbService.getWhatsAppConfig(sessionName);
+                    if (config) {
+                        if (config.lock_emojis && config.lock_emojis.trim()) {
+                            LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                        }
+                        if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                            UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`[WA] Failed to fetch config for emoji check: ${e.message}`);
+                }
                 
                 let command = null;
                 for (const e of LOCK_EMOJIS) if (textToSave.includes(e)) command = 'LOCK';
@@ -946,8 +961,18 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
         // --- EMOJI HANDOVER LOGIC (AI Reply) ---
         {
-            const LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
-            const UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+            let LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+            let UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+
+            if (pageConfig) {
+                if (pageConfig.lock_emojis && pageConfig.lock_emojis.trim()) {
+                    LOCK_EMOJIS = pageConfig.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                }
+                if (pageConfig.unlock_emojis && pageConfig.unlock_emojis.trim()) {
+                    UNLOCK_EMOJIS = pageConfig.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
+                }
+            }
+
             let aiCommand = null;
             for (const e of LOCK_EMOJIS) if (finalReplyText.includes(e)) aiCommand = 'LOCK';
             for (const e of UNLOCK_EMOJIS) if (finalReplyText.includes(e)) aiCommand = 'UNLOCK';
