@@ -66,7 +66,7 @@ const handleWebhook = async (req, res) => {
     }
     
     // [DEBUG] Log fromMe status
-    // console.log(`[WA Debug] Message ${messageIdRaw} - fromMe: ${payload.fromMe}`);
+    console.log(`[WA Debug] Message ${messageIdRaw} - fromMe: ${payload.fromMe}`);
     // Update payload.id to be the string version for downstream consistency
     if (payload.id && typeof payload.id === 'object') {
         payload.id = messageIdRaw;
@@ -122,17 +122,10 @@ const handleWebhook = async (req, res) => {
                 return;
             }
 
-            // 2. Exception for @lid (Linked Devices)
-            // User Request: Allow bot to reply to messages sent from Linked Devices (@lid)
-            // These come with fromMe=true, but we must treat them as User Messages.
-            if (payload.from && payload.from.includes('@lid')) {
-                console.log(`[WA] @lid message detected with fromMe=true. Treating as User Message.`);
-                // Proceed to queueMessage (Skip Admin Logic)
-            } else {
-                // 3. Text-Based Echo Guard (In-Memory)
-                const recipient = payload.to;
-                const recentReply = recentBotReplies.get(recipient);
-                if (recentReply) {
+            // 2. Text-Based Echo Guard (In-Memory)
+            const recipient = payload.to;
+            const recentReply = recentBotReplies.get(recipient);
+            if (recentReply) {
                     const timeDiff = Date.now() - recentReply.timestamp;
                     // 10 Seconds Window for Echo
                     if (timeDiff < 10000) { 
@@ -274,7 +267,6 @@ const handleWebhook = async (req, res) => {
                 }
                 return; // STOP Processing
             }
-        }
 
         // Ignore Status Updates (broadcasts)
         if (payload.from === 'status@broadcast') return;
@@ -289,6 +281,26 @@ const handleWebhook = async (req, res) => {
             return;
         }
         // -----------------------------------------------------
+
+        // --- FAILSAFE ECHO GUARD (Even if fromMe is false) ---
+        // Checks if we just sent this exact text to this user.
+        // Solves "Infinite Loop" if WAHA echoes bot messages as incoming user messages.
+        const sender = payload.from;
+        if (sender && recentBotReplies.has(sender)) {
+            const recent = recentBotReplies.get(sender);
+            const timeDiff = Date.now() - recent.timestamp;
+            
+            if (timeDiff < 15000) { // 15 Seconds Window
+                const incomingText = normalizeText(payload.body || '');
+                const sentText = recent.text; // Already normalized
+                
+                // Check for exact match or strong inclusion
+                if (incomingText && sentText && (incomingText === sentText || incomingText.includes(sentText) || sentText.includes(incomingText))) {
+                    console.log(`[WA] Ignoring INCOMING message (Failsafe Echo Match): "${(payload.body || '').substring(0,30)}..." from ${sender}`);
+                    return;
+                }
+            }
+        }
 
         await queueMessage(session, payload);
     } else if (event === 'state.change') {
@@ -344,15 +356,31 @@ const handleWebhook = async (req, res) => {
 // Queue Message for Debounce
 async function queueMessage(session, messagePayload) {
     let senderId = messagePayload.from; // e.g., 12345678@c.us
-    
+    let messageText = messagePayload.body || '';
+
     // Fix for Linked Devices (@lid)
     // User Update: Do NOT convert @lid to @c.us. Use as is.
     if (senderId && senderId.includes('@lid')) {
         console.log(`[WA] Processing message from Linked Device (@lid): ${senderId}`);
     }
 
+    // --- FAILSAFE ECHO GUARD (For "Received" messages that are actually echoes) ---
+    // Prevents "Ami Ami Ami" Loop / Spam
+    const recentReply = recentBotReplies.get(senderId);
+    if (recentReply) {
+        const timeDiff = Date.now() - recentReply.timestamp;
+        if (timeDiff < 20000) { // 20s window (increased for safety)
+            const incomingText = normalizeText(messageText);
+            const storedText = recentReply.text;
+            // Check for exact match or strong similarity
+            if (incomingText && storedText && (incomingText === storedText || incomingText.includes(storedText) || storedText.includes(incomingText))) {
+                 console.log(`[WA] Failsafe Echo Guard triggered! Ignoring message from ${senderId} (Matches recent bot reply).`);
+                 return;
+            }
+        }
+    }
+
     const sessionName = session; // Using WAHA Session as Session Name
-    let messageText = messagePayload.body || '';
     
     // Normalized ID
     let messageId = messagePayload.id;
@@ -533,14 +561,9 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
         if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
     }
-    // Remove duplicate lines (n8n-style filter)
-    combinedText = combinedText
-        .split('\n')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .filter((val, idx, arr) => arr.indexOf(val) === idx)
-        .join('\n')
-        .trim();
+    // --- MERGE LOGIC (Messenger Style) ---
+    // User Update: Use simple concatenation like Messenger to fix "merge message not working"
+    // Removed complex deduplication/filtering which caused data loss
     console.log(`[WA] Processing buffered. Text: ${combinedText.substring(0,50)}...`);
 
     // If this is a swipe-reply, fetch quoted message text by ID for context
@@ -1013,6 +1036,10 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         let sentMessageId = `bot_${Date.now()}`;
         
         if (finalReplyText) {
+             // PRE-REGISTER to prevent Race Condition (Echo Guard)
+             // We add it to the map BEFORE sending, so if the webhook hits immediately, it's already there.
+             recentBotReplies.set(senderId, { text: normalizeText(finalReplyText), timestamp: Date.now() });
+
              const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
              if (sentData && sentData.id) {
                  // WAHA returns { id: "...", ... } or { id: { _serialized: "..." } } depending on version
@@ -1023,10 +1050,6 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                  if (sentMessageId) {
                      console.log(`[WA Debug] Adding BotID: ${sentMessageId}`);
                      botMessageIds.add(sentMessageId);
-                     
-                     // Add to Recent Bot Replies (Text Guard)
-                     // Update: Store NORMALIZED text for robust matching
-                     recentBotReplies.set(senderId, { text: normalizeText(finalReplyText), timestamp: Date.now() });
                      
                      // Auto-clear after 2 minutes to save memory
                      setTimeout(() => {
