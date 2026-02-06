@@ -1111,6 +1111,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
 
         // 7. Save Bot Reply to DB
+        // Fix: Use 'sentMessageId' to upsert properly. 
+        // If the webhook already saved it (rare race condition), this will update it with full details.
         await dbService.saveWhatsAppChat({
             session_name: sessionName,
             sender_id: pageId || sessionName, // Bot (Page) is sender
