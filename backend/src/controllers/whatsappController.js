@@ -545,7 +545,7 @@ async function queueMessage(session, messagePayload) {
                      else handoverMap.delete(ck);
                      console.log(`[WA] Lock Status Updated for ${lockTarget}`);
                      
-                     // OPTIONAL: Save this "Admin" action to DB so it appears in chat history
+                     // Save this "Admin" action to DB
                      await dbService.saveWhatsAppChat({
                         session_name: session,
                         sender_id: session, // Treat as Admin/Page
@@ -571,6 +571,25 @@ async function queueMessage(session, messagePayload) {
              console.log(`[WA] Ignoring LID Emoji Reaction: "${msgBody}" from ${senderId}`);
              return; // STOP Processing
         }
+
+        // 3. NORMAL ADMIN CHAT from LID (No Command, Not Reaction)
+        // MUST SAVE AS ADMIN MESSAGE to prevent Bot Reply Loop
+        console.log(`[WA] LID Message (Normal Admin Chat): "${msgBody}" from ${senderId}`);
+        try {
+             await dbService.saveWhatsAppChat({
+                session_name: session,
+                sender_id: session, // Treat as Admin
+                recipient_id: messagePayload.to,
+                message_id: messagePayload.id || `lid_${Date.now()}`,
+                text: msgBody,
+                timestamp: Date.now(),
+                status: 'sent',
+                reply_by: 'admin'
+            });
+        } catch (e) {
+            console.error(`[WA] Failed to save LID Admin message: ${e.message}`);
+        }
+        return; // STOP Processing (Crucial: Don't let it fall through to User Logic)
     }
 
     // --- FAILSAFE ECHO GUARD (For "Received" messages that are actually echoes) ---
