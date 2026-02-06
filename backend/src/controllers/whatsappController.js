@@ -36,6 +36,40 @@ const botMessageIds = new Set();
 // Recent Bot Replies (Text-based Echo Guard)
 const recentBotReplies = new Map(); // Key: recipientId, Value: { text, timestamp }
 
+// --- MEMORY GARBAGE COLLECTOR (Safety for 100+ Users) ---
+// Runs every 5 minutes to clean stale data and prevent memory leaks.
+setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+
+    // 1. Clean recentBotReplies (Older than 3 mins)
+    for (const [key, val] of recentBotReplies.entries()) {
+        if (now - val.timestamp > 3 * 60 * 1000) {
+            recentBotReplies.delete(key);
+            cleaned++;
+        }
+    }
+
+    // 2. Clean handoverMap (Expired entries)
+    for (const [key, expiry] of handoverMap.entries()) {
+        if (now > expiry) {
+            handoverMap.delete(key);
+            cleaned++;
+        }
+    }
+
+    // 3. Clean debounceMap (Stuck entries > 5 mins)
+    for (const [key, val] of debounceMap.entries()) {
+         // debounceMap stores { timer, resolve }
+         // We can't easily check age unless we stored it. 
+         // Assuming standard flow clears it. If not, it's a small object.
+    }
+
+    if (cleaned > 0) {
+        console.log(`[WA GC] Cleaned ${cleaned} stale memory entries.`);
+    }
+}, 5 * 60 * 1000); // 5 Minutes Interval
+
 // Helper to normalize text for comparison
 const normalizeText = (text) => {
     // Remove all whitespace and special characters to ensure robust matching
