@@ -292,16 +292,12 @@ const handleWebhook = async (req, res) => {
                     try {
                         const config = await dbService.getWhatsAppConfig(sessionName);
                         if (config) {
-                            // Update: Use 'block_emoji' and 'unblock_emoji' from DB schema
-                            if (config.block_emoji && config.block_emoji.trim()) {
-                                LOCK_EMOJIS = config.block_emoji.split(',').map(e => e.trim()).filter(e => e);
-                            } else if (config.lock_emojis && config.lock_emojis.trim()) {
+                            // Update: Use 'lock_emojis' and 'unlock_emojis' directly
+                            if (config.lock_emojis && config.lock_emojis.trim()) {
                                 LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
                             }
                             
-                            if (config.unblock_emoji && config.unblock_emoji.trim()) {
-                                UNLOCK_EMOJIS = config.unblock_emoji.split(',').map(e => e.trim()).filter(e => e);
-                            } else if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                            if (config.unlock_emojis && config.unlock_emojis.trim()) {
                                 UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
                             }
                         }
