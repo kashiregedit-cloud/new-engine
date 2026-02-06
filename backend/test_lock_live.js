@@ -48,8 +48,12 @@ async function testLock() {
     console.log('\n--- 4. Testing Emoji Config ---');
     const config = await dbService.getWhatsAppConfig(sessionName);
     console.log('Config:', config);
-    if (config && config.lock_emojis && config.lock_emojis.length > 0) {
-        console.log(`Lock Emojis: ${config.lock_emojis}`);
+    
+    // Check both new and old columns
+    const lockEmojis = config.block_emoji || config.lock_emojis;
+    
+    if (lockEmojis && lockEmojis.length > 0) {
+        console.log(`Lock Emojis: ${lockEmojis}`);
     } else {
         console.log('WARNING: No Lock Emojis configured!');
     }

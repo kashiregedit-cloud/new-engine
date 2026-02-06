@@ -310,13 +310,17 @@ const handleWebhook = async (req, res) => {
                         console.warn(`[WA] Failed to fetch config for emoji check: ${e.message}`);
                     }
                     
+                    // Helper to strip variation selectors (VS16) which cause mismatch
+                    const stripVS = (str) => (str || '').replace(/\uFE0F/g, '');
+
                     let command = null;
                     // Check if textToSave contains any of the emojis
                     // Use standard includes, but debug what we are checking
-                    console.log(`[WA Handover] Checking text: "${textToSave}"`);
+                    console.log(`[WA Handover] Checking text: "${textToSave}" (Hex: ${Buffer.from(textToSave).toString('hex')})`);
+                    console.log(`[WA Handover] Lock Emojis: ${LOCK_EMOJIS.join('|')} (Hex: ${LOCK_EMOJIS.map(e => Buffer.from(e).toString('hex')).join('|')})`);
                     
                     for (const e of LOCK_EMOJIS) {
-                        if (textToSave.includes(e)) {
+                        if (stripVS(textToSave).includes(stripVS(e))) {
                             command = 'LOCK';
                             console.log(`[WA Handover] Matched Lock Emoji: ${e}`);
                             break;
@@ -324,7 +328,7 @@ const handleWebhook = async (req, res) => {
                     }
                     if (!command) {
                         for (const e of UNLOCK_EMOJIS) {
-                            if (textToSave.includes(e)) {
+                            if (stripVS(textToSave).includes(stripVS(e))) {
                                 command = 'UNLOCK';
                                 console.log(`[WA Handover] Matched Unlock Emoji: ${e}`);
                                 break;

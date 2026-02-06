@@ -116,8 +116,8 @@ export default function WhatsAppControlPage() {
           audio_detection: row.audio_detection ?? false,
           file_upload: row.file_upload ?? false,
           group_reply: row.group_reply ?? false,
-          lock_emojis: row.lock_emojis ?? "",
-          unlock_emojis: row.unlock_emojis ?? "",
+          lock_emojis: row.block_emoji ?? row.lock_emojis ?? "", // Support both (Prioritize block_emoji)
+          unlock_emojis: row.unblock_emoji ?? row.unlock_emojis ?? "",
           check_conversion: row.check_conversion ?? 20,
           image_prompt: row.image_prompt ?? ""
         });
@@ -196,16 +196,24 @@ export default function WhatsAppControlPage() {
     try {
       // Filter out keys that might not exist in DB or handled separately
       // We know these columns exist from whatsapp_tables.sql
+      // Update: Mapping UI 'lock_emojis' -> DB 'block_emoji' to match SQL schema
       const validColumns = [
         'reply_message', 'swipe_reply', 'image_detection', 'image_send', 
         'order_tracking', 'audio_detection', 'file_upload', 'group_reply',
-        'lock_emojis', 'unlock_emojis', 'check_conversion'
+        'block_emoji', 'unblock_emoji', 'check_conversion'
       ];
 
       const updates: any = {};
       validColumns.forEach(key => {
-        // @ts-ignore
-        updates[key] = config[key];
+        // Map UI keys to DB keys
+        if (key === 'block_emoji') {
+           updates[key] = config.lock_emojis;
+        } else if (key === 'unblock_emoji') {
+           updates[key] = config.unlock_emojis;
+        } else {
+           // @ts-ignore
+           updates[key] = config[key];
+        }
       });
 
       const { data, error } = await (supabase
