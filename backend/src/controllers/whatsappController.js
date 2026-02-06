@@ -37,6 +37,13 @@ const recentMessageIds = new Set();
 const botMessageIds = new Set();
 // Sent Message History (Fuzzy Match Guard)
 const sentMessageHistory = new Map(); // Key: recipient_body, Value: { ts: number }
+// Recent Bot Replies (Strong Echo Guard)
+const recentBotReplies = new Map(); // Key: recipient_id, Value: { text: string, ts: number }
+
+// Helper to normalize text for comparison
+const normalizeText = (text) => {
+    return (text || '').toLowerCase().replace(/\s+/g, '').trim();
+};
 
 // Step 1: Webhook Trigger
 const handleWebhook = async (req, res) => {
@@ -105,15 +112,24 @@ const handleWebhook = async (req, res) => {
             // If we recently sent a message with SAME content to SAME user within 10 seconds, ignore it.
             // This catches cases where ID format differs completely (e.g. true_... vs false_...)
             const targetRecipient = payload.to;
-            const targetBody = (payload.body || '').trim().toLowerCase(); // Normalize
+            const targetBody = normalizeText(payload.body);
             const now = Date.now();
             
+            // 1. Check Strong Echo Guard (recentBotReplies)
+            const lastBotReply = recentBotReplies.get(targetRecipient);
+            if (lastBotReply && (now - lastBotReply.ts < 20000)) { // 20s window
+                if (lastBotReply.text === targetBody) {
+                    console.log(`[WA] Ignoring fromMe message (Strong Echo Match): "${targetBody.substring(0, 30)}..."`);
+                    return;
+                }
+            }
+
             // Clean up old sent history
             for (const [key, val] of sentMessageHistory.entries()) {
                 if (now - val.ts > 15000) sentMessageHistory.delete(key); // Increased to 15s
             }
             
-            // Check
+            // Check Fuzzy History
             const historyKey = `${targetRecipient}_${targetBody}`;
             if (sentMessageHistory.has(historyKey)) {
                 console.log(`[WA] Ignoring fromMe message (Fuzzy Match): ${historyKey.substring(0,50)}...`);
@@ -152,17 +168,17 @@ const handleWebhook = async (req, res) => {
                  
                  const textToSave = messageText.trim() || '[Media Sent]';
                  
-                 // --- BOT ECHO CHECK ---
+                 // --- BOT ECHO CHECK (Fallback to DB) ---
                  // Verify if this 'Admin' message is actually just an echo of the last Bot Reply
                  try {
                      const lastMsg = await dbService.getLastWhatsAppMessage(sessionName, payload.to);
                      if (lastMsg && lastMsg.reply_by === 'bot') {
                          // Normalize strings for comparison (ignore small whitespace diffs)
-                         const cleanLast = (lastMsg.text || '').trim();
-                         const cleanNew = textToSave.trim();
+                         const cleanLast = normalizeText(lastMsg.text);
+                         const cleanNew = normalizeText(textToSave);
                          
                          if (cleanLast === cleanNew) {
-                             console.log(`[WA] Ignoring Bot Echo (Duplicate Admin Event): "${cleanNew.substring(0, 30)}..."`);
+                             console.log(`[WA] Ignoring Bot Echo (Duplicate Admin Event via DB): "${cleanNew.substring(0, 30)}..."`);
                              return;
                          }
                      }
@@ -334,6 +350,44 @@ async function queueMessage(session, messagePayload) {
         }
     } catch (err) {
         console.warn(`[WA] Failed to check lock status: ${err.message}`);
+    }
+
+    // 3. History Scan (Double Check via Emoji in previous messages)
+    // User Request: Check old conversion for lock emojis (like Messenger)
+    try {
+        let LOCK_EMOJIS = ['🛑', '🔒', '⛔'];
+        let UNLOCK_EMOJIS = ['🟢', '🔓', '✅'];
+        
+        const config = await dbService.getWhatsAppConfig(sessionName);
+        if (config) {
+            if (config.lock_emojis && config.lock_emojis.trim()) {
+                LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
+            }
+            if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
+            }
+        }
+
+        const historyCheck = await dbService.checkWhatsAppEmojiLock(sessionName, senderId, LOCK_EMOJIS, UNLOCK_EMOJIS);
+        
+        if (historyCheck) {
+            if (historyCheck.locked) {
+                console.log(`[WA] History Scan: Locked via emoji at ${historyCheck.timestamp}. Stopping AI.`);
+                // Update Memory
+                handoverMap.set(chatKey, Date.now() + 24 * 60 * 60 * 1000);
+                // Update DB (Self-Healing)
+                await dbService.toggleWhatsAppLock(sessionName, senderId, true);
+                return;
+            } else {
+                // Unlocked (Latest emoji was Unlock)
+                // console.log(`[WA] History Scan: Unlocked via emoji at ${historyCheck.timestamp}.`);
+                handoverMap.delete(chatKey);
+                // Ensure DB is clear
+                await dbService.toggleWhatsAppLock(sessionName, senderId, false);
+            }
+        }
+    } catch (err) {
+        console.warn(`[WA] History scan failed: ${err.message}`);
     }
 
     // Handle Images/Media (If WAHA exposes URL)
@@ -992,6 +1046,11 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         let sentMessageId = `bot_${Date.now()}`;
         
         if (finalReplyText) {
+             // Register Strong Echo Guard BEFORE Sending
+             // This covers the race condition where Webhook arrives before Send completes
+             const normalizedReply = normalizeText(finalReplyText);
+             recentBotReplies.set(senderId, { text: normalizedReply, ts: Date.now() });
+
              const sentData = await whatsappService.sendMessage(sessionName, senderId, finalReplyText);
              if (sentData && sentData.id) {
                  // WAHA returns { id: "...", ... } or { id: { _serialized: "..." } } depending on version
@@ -1007,7 +1066,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
 
                  // Add to Fuzzy Match History
                  // Normalize key for consistency
-                 const historyKey = `${senderId}_${finalReplyText.trim().toLowerCase()}`;
+                 const historyKey = `${senderId}_${normalizedReply}`;
                  sentMessageHistory.set(historyKey, { ts: Date.now() });
              }
         }

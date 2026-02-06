@@ -573,6 +573,13 @@ async function saveWhatsAppContact(data) {
 
 // 20. Toggle WhatsApp Lock (Handover)
 async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
+    console.log(`[WA Lock] Toggling lock for ${sessionName} - User: ${phoneNumber} -> ${isLocked}`);
+
+    if (!sessionName || !phoneNumber) {
+        console.error("[WA Lock] Missing sessionName or phoneNumber");
+        return false;
+    }
+
     // 1. Try UPDATE first (Works without Unique Constraint if row exists)
     const { data, error } = await supabase
         .from('whatsapp_contacts')
@@ -585,30 +592,70 @@ async function toggleWhatsAppLock(sessionName, phoneNumber, isLocked) {
         .select();
 
     if (error) {
-        console.error("Error updating WA lock:", error.message);
-        return false;
+        console.error(`[WA Lock] Update failed: ${error.message}. Trying Upsert...`);
+        // Don't return false yet, try upsert/insert as fallback
+    } else if (data && data.length > 0) {
+        console.log(`[WA Lock] Update successful for ${phoneNumber}`);
+        return true;
     }
 
-    // If update succeeded (row existed), we are done.
-    if (data && data.length > 0) return true;
-
     // 2. If no row found, Try UPSERT/INSERT
-    // This handles the "New Contact" case, but requires Unique Constraint for Upsert.
-    // We'll try standard Upsert here as fallback.
+    // We include 'name' as 'Unknown' to satisfy potential non-null constraints
     const { error: upsertError } = await supabase
         .from('whatsapp_contacts')
         .upsert({
             session_name: sessionName,
             phone_number: phoneNumber,
             is_locked: isLocked,
+            name: 'Unknown', // Default name
             last_interaction: new Date().toISOString()
         }, { onConflict: 'session_name, phone_number' });
 
     if (upsertError) {
-        console.error("Error upserting WA lock:", upsertError.message);
+        console.error(`[WA Lock] Upsert failed: ${upsertError.message}`);
         return false;
     }
+    
+    console.log(`[WA Lock] Upsert successful for ${phoneNumber}`);
     return true;
+}
+
+// 27. Check WhatsApp Emoji Lock (History Scan)
+async function checkWhatsAppEmojiLock(sessionName, phoneNumber, lockEmojis, unlockEmojis) {
+    try {
+        // Fetch last 10 messages from Admin or Bot (Page side)
+        const { data, error } = await supabase
+            .from('whatsapp_chats')
+            .select('text, reply_by, timestamp')
+            .eq('session_name', sessionName)
+            .eq('recipient_id', phoneNumber) // Messages sent TO user
+            .in('reply_by', ['admin', 'bot']) // Only check Page replies
+            .order('timestamp', { ascending: false })
+            .limit(10);
+
+        if (error || !data || data.length === 0) return null;
+
+        // Iterate from newest to oldest
+        for (const msg of data) {
+            const text = (msg.text || '').trim();
+            if (!text) continue;
+
+            // Check for Lock Emojis
+            for (const emoji of lockEmojis) {
+                if (text.includes(emoji)) return { locked: true, timestamp: msg.timestamp };
+            }
+
+            // Check for Unlock Emojis
+            for (const emoji of unlockEmojis) {
+                if (text.includes(emoji)) return { locked: false, timestamp: msg.timestamp };
+            }
+        }
+
+        return null; // No emoji found in recent history
+    } catch (e) {
+        console.error("Error checking emoji lock history:", e);
+        return null;
+    }
 }
 
 // 21. Get WhatsApp Contact (Check Lock Status)
@@ -1077,5 +1124,6 @@ module.exports = {
     getExpiredWhatsAppSessions,
     deductUserBalance,
     deleteWhatsAppEntry,
-    checkWhatsAppLockStatus
+    checkWhatsAppLockStatus,
+    checkWhatsAppEmojiLock
 };
