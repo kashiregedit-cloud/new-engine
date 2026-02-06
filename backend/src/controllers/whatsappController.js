@@ -345,12 +345,10 @@ const handleWebhook = async (req, res) => {
 async function queueMessage(session, messagePayload) {
     let senderId = messagePayload.from; // e.g., 12345678@c.us
     
-    // Fix for Linked Devices (@lid) - Normalize to @c.us for Reply Capability
-    // WAHA/WhatsApp cannot reliably reply to @lid. We must use @c.us (Phone Number).
+    // Fix for Linked Devices (@lid)
+    // User Update: Do NOT convert @lid to @c.us. Use as is.
     if (senderId && senderId.includes('@lid')) {
-        const originalId = senderId;
-        senderId = senderId.replace('@lid', '@c.us');
-        console.log(`[WA] Normalized @lid sender: ${originalId} -> ${senderId}`);
+        console.log(`[WA] Processing message from Linked Device (@lid): ${senderId}`);
     }
 
     const sessionName = session; // Using WAHA Session as Session Name
@@ -430,6 +428,21 @@ async function queueMessage(session, messagePayload) {
     }
 
     const sessionData = debounceMap.get(sessionId);
+    
+    // --- EXTRACT MEDIA (Fix for ReferenceError) ---
+    const imageUrls = [];
+    const audioUrls = [];
+
+    if (messagePayload.mediaUrl) {
+        const mime = messagePayload.mimetype || '';
+        if (mime.startsWith('image/')) imageUrls.push(messagePayload.mediaUrl);
+        else if (mime.startsWith('audio/') || mime.includes('audio') || messagePayload.type === 'ptt') audioUrls.push(messagePayload.mediaUrl);
+    } else if (messagePayload.hasMedia && messagePayload.body && messagePayload.body.startsWith('http')) {
+        // Fallback: If body contains URL and hasMedia is true
+        if (messagePayload.type === 'image') imageUrls.push(messagePayload.body);
+        else if (messagePayload.type === 'ptt' || messagePayload.type === 'audio') audioUrls.push(messagePayload.body);
+    }
+    // ---------------------------------------------
     
     // Push Object
     // Extract Quoted Message Data (Lightweight System - Webhook Data)
