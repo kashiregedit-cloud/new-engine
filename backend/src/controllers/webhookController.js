@@ -523,7 +523,7 @@ async function processBufferedMessages(sessionId, pageId, senderId, messages) {
             for (const msg of messages) {
                 if (msg.images && msg.images.length > 0) {
                     try {
-                        const imagePromises = msg.images.map(url => aiService.processImageWithVision(url, pageConfig));
+                        const imagePromises = msg.images.map(url => aiService.processImageWithVision(url, pageConfig, { prompt: pagePrompts?.image_prompt }));
                         const imageResults = await Promise.all(imagePromises);
                         
                         // Extract text and usage

@@ -355,7 +355,7 @@ async function generateReply(userMessage, pageConfig, pagePrompts, history = [],
 
     // --- MODEL NAME NORMALIZATION & ALIASES ---
     const MODEL_ALIASES = {
-        'gemini-2.5-flash': 'gemini-2.0-flash', // User Alias
+        // 'gemini-2.5-flash': 'gemini-2.0-flash', // REMOVED: User wants explicit control for Own API
         'gemini-2.5-flash-lite': 'gemini-2.0-flash-lite-preview-02-05', // User Alias
         'groq-fast': 'llama-3.3-70b-versatile', 
         'groq-speed': 'llama-3.1-8b-instant', 

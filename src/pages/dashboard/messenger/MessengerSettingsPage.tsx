@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   Dialog,
@@ -79,6 +80,7 @@ export default function MessengerSettingsPage() {
   // New State for System Prompt Modal
   const [isPromptOpen, setIsPromptOpen] = useState(false);
   const [tempPrompt, setTempPrompt] = useState("");
+  const [tempImagePrompt, setTempImagePrompt] = useState(""); // New State for Image Prompt
   const [promptSaving, setPromptSaving] = useState(false);
   
   // New State for Behavior Settings
@@ -161,6 +163,8 @@ export default function MessengerSettingsPage() {
         const pageRow = pageData as any;
         
         setVerified(dbRow.verified !== false);
+        setTempPrompt(dbRow.text_prompt || "");
+        setTempImagePrompt(dbRow.image_prompt || ""); // Load Image Prompt
 
         // Check ownership
         const { data: { user } } = await supabase.auth.getUser();
@@ -246,7 +250,10 @@ export default function MessengerSettingsPage() {
     try {
         const { error } = await (supabase
             .from('fb_message_database') as any)
-            .update({ text_prompt: tempPrompt })
+            .update({ 
+                text_prompt: tempPrompt,
+                image_prompt: tempImagePrompt // Save Image Prompt
+            })
             .eq('id', parseInt(dbId));
 
         if (error) throw error;
@@ -254,7 +261,7 @@ export default function MessengerSettingsPage() {
         // Also update form state to keep in sync
         form.setValue('text_prompt', tempPrompt);
         
-        toast.success("System prompt updated successfully!");
+        toast.success("System & Image prompts updated successfully!");
         
         // Auto-Trigger RAG Ingestion in Background
         if (pageId) {
@@ -510,18 +517,43 @@ export default function MessengerSettingsPage() {
       <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
         <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
             <DialogHeader>
-                <DialogTitle>Edit System Prompt</DialogTitle>
+                <DialogTitle>Edit AI Instructions</DialogTitle>
                 <DialogDescription>
-                    Define your AI's persona, knowledge base, and behavior rules. This update is independent of your plan.
+                    Define your AI's persona and how it handles images.
                 </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 py-4">
-                <Textarea 
-                    value={tempPrompt}
-                    onChange={(e) => setTempPrompt(e.target.value)}
-                    className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
-                    placeholder="You are a helpful assistant..."
-                />
+            <div className="flex-1 py-4 overflow-hidden">
+                <Tabs defaultValue="text" className="h-full flex flex-col">
+                    <TabsList>
+                        <TabsTrigger value="text">System Prompt (Text)</TabsTrigger>
+                        <TabsTrigger value="image">Image Detection Prompt</TabsTrigger>
+                    </TabsList>
+                    
+                    <TabsContent value="text" className="flex-1 mt-4 h-full">
+                        <Textarea 
+                            value={tempPrompt}
+                            onChange={(e) => setTempPrompt(e.target.value)}
+                            className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
+                            placeholder="You are a helpful assistant..."
+                        />
+                    </TabsContent>
+                    
+                    <TabsContent value="image" className="flex-1 mt-4 h-full">
+                         <div className="space-y-2 h-full flex flex-col">
+                            <div className="bg-muted/50 p-4 rounded-lg text-sm text-muted-foreground">
+                                <p className="font-semibold mb-1">How Image Detection Works:</p>
+                                <p>When a user sends an image, the AI will first "see" it using this prompt. The result is then passed to the main chat AI.</p>
+                                <p className="mt-2 italic">Example: "Analyze this image. If it's a product, identify the name, price, and color. If it's a payment screenshot, extract the transaction ID."</p>
+                            </div>
+                            <Textarea 
+                                value={tempImagePrompt}
+                                onChange={(e) => setTempImagePrompt(e.target.value)}
+                                className="w-full flex-1 font-mono text-sm leading-relaxed p-4 resize-none"
+                                placeholder="Describe how the AI should analyze images..."
+                            />
+                        </div>
+                    </TabsContent>
+                </Tabs>
             </div>
             <DialogFooter className="flex justify-between items-center sm:justify-between w-full">
                 <div className="flex gap-2">
@@ -543,7 +575,7 @@ export default function MessengerSettingsPage() {
                     <Button variant="outline" onClick={() => setIsPromptOpen(false)}>Cancel</Button>
                     <Button onClick={handleSavePrompt} disabled={promptSaving || optimizing}>
                         {promptSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" /> : <Save className="mr-2 h-4 w-4" />}
-                        Save Prompt Only
+                        Save Prompts
                     </Button>
                 </div>
             </DialogFooter>
