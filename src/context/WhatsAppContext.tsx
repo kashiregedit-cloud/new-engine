@@ -81,60 +81,26 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       }
 
       // 2. Fetch all from WAHA via Backend
-      const res = await fetch(`${BACKEND_URL}/whatsapp/sessions`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      
+      const res = await fetch(`${BACKEND_URL}/whatsapp/sessions`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       const wahaSessions = await res.json();
       const allSessions: WahaSession[] = Array.isArray(wahaSessions) ? wahaSessions : [];
 
       let formattedSessions: WahaSession[] = [];
 
-      // 3. Filter by target email from Supabase
-      // Note: We switched to whatsapp_message_database which uses user_id
-      // For shared sessions (Team Mode), we use 'email' column.
-      // For own sessions, we use 'user_id' (to support old sessions without email).
-      
-      let query = supabase
-          .from('whatsapp_message_database')
-          .select('id, session_name, expires_at');
-        
-      if (isViewingOwner) {
-          // Viewing someone else's sessions -> Must match email
-          query = query.eq('email', targetEmail);
+      // 3. Filter based on View Mode using backend 'is_shared' flag
+      // The backend now handles Auth and Permissions (returning only allowed sessions).
+      if (viewMode === 'team' && isMember) {
+          // Show shared sessions (where I am not the owner)
+          formattedSessions = allSessions.filter(s => s.is_shared);
       } else {
-          // Viewing my own sessions -> Match user_id
-          query = query.eq('user_id', user.id);
+          // Show personal sessions (where I am the owner, or it's a new/unlinked session)
+          formattedSessions = allSessions.filter(s => !s.is_shared);
       }
-
-      const { data: mySessions } = await query.returns<{ id: number; session_name: string; expires_at: string | null }[]>();
-        
-      const dbSessionMap = new Map(mySessions?.map(s => [s.session_name, s]) || []);
-      let allowedNames = Array.from(dbSessionMap.keys());
-      
-      // Filter by Team Permissions
-      if (viewMode === 'team' && isMember && teamData?.permissions?.wa_sessions) {
-          const allowedPermissions = teamData.permissions.wa_sessions;
-          if (Array.isArray(allowedPermissions)) {
-             allowedNames = allowedNames.filter(name => allowedPermissions.includes(name));
-          }
-      }
-      
-      // Filter WAHA sessions to only show allowed ones and merge DB data
-      formattedSessions = allSessions
-          .filter((s) => allowedNames.includes(s.name))
-          .map(s => {
-              // Try exact match first, then case-insensitive
-              let dbSession = dbSessionMap.get(s.name);
-              if (!dbSession) {
-                  // Fallback: Case-insensitive search
-                  const key = Array.from(dbSessionMap.keys()).find(k => k.toLowerCase() === s.name.toLowerCase());
-                  if (key) dbSession = dbSessionMap.get(key);
-              }
-
-              return {
-                ...s,
-                wp_db_id: dbSession?.id,
-                expires_at: dbSession?.expires_at
-              };
-          });
       
       setSessions(formattedSessions);
       

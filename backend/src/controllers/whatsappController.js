@@ -78,7 +78,9 @@ setInterval(() => {
 // Helper to normalize text for comparison
 const normalizeText = (text) => {
     // Remove all whitespace and special characters to ensure robust matching
-    return (text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Update: Support Unicode (Bengali) by using unicode property escapes
+    // Removes whitespace, punctuation, and symbols, keeps letters and numbers
+    return (text || '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 };
 
 // Step 1: Webhook Trigger
@@ -163,8 +165,21 @@ const handleWebhook = async (req, res) => {
 
             // 2. Text-Based Echo Guard (In-Memory)
             const recipient = payload.to;
-            const recentReplies = recentBotReplies.get(recipient);
-            if (recentReplies && Array.isArray(recentReplies)) {
+            
+            // Check keys with and without suffix to handle WAHA format variations
+            const keysToCheck = [recipient];
+            if (recipient.includes('@')) keysToCheck.push(recipient.split('@')[0]);
+            
+            let recentReplies = [];
+            for (const k of keysToCheck) {
+                const found = recentBotReplies.get(k);
+                if (found && Array.isArray(found)) {
+                    recentReplies = found;
+                    break;
+                }
+            }
+
+            if (recentReplies && recentReplies.length > 0) {
                 const incomingText = (payload.body || '').trim();
                 const normalizedIncoming = normalizeText(incomingText);
                 
@@ -175,9 +190,12 @@ const handleWebhook = async (req, res) => {
                     
                     const normalizedStored = reply.text;
                     // Robust Check: Exact, Includes, or 80% Similarity
+                    // If normalized text is empty (e.g. all symbols), fall back to raw length check or loose match
+                    if (!normalizedIncoming && !normalizedStored) return true; // Both empty -> Match
+                    
                     return normalizedIncoming === normalizedStored || 
-                           normalizedIncoming.includes(normalizedStored) || 
-                           normalizedStored.includes(normalizedIncoming);
+                           (normalizedIncoming.length > 5 && normalizedIncoming.includes(normalizedStored)) || 
+                           (normalizedStored.length > 5 && normalizedStored.includes(normalizedIncoming));
                 });
 
                 if (match) {
@@ -249,8 +267,11 @@ const handleWebhook = async (req, res) => {
                     
                     const textToSave = messageText.trim() || '[Media Sent]';
                     
-                    console.log(`[WA] Saving ADMIN message (fromMe): ${textToSave.substring(0,30)}...`);
+                    console.log(`[WA] Admin Message Detected: ${textToSave.substring(0,30)}...`);
+                    console.log(`[WA] SKIPPING DB SAVE for Admin Message (User Request to prevent duplicates).`);
                     
+                    /* 
+                    // DISABLED PER USER INSTRUCTION (Duplicate Fix)
                     await dbService.saveWhatsAppChat({
                         session_name: sessionName,
                         sender_id: sessionName, // Admin is the sender (Session Name/Page Number)
@@ -261,6 +282,7 @@ const handleWebhook = async (req, res) => {
                         status: 'sent',
                         reply_by: 'admin' // Trigger stop logic
                     });
+                    */
 
                     // --- EMOJI HANDOVER LOGIC (Admin) ---
                     // Fetch Config for Dynamic Emojis
@@ -270,21 +292,45 @@ const handleWebhook = async (req, res) => {
                     try {
                         const config = await dbService.getWhatsAppConfig(sessionName);
                         if (config) {
-                            if (config.lock_emojis && config.lock_emojis.trim()) {
+                            // Update: Use 'block_emoji' and 'unblock_emoji' from DB schema
+                            if (config.block_emoji && config.block_emoji.trim()) {
+                                LOCK_EMOJIS = config.block_emoji.split(',').map(e => e.trim()).filter(e => e);
+                            } else if (config.lock_emojis && config.lock_emojis.trim()) {
                                 LOCK_EMOJIS = config.lock_emojis.split(',').map(e => e.trim()).filter(e => e);
                             }
-                            if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                            
+                            if (config.unblock_emoji && config.unblock_emoji.trim()) {
+                                UNLOCK_EMOJIS = config.unblock_emoji.split(',').map(e => e.trim()).filter(e => e);
+                            } else if (config.unlock_emojis && config.unlock_emojis.trim()) {
                                 UNLOCK_EMOJIS = config.unlock_emojis.split(',').map(e => e.trim()).filter(e => e);
                             }
                         }
+                        console.log(`[WA Handover] Config Loaded. Lock: ${LOCK_EMOJIS.join('|')}, Unlock: ${UNLOCK_EMOJIS.join('|')}`);
                     } catch (e) {
                         console.warn(`[WA] Failed to fetch config for emoji check: ${e.message}`);
                     }
                     
                     let command = null;
                     // Check if textToSave contains any of the emojis
-                    for (const e of LOCK_EMOJIS) if (textToSave.includes(e)) command = 'LOCK';
-                    for (const e of UNLOCK_EMOJIS) if (textToSave.includes(e)) command = 'UNLOCK';
+                    // Use standard includes, but debug what we are checking
+                    console.log(`[WA Handover] Checking text: "${textToSave}"`);
+                    
+                    for (const e of LOCK_EMOJIS) {
+                        if (textToSave.includes(e)) {
+                            command = 'LOCK';
+                            console.log(`[WA Handover] Matched Lock Emoji: ${e}`);
+                            break;
+                        }
+                    }
+                    if (!command) {
+                        for (const e of UNLOCK_EMOJIS) {
+                            if (textToSave.includes(e)) {
+                                command = 'UNLOCK';
+                                console.log(`[WA Handover] Matched Unlock Emoji: ${e}`);
+                                break;
+                            }
+                        }
+                    }
                     
                     if (command) {
                         const isLocked = command === 'LOCK';

@@ -8,52 +8,98 @@ const dbService = require('../services/dbService');
 // Endpoint: /whatsapp/webhook
 router.post('/webhook', whatsappController.handleWebhook);
 
-// Get Sessions (Merged with DB Info)
+// Get Sessions (Merged with DB Info & Team Permissions)
 router.get('/sessions', async (req, res) => {
     try {
-        // 1. Get WAHA Sessions
-        const wahaSessions = await whatsappService.getSessions(true);
+        // 1. Auth Check
+        const authHeader = req.headers.authorization;
+        let userId = null;
+        let userEmail = null;
         
-        // 2. Get DB Sessions (for expiry info)
-        const { data: dbSessions, error } = await dbService.supabase
+        if (authHeader) {
+            const token = authHeader.replace('Bearer ', '');
+            const { data: { user }, error } = await dbService.supabase.auth.getUser(token);
+            if (user) {
+                userId = user.id;
+                userEmail = user.email;
+            }
+        }
+
+        if (!userId) {
+            // Return empty if not authenticated (Security)
+            return res.json([]);
+        }
+
+        // 2. Fetch User's Own Sessions (By ID or Email)
+        const { data: mySessions, error: myError } = await dbService.supabase
             .from('whatsapp_message_database')
-            .select('id, session_name, expires_at, plan_days, status, subscription_status');
+            .select('id, session_name, expires_at, plan_days, status, subscription_status, user_id, email')
+            .or(`user_id.eq.${userId},email.eq.${userEmail}`);
 
-        if (error) throw error;
+        if (myError) throw myError;
 
-        // 3. Merge
-        const mergedSessions = wahaSessions.map(ws => {
-            const dbSession = dbSessions.find(ds => ds.session_name === ws.name);
+        // 3. Fetch Shared Sessions (Team Members)
+        let sharedSessionNames = [];
+        if (userEmail) {
+            const { data: teamData, error: teamError } = await dbService.supabase
+                .from('team_members')
+                .select('permissions')
+                .eq('member_email', userEmail)
+                .eq('status', 'accepted');
+            
+            if (!teamError && teamData) {
+                teamData.forEach(row => {
+                    if (row.permissions && Array.isArray(row.permissions.wa_sessions)) {
+                        sharedSessionNames.push(...row.permissions.wa_sessions);
+                    }
+                });
+            }
+        }
+
+        let sharedSessions = [];
+        if (sharedSessionNames.length > 0) {
+            const { data: sharedData, error: sharedError } = await dbService.supabase
+                .from('whatsapp_message_database')
+                .select('id, session_name, expires_at, plan_days, status, subscription_status, user_id, email')
+                .in('session_name', sharedSessionNames);
+            
+            if (!sharedError && sharedData) {
+                sharedSessions = sharedData;
+            }
+        }
+
+        // 4. Combine DB Sessions
+        // Deduplicate by ID
+        const allDBSessions = [...(mySessions || []), ...sharedSessions];
+        const uniqueDBSessions = Array.from(new Map(allDBSessions.map(item => [item.session_name, item])).values());
+
+        // 5. Get WAHA Sessions (Real-time Status)
+        let wahaSessions = [];
+        try {
+            wahaSessions = await whatsappService.getSessions(true);
+        } catch (e) {
+            console.warn("WAHA Sessions Fetch Failed:", e.message);
+        }
+        
+        // 6. Merge and Format
+        const finalSessions = uniqueDBSessions.map(ds => {
+            const ws = wahaSessions.find(s => s.name === ds.session_name);
             return {
-                ...ws,
-                wp_db_id: dbSession?.id || null, // Critical for auto-connect
-                wp_id: dbSession?.id || null,    // For UI display
-                expires_at: dbSession?.expires_at || null,
-                plan_days: dbSession?.plan_days || null,
-                subscription_status: dbSession?.subscription_status || 'unknown',
-                db_status: dbSession?.status || 'unknown'
+                name: ds.session_name,
+                status: ws ? ws.status : (ds.status || 'STOPPED'), // Use WAHA status if available, else DB
+                config: ws ? ws.config : {},
+                me: ws ? ws.me : null,
+                wp_db_id: ds.id,
+                wp_id: ds.id,
+                expires_at: ds.expires_at,
+                plan_days: ds.plan_days,
+                subscription_status: ds.subscription_status || 'unknown',
+                db_status: ds.status || 'unknown',
+                is_shared: ds.user_id !== userId // Flag if it's a shared session
             };
         });
 
-        // Also include sessions that are in DB but NOT in WAHA (e.g. stopped/expired)
-        dbSessions.forEach(ds => {
-            if (!wahaSessions.find(ws => ws.name === ds.session_name)) {
-                mergedSessions.push({
-                    name: ds.session_name,
-                    status: 'STOPPED', // Assume stopped if not in WAHA
-                    config: {},
-                    me: null,
-                    wp_db_id: ds.id,
-                    wp_id: ds.id,
-                    expires_at: ds.expires_at,
-                    plan_days: ds.plan_days,
-                    subscription_status: ds.subscription_status || 'unknown',
-                    db_status: ds.status || 'unknown'
-                });
-            }
-        });
-
-        res.json(mergedSessions);
+        res.json(finalSessions);
     } catch (err) {
         console.error("Get Sessions Error:", err);
         res.status(500).json({ error: err.message });

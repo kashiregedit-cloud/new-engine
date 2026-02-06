@@ -80,10 +80,7 @@ export default function ProfilePage() {
   };
 
   const openAddModal = () => {
-      if (teamMembers.length >= 10) {
-          toast.error("Maximum 10 team members allowed");
-          return;
-      }
+      // Limit removed per user request
       setNewMemberEmail("");
       setSelectedFbPages([]);
       setSelectedWaSessions([]);
@@ -230,7 +227,7 @@ export default function ProfilePage() {
             
             {/* Add Member Form */}
             <div className="flex justify-end">
-              <Button onClick={openAddModal} disabled={loading || teamMembers.length >= 10}>
+              <Button onClick={openAddModal} disabled={loading}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 Add New Member
               </Button>
