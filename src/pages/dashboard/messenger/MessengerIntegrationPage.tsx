@@ -323,6 +323,20 @@ export default function MessengerIntegrationPage() {
                          }
                     } else {
                         console.log(`Subscribed app to page ${page.name}`);
+                        
+                        // VERIFY SUBSCRIPTION FROM SOURCE
+                        try {
+                            const verifySub = await fetch(`https://graph.facebook.com/v19.0/${page.id}/subscribed_apps?access_token=${page.access_token}`);
+                            const verifyData = await verifySub.json();
+                            console.log(`[Verify] Subscribed Apps for ${page.name}:`, verifyData);
+                            if (verifyData.data && verifyData.data.length > 0) {
+                                toast.success(`${page.name}: Webhook Connected (Verified)`);
+                            } else {
+                                toast.warning(`${page.name}: Subscription may have failed (No active subscription found)`);
+                            }
+                        } catch (vErr) {
+                            console.warn('Verification check failed:', vErr);
+                        }
                     }
                 } catch (subError) {
                     console.error(`Failed to subscribe app to page ${page.name}`, subError);
@@ -425,8 +439,14 @@ export default function MessengerIntegrationPage() {
                         console.warn('Backend returned no token:', exchangeData);
                     }
                 } else {
-                    console.warn('Backend exchange failed:', await exchangeResponse.text());
-                    toast.warning("Using short-lived token (Backend unreachable).");
+                    const errorText = await exchangeResponse.text();
+                    console.warn('Backend exchange failed:', errorText);
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        toast.warning(`Token Exchange Failed: ${errorJson.error || 'Unknown Error'}`);
+                    } catch (e) {
+                        toast.warning(`Backend Error: ${exchangeResponse.status} ${exchangeResponse.statusText}`);
+                    }
                 }
 
             } catch (err) {
