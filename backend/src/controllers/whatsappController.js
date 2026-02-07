@@ -768,11 +768,18 @@ async function queueMessage(session, messagePayload) {
         console.error('[WA] Failed to extract quoted content:', e);
     }
 
+    // Extract Push Name for AI Context
+    let pushName = messagePayload.pushName || messagePayload._data?.notifyName || messagePayload.notifyName;
+    if (!pushName && messagePayload.sender) {
+         pushName = messagePayload.sender.pushname || messagePayload.sender.name || messagePayload.sender.shortName;
+    }
+
     sessionData.messages.push({
         id: messageId,
         text: messageText,
         reply_to: messagePayload.replyTo?.id || null, // WAHA reply info
         quoted_text: quotedContent, // <-- NEW: Store quoted text from webhook
+        sender_name: pushName || 'Unknown', // <-- NEW: Store sender name
         images: imageUrls,
         audios: audioUrls
     });
@@ -806,6 +813,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
     let replyToId = null;
     let allImages = [];
     let allAudios = [];
+    let senderName = null;
     const isGroup = typeof senderId === 'string' && senderId.includes('@g.us');
 
     // Handover guard (Memory) - Late Check (Race Condition Fix)
@@ -825,6 +833,7 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         }
         if (msg.images && msg.images.length > 0) allImages.push(...msg.images);
         if (msg.audios && msg.audios.length > 0) allAudios.push(...msg.audios);
+        if (msg.sender_name && msg.sender_name !== 'Unknown') senderName = msg.sender_name;
     }
     // --- MERGE LOGIC (Messenger Style) ---
     // User Update: Use simple concatenation like Messenger to fix "merge message not working"
@@ -1119,6 +1128,69 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Ensure Page ID is correctly identified (Session Name = Page ID for WhatsApp)
         const pageId = sessionName; 
 
+        // --- EMOJI LOCK SYSTEM (Messenger Parity) ---
+        // Checks for admin emojis to lock/unlock AI
+        try {
+            const prompts = pageConfig.page_prompts || {};
+            const blockEmoji = prompts.block_emoji;
+            const unblockEmoji = prompts.unblock_emoji;
+            // Handle both single string and comma-separated lists
+            const lockEmojis = prompts.lock_emojis ? prompts.lock_emojis.split(',').map(e => e.trim()).filter(Boolean) : [];
+            const unlockEmojis = prompts.unlock_emojis ? prompts.unlock_emojis.split(',').map(e => e.trim()).filter(Boolean) : [];
+
+            if (blockEmoji || unblockEmoji || lockEmojis.length > 0 || unlockEmojis.length > 0) {
+                 // Fetch recent raw history for emoji detection
+                 const { data: rawHistory } = await dbService.supabase
+                    .from('whatsapp_chats')
+                    .select('text, timestamp, reply_by')
+                    .eq('session_name', sessionName)
+                    .or(`and(sender_id.eq.${senderId},recipient_id.eq.${sessionName}),and(sender_id.eq.${sessionName},recipient_id.eq.${senderId})`)
+                    .order('timestamp', { ascending: false })
+                    .limit(50); // Check last 50 messages
+
+                 if (rawHistory && rawHistory.length > 0) {
+                     let lastBlockTime = 0;
+                     let lastUnblockTime = 0;
+
+                     for (const msg of rawHistory) {
+                         // Only check Admin/System/Page messages
+                         if (msg.reply_by === 'admin' || msg.reply_by === 'system' || msg.reply_by === 'api') {
+                             const content = (msg.text || '').trim();
+                             const msgTime = new Date(msg.timestamp).getTime();
+
+                             // Check Block/Lock
+                             if ((blockEmoji && content.includes(blockEmoji)) || 
+                                 lockEmojis.some(e => content.includes(e))) {
+                                 if (msgTime > lastBlockTime) lastBlockTime = msgTime;
+                             }
+
+                             // Check Unblock/Unlock
+                             if ((unblockEmoji && content.includes(unblockEmoji)) || 
+                                 unlockEmojis.some(e => content.includes(e))) {
+                                 if (msgTime > lastUnblockTime) lastUnblockTime = msgTime;
+                             }
+                         }
+                     }
+
+                     if (lastBlockTime > lastUnblockTime) {
+                         console.log(`[WA] Conversation Locked via Emoji by Admin. (Block: ${lastBlockTime} > Unblock: ${lastUnblockTime})`);
+                         const chatKey = `${sessionName}_${senderId}`;
+                         handoverMap.set(chatKey, Date.now() + 60 * 60 * 1000); // 1 Hour Lock
+                         return; 
+                     } else if (lastUnblockTime > lastBlockTime) {
+                         // Ensure lock is cleared
+                         const chatKey = `${sessionName}_${senderId}`;
+                         if (handoverMap.has(chatKey)) {
+                             console.log(`[WA] Conversation Unlocked via Emoji by Admin.`);
+                             handoverMap.delete(chatKey);
+                         }
+                     }
+                 }
+            }
+        } catch (e) {
+            console.warn(`[WA] Emoji lock check failed: ${e.message}`);
+        }
+
         // --- CHECK LABELS (Admin Handover & Dynamic Actions) ---
         try {
             const contact = await whatsappService.getContact(sessionName, senderId);
@@ -1189,7 +1261,8 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             audioUrls: [], // Handled manually in controller
             config: pageConfig,
             platform: 'whatsapp',
-            extraTokenUsage: totalVisionTokens + totalAudioTokens // Pass vision + audio tokens
+            extraTokenUsage: totalVisionTokens + totalAudioTokens, // Pass vision + audio tokens
+            senderName: senderName // <-- NEW: Pass resolved sender name
         });
 
         if (!aiResponse) {

@@ -363,6 +363,22 @@ async function getWhatsAppConfig(sessionName) {
         data.label_actions = labelActions;
     }
 
+    // --- Page Prompts (Emoji & Config) ---
+    const { data: prompts, error: promptsError } = await supabase
+        .from('page_prompts')
+        .select('*')
+        .eq('page_id', sessionName)
+        .maybeSingle();
+
+    if (prompts) {
+        // Merge prompts into data for unified config access
+        // We preserve existing data keys if they exist
+        data.page_prompts = prompts;
+        
+        // Also map specific fields that might be expected at root level if needed
+        // but keeping them in page_prompts is cleaner.
+    }
+
     return data;
 }
 

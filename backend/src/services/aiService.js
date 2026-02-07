@@ -193,7 +193,7 @@ async function fetchOgImage(url) {
 }
 
 // Wrapper for Controller Consistency
-async function generateResponse({ pageId, userId, userMessage, history, imageUrls, audioUrls, config, platform, extraTokenUsage = 0 }) {
+async function generateResponse({ pageId, userId, userMessage, history, imageUrls, audioUrls, config, platform, extraTokenUsage = 0, senderName: explicitSenderName = null }) {
     // 1. Fetch Prompts if needed
     let pagePrompts = config;
     
@@ -210,20 +210,23 @@ async function generateResponse({ pageId, userId, userMessage, history, imageUrl
     }
 
     // 2. Resolve Sender Name (WhatsApp Specific)
-    let senderName = userId;
-    try {
-        const dbService = require('./dbService');
-        if (platform === 'whatsapp') {
-             const { data } = await dbService.supabase
-                .from('whatsapp_contacts')
-                .select('name')
-                .eq('phone_number', userId)
-                .eq('session_name', pageId)
-                .maybeSingle();
-             if (data && data.name && data.name !== 'Unknown') senderName = data.name;
+    let senderName = explicitSenderName || userId;
+    // Only fetch from DB if explicitSenderName is missing or 'Unknown'
+    if (!explicitSenderName || explicitSenderName === 'Unknown') {
+        try {
+            const dbService = require('./dbService');
+            if (platform === 'whatsapp') {
+                 const { data } = await dbService.supabase
+                    .from('whatsapp_contacts')
+                    .select('name')
+                    .eq('phone_number', userId)
+                    .eq('session_name', pageId)
+                    .maybeSingle();
+                 if (data && data.name && data.name !== 'Unknown') senderName = data.name;
+            }
+        } catch (e) {
+            // Ignore error, fallback to ID
         }
-    } catch (e) {
-        // Ignore error, fallback to ID
     }
 
     // 3. Call Core Logic
