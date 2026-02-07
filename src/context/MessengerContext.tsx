@@ -19,9 +19,9 @@ export interface MessengerContextType {
   loading: boolean;
   // Team Features
   isTeamMember: boolean;
-  teams: { owner_email: string; permissions: any }[];
-  activeTeam: { owner_email: string; permissions: any } | null;
-  setActiveTeam: (team: { owner_email: string; permissions: any } | null) => void;
+  teams: { id: number; owner_email: string; permissions: any }[];
+  activeTeam: { id: number; owner_email: string; permissions: any } | null;
+  setActiveTeam: (team: { id: number; owner_email: string; permissions: any } | null) => void;
   viewMode: 'personal' | 'team';
   switchViewMode: (mode: 'personal' | 'team') => void;
 }
@@ -35,8 +35,8 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
   
   // Team State
   const [isTeamMember, setIsTeamMember] = useState(false);
-  const [teams, setTeams] = useState<{ owner_email: string; permissions: any }[]>([]);
-  const [activeTeam, setActiveTeam] = useState<{ owner_email: string; permissions: any } | null>(null);
+  const [teams, setTeams] = useState<{ id: number; owner_email: string; permissions: any }[]>([]);
+  const [activeTeam, setActiveTeam] = useState<{ id: number; owner_email: string; permissions: any } | null>(null);
   
   const [viewMode, setViewMode] = useState<'personal' | 'team'>(() => {
     return (localStorage.getItem('messenger_view_mode') as 'personal' | 'team') || 'personal';
@@ -59,7 +59,7 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       // Check Team Membership (Allow Multiple Teams)
       const { data: teamData } = await (supabase
           .from('team_members') as any)
-          .select('owner_email, permissions')
+          .select('id, owner_email, permissions')
           .eq('member_email', user.email);
       
       const foundTeams = teamData || [];

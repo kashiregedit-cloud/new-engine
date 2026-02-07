@@ -60,7 +60,7 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
       // Check Team Membership
       const { data: teamData } = await (supabase
           .from('team_members') as any)
-          .select('owner_email, permissions')
+          .select('id, owner_email, permissions')
           .eq('member_email', user.email)
           .maybeSingle();
       
