@@ -100,42 +100,80 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
           setViewMode('personal'); // Force revert
       }
 
-      // 1. Fetch Pages via Backend API (Bypasses RLS & Handles Permissions)
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      // 1. Fetch Pages (Hybrid Approach)
+      let mergedPages: MessengerPage[] = [];
 
-      if (!token) {
-         console.error("No access token found");
-         setPages([]);
-         return;
-      }
+      if (viewMode === 'personal') {
+         // DIRECT SUPABASE (Old Method - Works without Backend Update)
+         const { data: pagesData, error: pagesError } = await supabase
+            .from('page_access_token_message')
+            .select('*')
+            .eq('email', targetEmail);
 
-      const response = await fetch(`${BACKEND_URL}/api/messenger/pages`, {
-         headers: {
-            'Authorization': `Bearer ${token}`
+         if (pagesError) throw pagesError;
+         
+         if (pagesData && pagesData.length > 0) {
+             const pageIds = pagesData.map((p: any) => p.page_id);
+             const { data: dbData, error: dbError } = await supabase
+                .from('fb_message_database')
+                .select('id, page_id')
+                .in('page_id', pageIds);
+
+             if (dbError) throw dbError;
+
+             mergedPages = pagesData.map((p: any) => {
+                const dbEntry = (dbData as any[])?.find((d: any) => d.page_id === p.page_id);
+                return {
+                   ...p,
+                   db_id: dbEntry?.id
+                };
+             });
          }
-      });
+      } else {
+         // TEAM MODE - REQUIRES BACKEND API (Bypasses RLS)
+         const { data: { session } } = await supabase.auth.getSession();
+         const token = session?.access_token;
 
-      if (!response.ok) {
-         throw new Error("Failed to fetch pages from backend");
+         if (!token) {
+             console.error("No access token found");
+             setPages([]);
+             return;
+         }
+
+         try {
+             const response = await fetch(`${BACKEND_URL}/api/messenger/pages`, {
+                 headers: {
+                    'Authorization': `Bearer ${token}`
+                 }
+             });
+
+             if (!response.ok) {
+                 // Fallback to Supabase if backend fails (though likely empty for Team)
+                 console.warn("Backend API failed, falling back to Supabase (Team mode might be empty)");
+                 throw new Error("Backend API failed");
+             }
+
+             const allPages = await response.json();
+             
+             // Filter by View Mode (Target Email) & Map
+             const filtered = allPages.filter((p: any) => p.email === targetEmail);
+             mergedPages = filtered.map((p: any) => ({
+                  ...p,
+                  db_id: p.id
+             }));
+         } catch (err) {
+             console.error("Team fetch failed:", err);
+             // Silent fail or toast? 
+             // If we throw here, it triggers the main catch block which shows the toast user complained about.
+             // We should probably try to swallow it or show a specific "Team Sync Error" instead of generic failure.
+             throw err; 
+         }
       }
 
-      const allPages = await response.json();
-
-      // 2. Filter by View Mode (Target Email)
-      let mergedPages: MessengerPage[] = allPages.filter((p: any) => p.email === targetEmail);
-
-      // Map backend response to MessengerPage interface
-      mergedPages = mergedPages.map((p: any) => ({
-          ...p,
-          db_id: p.id // Backend merges fb_message_database which has 'id'
-      }));
-
-      // 3. Filter by Team Permissions (Double Check)
+      // 3. Filter by Team Permissions (Double Check - Applies to both modes if logic requires, but mainly Team)
       if (viewMode === 'team' && currentActiveTeam?.permissions?.fb_pages) {
           const allowedIds = currentActiveTeam.permissions.fb_pages;
           if (Array.isArray(allowedIds)) {
-             // Ensure robust comparison by converting both to strings
              const allowedStrings = allowedIds.map((id: any) => String(id));
              mergedPages = mergedPages.filter(p => allowedStrings.includes(String(p.page_id)));
           }
