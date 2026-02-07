@@ -167,8 +167,22 @@ export default function MessengerIntegrationPage() {
                 resolve({ success: false, error: 'timeout' });
             }, 10000); // 10 seconds timeout
 
+            // Extended Fields for Professional Bot & Handover Protocol
+            const subscribedFields = [
+                'messages', 
+                'messaging_postbacks', 
+                'messaging_optins', 
+                'message_deliveries', 
+                'message_reads', 
+                'messaging_referrals', 
+                'standby', // Critical for Handover Protocol
+                'feed', 
+                'changes'
+            ];
+            const fieldsStr = subscribedFields.join(',');
+
             // Try using direct fetch first to avoid SDK dependency issues
-            fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=messages,messaging_postbacks,feed,changes`, {
+            fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=${fieldsStr}`, {
                 method: 'POST'
             })
             .then(res => res.json())
@@ -183,7 +197,7 @@ export default function MessengerIntegrationPage() {
                             'post',
                             {
                                 access_token: accessToken,
-                                subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
+                                subscribed_fields: subscribedFields
                             },
                             function(response: any) {
                                 if (!response || response.error) {
@@ -213,7 +227,7 @@ export default function MessengerIntegrationPage() {
                         'post',
                         {
                             access_token: accessToken,
-                            subscribed_fields: ['messages', 'messaging_postbacks', 'feed', 'changes'] 
+                            subscribed_fields: subscribedFields
                         },
                         function(response: any) {
                             if (!response || response.error) {
