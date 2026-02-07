@@ -668,6 +668,72 @@ export default function MessengerIntegrationPage() {
                 </DialogContent>
             </Dialog>
 
+            <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/10 dark:border-blue-800">
+                <CardHeader>
+                    <div className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                        <CardTitle className="text-blue-700 dark:text-blue-300">App Submission Resources</CardTitle>
+                    </div>
+                    <CardDescription>
+                        Use these details when submitting your App for Review on the Facebook Developer Console.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label className="text-xs font-semibold text-muted-foreground">Privacy Policy URL</Label>
+                            <div className="flex gap-2">
+                                <Input 
+                                    readOnly 
+                                    value={`${window.location.origin}/privacy-policy`} 
+                                    className="h-8 font-mono text-xs bg-background" 
+                                />
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(`${window.location.origin}/privacy-policy`);
+                                        toast.success("Copied Privacy Policy URL");
+                                    }}
+                                >
+                                    <Copy className="h-3 w-3" />
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-xs font-semibold text-muted-foreground">Terms of Service URL</Label>
+                            <div className="flex gap-2">
+                                <Input 
+                                    readOnly 
+                                    value={`${window.location.origin}/terms-of-service`} 
+                                    className="h-8 font-mono text-xs bg-background" 
+                                />
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-8 px-2"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(`${window.location.origin}/terms-of-service`);
+                                        toast.success("Copied Terms of Service URL");
+                                    }}
+                                >
+                                    <Copy className="h-3 w-3" />
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-background/50 p-3 rounded-md text-sm border">
+                        <span className="font-semibold block mb-1">Required Permissions for App Review:</span>
+                        <ul className="list-disc list-inside text-muted-foreground space-y-1">
+                            <li><code className="bg-muted px-1 rounded">pages_show_list</code> (To display your pages)</li>
+                            <li><code className="bg-muted px-1 rounded">pages_messaging</code> (To send/receive messages)</li>
+                            <li><code className="bg-muted px-1 rounded">pages_manage_metadata</code> (To subscribe to webhooks)</li>
+                        </ul>
+                    </div>
+                </CardContent>
+            </Card>
+
             <Card>
                 <CardHeader>
                     <CardTitle>Connected Pages</CardTitle>

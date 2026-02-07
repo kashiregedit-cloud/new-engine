@@ -1132,13 +1132,23 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
         // Checks for admin emojis to lock/unlock AI
         try {
             const prompts = pageConfig.page_prompts || {};
-            const blockEmoji = prompts.block_emoji;
-            const unblockEmoji = prompts.unblock_emoji;
-            // Handle both single string and comma-separated lists
-            const lockEmojis = prompts.lock_emojis ? prompts.lock_emojis.split(',').map(e => e.trim()).filter(Boolean) : [];
-            const unlockEmojis = prompts.unlock_emojis ? prompts.unlock_emojis.split(',').map(e => e.trim()).filter(Boolean) : [];
+            
+            // Normalize inputs from both sources (page_prompts & whatsapp_message_database)
+            // Combine all lock signals into one list
+            const lockList = [
+                prompts.block_emoji, 
+                prompts.lock_emojis, 
+                pageConfig.lock_emojis
+            ].join(',').split(',').map(e => e.trim()).filter(Boolean);
 
-            if (blockEmoji || unblockEmoji || lockEmojis.length > 0 || unlockEmojis.length > 0) {
+            // Combine all unlock signals into one list
+            const unlockList = [
+                prompts.unblock_emoji, 
+                prompts.unlock_emojis, 
+                pageConfig.unlock_emojis
+            ].join(',').split(',').map(e => e.trim()).filter(Boolean);
+
+            if (lockList.length > 0 || unlockList.length > 0) {
                  // Fetch recent raw history for emoji detection
                  const { data: rawHistory } = await dbService.supabase
                     .from('whatsapp_chats')
@@ -1159,14 +1169,12 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
                              const msgTime = new Date(msg.timestamp).getTime();
 
                              // Check Block/Lock
-                             if ((blockEmoji && content.includes(blockEmoji)) || 
-                                 lockEmojis.some(e => content.includes(e))) {
+                             if (lockList.some(e => content.includes(e))) {
                                  if (msgTime > lastBlockTime) lastBlockTime = msgTime;
                              }
 
                              // Check Unblock/Unlock
-                             if ((unblockEmoji && content.includes(unblockEmoji)) || 
-                                 unlockEmojis.some(e => content.includes(e))) {
+                             if (unlockList.some(e => content.includes(e))) {
                                  if (msgTime > lastUnblockTime) lastUnblockTime = msgTime;
                              }
                          }
