@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { BACKEND_URL } from "@/config";
 
 export interface MessengerPage {
   page_id: string;
@@ -99,40 +100,38 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
           setViewMode('personal'); // Force revert
       }
 
-      // 1. Fetch Pages
-      // Explicitly typing the response to avoid 'never' issues
-      const { data: pagesData, error: pagesError } = await supabase
-        .from('page_access_token_message')
-        .select('*')
-        .eq('email', targetEmail);
+      // 1. Fetch Pages via Backend API (Bypasses RLS & Handles Permissions)
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      if (pagesError) throw pagesError;
-      
-      if (!pagesData || pagesData.length === 0) {
-        setPages([]);
-        setCurrentPage(null);
-        return;
+      if (!token) {
+         console.error("No access token found");
+         setPages([]);
+         return;
       }
 
-      // 2. Fetch DB IDs for these pages
-      const pageIds = pagesData.map((p: any) => p.page_id);
-      const { data: dbData, error: dbError } = await supabase
-        .from('fb_message_database')
-        .select('id, page_id')
-        .in('page_id', pageIds);
-
-      if (dbError) throw dbError;
-
-      // 3. Merge Data
-      let mergedPages: MessengerPage[] = pagesData.map((p: any) => {
-        const dbEntry = (dbData as any[])?.find((d: any) => d.page_id === p.page_id);
-        return {
-          ...p,
-          db_id: dbEntry?.id
-        };
+      const response = await fetch(`${BACKEND_URL}/api/messenger/pages`, {
+         headers: {
+            'Authorization': `Bearer ${token}`
+         }
       });
 
-      // Filter by Team Permissions
+      if (!response.ok) {
+         throw new Error("Failed to fetch pages from backend");
+      }
+
+      const allPages = await response.json();
+
+      // 2. Filter by View Mode (Target Email)
+      let mergedPages: MessengerPage[] = allPages.filter((p: any) => p.email === targetEmail);
+
+      // Map backend response to MessengerPage interface
+      mergedPages = mergedPages.map((p: any) => ({
+          ...p,
+          db_id: p.id // Backend merges fb_message_database which has 'id'
+      }));
+
+      // 3. Filter by Team Permissions (Double Check)
       if (viewMode === 'team' && currentActiveTeam?.permissions?.fb_pages) {
           const allowedIds = currentActiveTeam.permissions.fb_pages;
           if (Array.isArray(allowedIds)) {

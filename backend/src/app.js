@@ -7,6 +7,7 @@ const whatsappRoutes = require('./routes/whatsappRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const authRoutes = require('./routes/authRoutes');
 const logRoutes = require('./routes/logRoutes');
+const messengerRoutes = require('./routes/messengerRoutes');
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use('/whatsapp', whatsappRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/log', logRoutes);
+app.use('/api/messenger', messengerRoutes);
 
 // Serve Frontend Static Files
 const frontendPath = path.join(__dirname, '../../dist');
