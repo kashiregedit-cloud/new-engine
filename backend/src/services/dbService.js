@@ -560,14 +560,33 @@ async function deductWhatsAppCredit(sessionName, amount = 1) {
 // 19. Save WhatsApp Contact (Lead)
 async function saveWhatsAppContact(data) {
     // data: { session_name, phone_number, name }
+    
+    // Smart Update: Don't overwrite existing names with 'Unknown'
+    const { data: existing } = await supabase
+        .from('whatsapp_contacts')
+        .select('name')
+        .eq('session_name', data.session_name)
+        .eq('phone_number', data.phone_number)
+        .maybeSingle();
+
+    const updates = {
+        session_name: data.session_name,
+        phone_number: data.phone_number,
+        last_interaction: new Date().toISOString()
+    };
+
+    // If we have a valid name, always use it
+    if (data.name && data.name !== 'Unknown' && data.name.trim() !== '') {
+        updates.name = data.name;
+    } else if (!existing) {
+        // If new contact and no name, set default
+        updates.name = 'Unknown';
+    }
+    // If existing exists and new name is Unknown, we omit 'name' from updates to preserve old value
+
     const { error } = await supabase
         .from('whatsapp_contacts')
-        .upsert({
-            session_name: data.session_name,
-            phone_number: data.phone_number,
-            name: data.name,
-            last_interaction: new Date().toISOString()
-        }, { onConflict: 'session_name, phone_number' });
+        .upsert(updates, { onConflict: 'session_name, phone_number' });
 
     if (error) console.error("Error saving WA contact:", error.message);
 }

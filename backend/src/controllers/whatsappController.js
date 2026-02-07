@@ -318,15 +318,25 @@ const handleWebhook = async (req, res) => {
                     try {
                         const config = await dbService.getWhatsAppConfig(sessionName);
                         if (config) {
-                            // Update: Use 'lock_emojis' and 'unlock_emojis' directly
-                            // Split by comma or space to be flexible
+                            // Support both Messenger-style (single emoji) and List-style (comma separated)
+                            const locks = [];
+                            const unlocks = [];
+
+                            // 1. Messenger Style (block_emoji / unblock_emoji)
+                            if (config.block_emoji) locks.push(config.block_emoji);
+                            if (config.unblock_emoji) unlocks.push(config.unblock_emoji);
+
+                            // 2. List Style (lock_emojis / unlock_emojis)
                             if (config.lock_emojis && config.lock_emojis.trim()) {
-                                LOCK_EMOJIS = config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
+                                locks.push(...config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e));
                             }
-                            
                             if (config.unlock_emojis && config.unlock_emojis.trim()) {
-                                UNLOCK_EMOJIS = config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
+                                unlocks.push(...config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e));
                             }
+
+                            // Update if we found any
+                            if (locks.length > 0) LOCK_EMOJIS = locks;
+                            if (unlocks.length > 0) UNLOCK_EMOJIS = unlocks;
                         }
                         console.log(`[WA Handover] Config Loaded. Lock: ${LOCK_EMOJIS.join('|')}, Unlock: ${UNLOCK_EMOJIS.join('|')}`);
                     } catch (e) {
@@ -496,12 +506,25 @@ async function queueMessage(session, messagePayload) {
             // Use sessionName (which is passed as 'session' arg)
             const config = await dbService.getWhatsAppConfig(session);
             if (config) {
-                if (config.lock_emojis && config.lock_emojis.trim()) {
-                    LOCK_EMOJIS = config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
-                }
-                if (config.unlock_emojis && config.unlock_emojis.trim()) {
-                    UNLOCK_EMOJIS = config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e);
-                }
+                 // Support both Messenger-style (single emoji) and List-style (comma separated)
+                 const locks = [];
+                 const unlocks = [];
+
+                 // 1. Messenger Style (block_emoji / unblock_emoji)
+                 if (config.block_emoji) locks.push(config.block_emoji);
+                 if (config.unblock_emoji) unlocks.push(config.unblock_emoji);
+
+                 // 2. List Style (lock_emojis / unlock_emojis)
+                 if (config.lock_emojis && config.lock_emojis.trim()) {
+                     locks.push(...config.lock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e));
+                 }
+                 if (config.unlock_emojis && config.unlock_emojis.trim()) {
+                     unlocks.push(...config.unlock_emojis.split(/[, ]+/).map(e => e.trim()).filter(e => e));
+                 }
+
+                 // Update if we found any
+                 if (locks.length > 0) LOCK_EMOJIS = locks;
+                 if (unlocks.length > 0) UNLOCK_EMOJIS = unlocks;
             }
         } catch (e) {
             console.warn(`[WA LID] Failed to fetch config for emoji check: ${e.message}`);
@@ -647,7 +670,16 @@ async function queueMessage(session, messagePayload) {
         });
         
         // Save Contact/Lead
-        const pushName = messagePayload._data?.notifyName || messagePayload.pushName || 'Unknown';
+        // Enhanced Name Extraction
+        let pushName = messagePayload.pushName || messagePayload._data?.notifyName || messagePayload.notifyName;
+        
+        // Deep search for name in various WAHA payload structures
+        if (!pushName && messagePayload.sender) {
+             pushName = messagePayload.sender.pushname || messagePayload.sender.name || messagePayload.sender.shortName;
+        }
+        
+        if (!pushName) pushName = 'Unknown';
+
         await dbService.saveWhatsAppContact({
             session_name: sessionName,
             phone_number: senderId,

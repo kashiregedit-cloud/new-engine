@@ -220,7 +220,7 @@ async function generateResponse({ pageId, userId, userMessage, history, imageUrl
                 .eq('phone_number', userId)
                 .eq('session_name', pageId)
                 .maybeSingle();
-             if (data && data.name) senderName = data.name;
+             if (data && data.name && data.name !== 'Unknown') senderName = data.name;
         }
     } catch (e) {
         // Ignore error, fallback to ID
