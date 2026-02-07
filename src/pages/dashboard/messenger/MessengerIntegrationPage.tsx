@@ -188,7 +188,7 @@ export default function MessengerIntegrationPage() {
                     'post',
                     {
                         access_token: accessToken,
-                        subscribed_fields: subscribedFields
+                        subscribed_fields: fieldsStr // Send as string for compatibility
                     },
                     function(response: any) {
                         clearTimeout(timeoutId);
@@ -401,7 +401,7 @@ export default function MessengerIntegrationPage() {
                     } else {
                         reject(new Error("User cancelled login or did not fully authorize."));
                     }
-                }, {scope: 'pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata'});
+                }, {scope: 'pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata,pages_read_user_content'});
             });
 
             console.log('Successfully logged in, exchanging token...');
