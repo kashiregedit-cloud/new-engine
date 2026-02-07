@@ -5,6 +5,7 @@ const fs = require('fs');
 const webhookRoutes = require('./routes/webhookRoutes');
 const whatsappRoutes = require('./routes/whatsappRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use('/webhook', webhookRoutes);
 app.use('/whatsapp', whatsappRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/auth', authRoutes);
 
 // Serve Frontend Static Files
 const frontendPath = path.join(__dirname, '../../dist');
