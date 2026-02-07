@@ -25,6 +25,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { BACKEND_URL } from "@/config";
 import { useMessenger } from "@/context/MessengerContext";
+import { logFrontendError } from "@/lib/logger";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // --- Types & Interfaces ---
@@ -254,6 +255,11 @@ export default function MessengerIntegrationPage() {
                     function(response: any) {
                         if (!response || response.error) {
                             console.error('Error unsubscribing app from page:', response?.error);
+                            logFrontendError({
+                                message: `Unsubscribe Error: ${JSON.stringify(response?.error)}`,
+                                context: 'MessengerIntegrationPage:unsubscribeAppFromPage',
+                                pageId: pageId
+                            });
                             resolve(false);
                         } else {
                             console.log('Successfully unsubscribed app from page:', response);
@@ -325,6 +331,15 @@ export default function MessengerIntegrationPage() {
                     if (subResult?.error) {
                         // Final Failure
                         console.error(`Basic subscription failed for ${page.name}`, subResult.error);
+                        
+                        // Log to Backend
+                        logFrontendError({
+                            message: `Subscription Failed for ${page.name}: ${JSON.stringify(subResult.error)}`,
+                            context: 'MessengerIntegrationPage:subscribeAppToPage',
+                            pageName: page.name,
+                            pageId: page.id
+                        });
+
                         toast.error(`${page.name}: Connection Failed. ${subResult.error.message || 'Check Permissions'}`);
                     } else {
                         console.log(`Subscribed app to page ${page.name}`);
@@ -347,8 +362,15 @@ export default function MessengerIntegrationPage() {
                             toast.success(`${page.name}: Connected (Verification Skipped)`);
                         }
                     }
-                } catch (subError) {
+                } catch (subError: any) {
                     console.error(`Failed to subscribe app to page ${page.name}`, subError);
+                    logFrontendError({
+                        message: `Subscription Exception: ${subError.message}`,
+                        stack: subError.stack,
+                        context: 'MessengerIntegrationPage:subscribeAppToPage:Exception',
+                        pageName: page.name,
+                        pageId: page.id
+                    });
                 }
 
                 // 2. Upsert into page_access_token_message
@@ -389,8 +411,15 @@ export default function MessengerIntegrationPage() {
                 }
 
                 successCount++;
-            } catch (err) {
+            } catch (err: any) {
                 console.error(`Failed to process page ${page.name}`, err);
+                logFrontendError({
+                    message: `Process Page Exception: ${err.message}`,
+                    stack: err.stack,
+                    context: 'MessengerIntegrationPage:savePagesToSupabase',
+                    pageName: page.name,
+                    pageId: page.id
+                });
             }
         }
 
@@ -479,6 +508,11 @@ export default function MessengerIntegrationPage() {
 
         } catch (error: any) {
             console.error("Facebook Connect Error:", error);
+            logFrontendError({
+                message: `Facebook Connect Error: ${error.message}`,
+                stack: error.stack,
+                context: 'MessengerIntegrationPage:handleConnectFacebook'
+            });
             toast.error(error.message || "Failed to connect Facebook");
         } finally {
             setConnecting(false);
@@ -522,6 +556,11 @@ export default function MessengerIntegrationPage() {
             
         } catch (error: any) {
             console.error("Direct Connect Error:", error);
+            logFrontendError({
+                message: `Direct Connect Error: ${error.message}`,
+                stack: error.stack,
+                context: 'MessengerIntegrationPage:handleDirectConnect'
+            });
             toast.error(error.message || "Failed to connect page");
         } finally {
             setDirectLoading(false);
@@ -557,8 +596,15 @@ export default function MessengerIntegrationPage() {
             toast.success(`Disconnected ${page.name}`);
             fetchPages();
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error removing page:", error);
+            logFrontendError({
+                message: `Remove Page Error: ${error.message}`,
+                stack: error.stack,
+                context: 'MessengerIntegrationPage:handleRemovePage',
+                pageName: page.name,
+                pageId: page.page_id
+            });
             toast.error("Failed to disconnect page");
         }
     };
