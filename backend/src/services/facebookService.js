@@ -8,6 +8,30 @@ async function handleFacebookError(error, pageId) {
         // Error Code 190: Invalid OAuth Access Token
         if (fbError.code === 190 || fbError.code === 102) { // 102 can also be session invalid
              console.error(`[Facebook] Critical Token Error for Page ${pageId}: ${fbError.message}`);
+             
+             // --- AUTO REFRESH LOGIC ---
+             try {
+                 console.log(`[Facebook] Attempting Auto-Refresh for Page ${pageId}...`);
+                 const config = await dbService.getPageConfig(pageId);
+                 
+                 if (config && config.user_access_token) {
+                     // Try to get new page token
+                     const url = `https://graph.facebook.com/v19.0/${pageId}?fields=access_token&access_token=${config.user_access_token}`;
+                     const response = await axios.get(url);
+                     
+                     if (response.data && response.data.access_token) {
+                         console.log(`[Facebook] Auto-Refresh SUCCESS! Updating DB...`);
+                         await dbService.updatePageToken(pageId, response.data.access_token);
+                         return true; // Signal success (Token Refreshed)
+                     }
+                 } else {
+                     console.warn(`[Facebook] No user_access_token found for auto-refresh.`);
+                 }
+             } catch (refreshError) {
+                 console.error(`[Facebook] Auto-Refresh FAILED:`, refreshError.message);
+             }
+             // ---------------------------
+
              await dbService.markPageTokenInvalid(pageId);
         }
     }

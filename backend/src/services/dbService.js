@@ -1168,7 +1168,25 @@ async function getLastNWhatsAppMessages(sessionName, recipientId, limit = 20) {
     return data;
 }
 
+// 16. Update Page Token (Auto-Refresh)
+async function updatePageToken(pageId, newToken) {
+    const { error } = await supabase
+        .from('page_access_token_message')
+        .update({ 
+            page_access_token: newToken,
+            subscription_status: 'active' // Reactivate if it was invalid
+        })
+        .eq('page_id', pageId);
+
+    if (error) {
+        console.error(`[DB] Failed to update page token for ${pageId}:`, error);
+    } else {
+        console.log(`[DB] Updated page token for ${pageId}`);
+    }
+}
+
 module.exports = {
+    updatePageToken,
     supabase,
     getPageConfig,
     getPagePrompts,

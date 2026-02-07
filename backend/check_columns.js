@@ -13,16 +13,16 @@ async function checkColumns() {
 
     if (error) {
          console.log("fb_message_database not found or empty. Checking page_access_token_message...");
-         const { data: two, error: error2 } = await supabase
-            .from('page_access_token_message')
-            .select('*')
-            .limit(1);
-         if (error2) console.error("Error:", error2);
-         else console.log("Keys (page_access_token_message):", Object.keys(two[0] || {}));
     }
-    else {
-        console.log("Keys (fb_message_database):", Object.keys(one[0] || {}));
-    }
+    
+    const { data: two, error: error2 } = await supabase
+        .from('page_access_token_message')
+        .select('*')
+        .limit(1);
+        
+    if (error2) console.error("Error checking page_access_token_message:", error2);
+    else console.log("Keys (page_access_token_message):", Object.keys(two[0] || {}));
+
 }
 
 checkColumns();
