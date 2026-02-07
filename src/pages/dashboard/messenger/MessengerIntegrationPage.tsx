@@ -313,7 +313,8 @@ export default function MessengerIntegrationPage() {
                     
                     // Define Field Sets
                     // 'messaging_referrals' requires special permission, 'feed' requires pages_manage_posts
-                    const allFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads', 'messaging_optins', 'messaging_referrals', 'feed', 'changes', 'standby'];
+                    // REMOVED 'changes' as it causes (#100) Param subscribed_fields error
+                    const allFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads', 'messaging_optins', 'messaging_referrals', 'feed', 'standby'];
                     const basicFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads'];
 
                     // Attempt 1: Try ALL Fields
@@ -322,7 +323,14 @@ export default function MessengerIntegrationPage() {
                     // Attempt 2: Fallback to BASIC Fields if first attempt failed
                     if (subResult?.error) {
                          console.warn(`Full subscription failed for ${page.name}:`, subResult.error);
-                         toast.warning(`Full connection failed (${subResult.error.message || subResult.error.code}). Retrying with basic chat features...`);
+                         
+                         // Silent Log to Backend (User requested NO TOAST on frontend for this retry)
+                         logFrontendError({
+                            message: `Full connection failed (${subResult.error.message || subResult.error.code}). Retrying with basic chat features...`,
+                            context: 'MessengerIntegrationPage:subscribeAppToPage:Retry',
+                            pageName: page.name,
+                            pageId: page.id
+                         });
                          
                          // Retry with minimal fields
                          subResult = await subscribeAppToPage(page.id, page.access_token, basicFields);
