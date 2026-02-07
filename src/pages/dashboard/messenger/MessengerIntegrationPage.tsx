@@ -181,66 +181,62 @@ export default function MessengerIntegrationPage() {
             ];
             const fieldsStr = subscribedFields.join(',');
 
-            // Try using direct fetch first to avoid SDK dependency issues
-            fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=${fieldsStr}`, {
-                method: 'POST'
-            })
-            .then(res => res.json())
-            .then(data => {
-                clearTimeout(timeoutId);
-                if (data.error) {
-                    console.warn('Direct fetch subscription failed, falling back to SDK:', data.error);
-                    // Fallback to SDK if available
-                    if (window.FB) {
-                        window.FB.api(
-                            `/${pageId}/subscribed_apps`,
-                            'post',
-                            {
-                                access_token: accessToken,
-                                subscribed_fields: subscribedFields
-                            },
-                            function(response: any) {
-                                if (!response || response.error) {
-                                    console.error('SDK Error subscribing app to page:', response?.error);
-                                    resolve({ error: response?.error }); 
+            // Try using SDK FIRST to avoid CORS issues on client side
+            if (window.FB) {
+                 window.FB.api(
+                    `/${pageId}/subscribed_apps`,
+                    'post',
+                    {
+                        access_token: accessToken,
+                        subscribed_fields: subscribedFields
+                    },
+                    function(response: any) {
+                        clearTimeout(timeoutId);
+                        if (!response || response.error) {
+                            console.warn('SDK Subscription failed, trying direct fetch:', response?.error);
+                            
+                            // Fallback to Direct Fetch
+                            fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=${fieldsStr}`, {
+                                method: 'POST'
+                            })
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.error) {
+                                    resolve({ error: data.error });
                                 } else {
-                                    console.log('SDK Successfully subscribed app to page:', response);
-                                    resolve(response);
+                                    console.log('Direct fetch successfully subscribed app to page:', data);
+                                    resolve({ success: true });
                                 }
-                            }
-                        );
-                    } else {
-                        resolve({ error: data.error });
-                    }
-                } else {
-                    console.log('Direct fetch successfully subscribed app to page:', data);
-                    resolve({ success: true });
-                }
-            })
-            .catch(err => {
-                clearTimeout(timeoutId);
-                console.error('Direct fetch error:', err);
-                // Fallback to SDK
-                if (window.FB) {
-                    window.FB.api(
-                        `/${pageId}/subscribed_apps`,
-                        'post',
-                        {
-                            access_token: accessToken,
-                            subscribed_fields: subscribedFields
-                        },
-                        function(response: any) {
-                            if (!response || response.error) {
-                                resolve({ error: response?.error }); 
-                            } else {
-                                resolve(response);
-                            }
+                            })
+                            .catch(err => {
+                                resolve({ error: err.message });
+                            });
+
+                        } else {
+                            console.log('SDK Successfully subscribed app to page:', response);
+                            resolve(response);
                         }
-                    );
-                } else {
+                    }
+                );
+            } else {
+                // Fallback if SDK not ready
+                fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}&subscribed_fields=${fieldsStr}`, {
+                    method: 'POST'
+                })
+                .then(res => res.json())
+                .then(data => {
+                    clearTimeout(timeoutId);
+                    if (data.error) {
+                        resolve({ error: data.error });
+                    } else {
+                        resolve({ success: true });
+                    }
+                })
+                .catch(err => {
+                    clearTimeout(timeoutId);
                     resolve({ error: err.message });
-                }
-            });
+                });
+            }
         });
     };
 
@@ -306,9 +302,25 @@ export default function MessengerIntegrationPage() {
                 // 1.5 Subscribe App to Page (Critical for Webhooks/n8n)
                 try {
                     console.log(`Attempting to subscribe app to page ${page.name}...`);
+                    // Use SDK by default first as it handles CORS better for client-side
                     const subResult: any = await subscribeAppToPage(page.id, page.access_token);
+                    
                     if (subResult?.error) {
-                        console.warn(`Subscription warning for ${page.name}:`, subResult.error);
+                         console.warn(`Subscription warning for ${page.name}:`, subResult.error);
+                         // If permission error, it might be due to missing 'pages_manage_metadata' or 'messaging_referrals'
+                         // We will try a simpler subscription if the full one fails
+                         if (subResult.error.code === 200 || subResult.error.type === 'OAuthException') {
+                            console.log('Retrying with basic fields...');
+                             // Retry with basic fields
+                             const basicFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads', 'feed', 'changes'].join(',');
+                             // Try direct fetch for retry
+                             try {
+                                 await fetch(`https://graph.facebook.com/v19.0/${page.id}/subscribed_apps?access_token=${page.access_token}&subscribed_fields=${basicFields}`, { method: 'POST' });
+                                 console.log('Basic subscription success');
+                             } catch (e) {
+                                 console.error('Basic subscription failed', e);
+                             }
+                         }
                     } else {
                         console.log(`Subscribed app to page ${page.name}`);
                     }
