@@ -159,7 +159,7 @@ export default function MessengerIntegrationPage() {
         setLoading(false);
     };
 
-    const subscribeAppToPage = (pageId: string, accessToken: string) => {
+    const subscribeAppToPage = (pageId: string, accessToken: string, fields: string[] = []) => {
         return new Promise((resolve) => {
             // Add timeout to prevent hanging
             const timeoutId = setTimeout(() => {
@@ -168,7 +168,7 @@ export default function MessengerIntegrationPage() {
             }, 10000); // 10 seconds timeout
 
             // Extended Fields for Professional Bot & Handover Protocol
-            const subscribedFields = [
+            const defaultFields = [
                 'messages', 
                 'messaging_postbacks', 
                 'messaging_optins', 
@@ -179,7 +179,9 @@ export default function MessengerIntegrationPage() {
                 'feed', 
                 'changes'
             ];
-            const fieldsStr = subscribedFields.join(',');
+            
+            const targetFields = fields.length > 0 ? fields : defaultFields;
+            const fieldsStr = targetFields.join(',');
 
             // Try using SDK FIRST to avoid CORS issues on client side
             if (window.FB) {
@@ -302,25 +304,28 @@ export default function MessengerIntegrationPage() {
                 // 1.5 Subscribe App to Page (Critical for Webhooks/n8n)
                 try {
                     console.log(`Attempting to subscribe app to page ${page.name}...`);
-                    // Use SDK by default first as it handles CORS better for client-side
-                    const subResult: any = await subscribeAppToPage(page.id, page.access_token);
                     
+                    // Define Field Sets
+                    // 'messaging_referrals' requires special permission, 'feed' requires pages_manage_posts
+                    const allFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads', 'messaging_optins', 'messaging_referrals', 'feed', 'changes', 'standby'];
+                    const basicFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads'];
+
+                    // Attempt 1: Try ALL Fields
+                    let subResult: any = await subscribeAppToPage(page.id, page.access_token, allFields);
+                    
+                    // Attempt 2: Fallback to BASIC Fields if first attempt failed
                     if (subResult?.error) {
-                         console.warn(`Subscription warning for ${page.name}:`, subResult.error);
-                         // If permission error, it might be due to missing 'pages_manage_metadata' or 'messaging_referrals'
-                         // We will try a simpler subscription if the full one fails
-                         if (subResult.error.code === 200 || subResult.error.type === 'OAuthException') {
-                            console.log('Retrying with basic fields...');
-                             // Retry with basic fields
-                             const basicFields = ['messages', 'messaging_postbacks', 'message_deliveries', 'message_reads', 'feed', 'changes'].join(',');
-                             // Try direct fetch for retry
-                             try {
-                                 await fetch(`https://graph.facebook.com/v19.0/${page.id}/subscribed_apps?access_token=${page.access_token}&subscribed_fields=${basicFields}`, { method: 'POST' });
-                                 console.log('Basic subscription success');
-                             } catch (e) {
-                                 console.error('Basic subscription failed', e);
-                             }
-                         }
+                         console.warn(`Full subscription failed for ${page.name}:`, subResult.error);
+                         toast.warning(`Full connection failed (${subResult.error.message || subResult.error.code}). Retrying with basic chat features...`);
+                         
+                         // Retry with minimal fields
+                         subResult = await subscribeAppToPage(page.id, page.access_token, basicFields);
+                    }
+
+                    if (subResult?.error) {
+                        // Final Failure
+                        console.error(`Basic subscription failed for ${page.name}`, subResult.error);
+                        toast.error(`${page.name}: Connection Failed. ${subResult.error.message || 'Check Permissions'}`);
                     } else {
                         console.log(`Subscribed app to page ${page.name}`);
                         
@@ -329,13 +334,17 @@ export default function MessengerIntegrationPage() {
                             const verifySub = await fetch(`https://graph.facebook.com/v19.0/${page.id}/subscribed_apps?access_token=${page.access_token}`);
                             const verifyData = await verifySub.json();
                             console.log(`[Verify] Subscribed Apps for ${page.name}:`, verifyData);
+                            
                             if (verifyData.data && verifyData.data.length > 0) {
-                                toast.success(`${page.name}: Webhook Connected (Verified)`);
+                                toast.success(`${page.name}: Connected Successfully!`);
                             } else {
-                                toast.warning(`${page.name}: Subscription may have failed (No active subscription found)`);
+                                // If verification returns empty, it means even the success response was a lie or token issue
+                                toast.error(`${page.name}: Verification Failed. Please Re-login & Grant All Permissions.`);
                             }
                         } catch (vErr) {
                             console.warn('Verification check failed:', vErr);
+                            // Assume success if fetch failed (network issue) but subscribe returned success
+                            toast.success(`${page.name}: Connected (Verification Skipped)`);
                         }
                     }
                 } catch (subError) {
