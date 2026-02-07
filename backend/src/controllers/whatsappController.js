@@ -1242,24 +1242,22 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             finalReplyText = finalReplyText.replace(fullTag, '').trim();
         }
 
-        // Handle Strict Image Sending (IMAGE: Title | URL)
-        // Extracted images are removed from replyText
-        const extractedImages = [];
+        // Handle Strict Image Sending (High Level: JSON + Regex Fallback)
+        let extractedImages = [];
         
+        // 1. Structured Images from AI (Priority)
+        if (aiResponse.images && Array.isArray(aiResponse.images)) {
+            extractedImages = [...aiResponse.images];
+        }
+
+        // 2. Legacy Regex Fallback (In case AI puts it in text)
         const strictImageRegex = /IMAGE:\s*(.+?)\s*\|\s*(https?:\/\/[^\s,]+)/gi;
         let strictMatch;
         while ((strictMatch = strictImageRegex.exec(finalReplyText)) !== null) {
             const fullMatch = strictMatch[0];
             const title = strictMatch[1].trim();
-            let url = strictMatch[2].trim();
-            url = url.replace(/[,.]$/, ''); // Cleanup
-
-            // Fix Google Drive Links
-            const driveIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-            if (driveIdMatch && driveIdMatch[1]) {
-                url = `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
-            }
-
+            const url = strictMatch[2].trim();
+            
             if (!extractedImages.some(img => img.url === url)) {
                 extractedImages.push({ url: url, title: title });
             }
@@ -1267,6 +1265,18 @@ async function processBufferedMessages(sessionId, sessionName, senderId, message
             // Remove from text
             finalReplyText = finalReplyText.replace(fullMatch, '').trim();
         }
+
+        // 3. Normalize & Fix URLs (Google Drive, etc.)
+        extractedImages = extractedImages.map(img => {
+            let url = img.url.replace(/[,.]$/, ''); // Cleanup punctuation
+            
+            // Fix Google Drive Links
+            const driveIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (driveIdMatch && driveIdMatch[1]) {
+                url = `https://drive.google.com/uc?export=view&id=${driveIdMatch[1]}`;
+            }
+            return { ...img, url };
+        });
 
         // --- EMOJI HANDOVER LOGIC (AI Reply) ---
         {
