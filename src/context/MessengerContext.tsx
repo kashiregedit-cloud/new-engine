@@ -136,7 +136,9 @@ export function MessengerProvider({ children }: { children: React.ReactNode }) {
       if (viewMode === 'team' && currentActiveTeam?.permissions?.fb_pages) {
           const allowedIds = currentActiveTeam.permissions.fb_pages;
           if (Array.isArray(allowedIds)) {
-             mergedPages = mergedPages.filter(p => allowedIds.includes(p.page_id));
+             // Ensure robust comparison by converting both to strings
+             const allowedStrings = allowedIds.map((id: any) => String(id));
+             mergedPages = mergedPages.filter(p => allowedStrings.includes(String(p.page_id)));
           }
       }
 
