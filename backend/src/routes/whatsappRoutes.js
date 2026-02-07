@@ -45,7 +45,7 @@ router.get('/sessions', async (req, res) => {
                 .from('team_members')
                 .select('permissions')
                 .eq('member_email', userEmail)
-                .eq('status', 'accepted');
+                .eq('status', 'active');
             
             if (!teamError && teamData) {
                 teamData.forEach(row => {

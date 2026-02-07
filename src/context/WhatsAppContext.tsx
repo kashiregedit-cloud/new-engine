@@ -80,26 +80,54 @@ export function WhatsAppProvider({ children }: { children: React.ReactNode }) {
           targetEmail = user.email;
       }
 
-      // 2. Fetch all from WAHA via Backend
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      // 2. Fetch Sessions (Hybrid / Direct Supabase)
+      // We prioritize Direct Supabase to avoid backend sync issues, but might lose real-time status (unless we merge)
       
-      const res = await fetch(`${BACKEND_URL}/whatsapp/sessions`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const wahaSessions = await res.json();
-      const allSessions: WahaSession[] = Array.isArray(wahaSessions) ? wahaSessions : [];
+      let allSessions: WahaSession[] = [];
 
+      // Fetch from DB
+      const { data: dbSessions, error: dbError } = await supabase
+         .from('whatsapp_message_database')
+         .select('*')
+         .eq('email', targetEmail); // Assuming 'email' column is used for ownership/sharing context
+
+      if (dbError) throw dbError;
+
+      if (dbSessions) {
+          // Map DB sessions to WahaSession format
+          allSessions = dbSessions.map((s: any) => ({
+              name: s.session_name,
+              status: s.status || 'STOPPED', // Fallback to DB status
+              config: {}, // Config not available in DB usually, unless stored
+              me: null,
+              wp_db_id: s.id,
+              wp_id: s.id,
+              expires_at: s.expires_at,
+              plan_days: s.plan_days,
+              subscription_status: s.subscription_status || 'unknown',
+              db_status: s.status || 'unknown',
+              is_shared: s.email !== user.email // Check if shared
+          }));
+      }
+
+      // Filter by Team Permissions (Frontend Enforcement)
+      if (viewMode === 'team' && isMember && teamData?.permissions?.wa_sessions) {
+          const allowedSessions = teamData.permissions.wa_sessions;
+          if (Array.isArray(allowedSessions)) {
+              allSessions = allSessions.filter(s => allowedSessions.includes(s.name));
+          }
+      }
+
+      // Filter based on View Mode
       let formattedSessions: WahaSession[] = [];
-
-      // 3. Filter based on View Mode using backend 'is_shared' flag
-      // The backend now handles Auth and Permissions (returning only allowed sessions).
-      if (viewMode === 'team' && isMember) {
-          // Show shared sessions (where I am not the owner)
-          formattedSessions = allSessions.filter(s => s.is_shared);
+      if (viewMode === 'team') {
+          // In team mode, show sessions owned by team owner (targetEmail)
+          // We already filtered by targetEmail above.
+          // Just ensure we don't show sessions that shouldn't be visible (redundant check but safe)
+           formattedSessions = allSessions;
       } else {
-          // Show personal sessions (where I am the owner, or it's a new/unlinked session)
-          formattedSessions = allSessions.filter(s => !s.is_shared);
+          // Personal mode
+          formattedSessions = allSessions;
       }
       
       setSessions(formattedSessions);
