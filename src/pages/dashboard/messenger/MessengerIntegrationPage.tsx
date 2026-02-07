@@ -245,6 +245,28 @@ export default function MessengerIntegrationPage() {
 
     const unsubscribeAppFromPage = (pageId: string, accessToken: string) => {
         return new Promise((resolve) => {
+            const doDirectUnsubscribe = () => {
+                fetch(`https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?access_token=${accessToken}`, {
+                    method: 'DELETE'
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('Direct fetch successfully unsubscribed');
+                        resolve(true);
+                    } else {
+                        console.warn('Direct unsubscribe failed:', data);
+                        // Even if it fails, we resolve true to allow deletion to proceed
+                        // (User wants to delete from system regardless of FB status sometimes)
+                        resolve(true); 
+                    }
+                })
+                .catch(err => {
+                    console.error('Direct unsubscribe error:', err);
+                    resolve(true); // Proceed anyway
+                });
+            };
+
             if (window.FB) {
                 window.FB.api(
                     `/${pageId}/subscribed_apps`,
@@ -255,12 +277,8 @@ export default function MessengerIntegrationPage() {
                     function(response: any) {
                         if (!response || response.error) {
                             console.error('Error unsubscribing app from page:', response?.error);
-                            logFrontendError({
-                                message: `Unsubscribe Error: ${JSON.stringify(response?.error)}`,
-                                context: 'MessengerIntegrationPage:unsubscribeAppFromPage',
-                                pageId: pageId
-                            });
-                            resolve(false);
+                            // Fallback to direct
+                            doDirectUnsubscribe();
                         } else {
                             console.log('Successfully unsubscribed app from page:', response);
                             resolve(true);
@@ -268,7 +286,7 @@ export default function MessengerIntegrationPage() {
                     }
                 );
             } else {
-                resolve(false);
+                doDirectUnsubscribe();
             }
         });
     };
@@ -586,7 +604,17 @@ export default function MessengerIntegrationPage() {
                 await unsubscribeAppFromPage(page.page_id, page.page_access_token);
             }
 
-            // 2. Remove from page_access_token_message
+            // 2. Remove from fb_message_database (Config) first to prevent FK issues or lingering config
+            const { error: dbError } = await supabase
+                .from('fb_message_database')
+                .delete()
+                .eq('page_id', page.page_id);
+            
+            if (dbError) {
+                console.warn("Error deleting from fb_message_database (might not exist):", dbError);
+            }
+
+            // 3. Remove from page_access_token_message (Tokens)
             const { error } = await supabase
                 .from('page_access_token_message')
                 .delete()
@@ -594,7 +622,7 @@ export default function MessengerIntegrationPage() {
 
             if (error) throw error;
 
-            // 3. Clear from local storage if active
+            // 4. Clear from local storage if active
             const activeId = localStorage.getItem("active_fb_page_id");
             if (activeId === page.page_id) {
                 localStorage.removeItem("active_fb_db_id");
