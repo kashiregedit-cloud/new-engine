@@ -146,12 +146,23 @@ export default function MessengerControlPage() {
     if (!dbId) return;
     setPromptSaving(true);
     try {
-        const { error } = await (supabase
-            .from('fb_message_database') as any)
-            .update({ text_prompt: tempPrompt })
-            .eq('id', parseInt(dbId));
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
 
-        if (error) throw error;
+        const res = await fetch(`${BACKEND_URL}/messenger/config/${dbId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ text_prompt: tempPrompt })
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            const message = body.error || `Failed with status ${res.status}`;
+            throw new Error(message);
+        }
         
         // Update local config state
         setConfig(prev => ({ ...prev, text_prompt: tempPrompt }));

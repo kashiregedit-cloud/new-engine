@@ -269,7 +269,8 @@ router.put('/config/:id', async (req, res) => {
             'block_emoji',
             'unblock_emoji',
             'check_conversion',
-            'text_prompt'
+            'text_prompt',
+            'image_prompt'
         ];
 
         const updates = {};

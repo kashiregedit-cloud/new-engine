@@ -255,15 +255,26 @@ export default function MessengerSettingsPage() {
     if (!dbId) return;
     setPromptSaving(true);
     try {
-        const { error } = await (supabase
-            .from('fb_message_database') as any)
-            .update({ 
-                text_prompt: tempPrompt,
-                image_prompt: tempImagePrompt // Save Image Prompt
-            })
-            .eq('id', parseInt(dbId));
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
 
-        if (error) throw error;
+        const res = await fetch(`${BACKEND_URL}/messenger/config/${dbId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({ 
+                text_prompt: tempPrompt,
+                image_prompt: tempImagePrompt
+            })
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            const message = body.error || `Failed with status ${res.status}`;
+            throw new Error(message);
+        }
         
         // Also update form state to keep in sync
         form.setValue('text_prompt', tempPrompt);
@@ -439,14 +450,25 @@ export default function MessengerSettingsPage() {
     }
 
     try {
-      const { error: dbError } = await (supabase
-        .from('fb_message_database') as any)
-        .update({
-            text_prompt: values.text_prompt
-        })
-        .eq('id', parseInt(dbId));
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      if (dbError) throw dbError;
+      if (values.text_prompt) {
+        const resPrompt = await fetch(`${BACKEND_URL}/messenger/config/${dbId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({ text_prompt: values.text_prompt })
+        });
+
+        if (!resPrompt.ok) {
+          const body = await resPrompt.json().catch(() => ({}));
+          const message = body.error || `Failed to save prompt (${resPrompt.status})`;
+          throw new Error(message);
+        }
+      }
 
       const updates: any = {
           ai: values.provider,
