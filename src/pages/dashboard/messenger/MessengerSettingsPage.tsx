@@ -91,6 +91,8 @@ export default function MessengerSettingsPage() {
   const [activeTab, setActiveTab] = useState("text"); // Add activeTab state
   const [tempPrompt, setTempPrompt] = useState("");
   const [tempImagePrompt, setTempImagePrompt] = useState("");
+  const [baseTextPrompt, setBaseTextPrompt] = useState("");
+  const [baseImagePrompt, setBaseImagePrompt] = useState("");
   const [promptSaving, setPromptSaving] = useState(false);
   
   // New State for Behavior Settings
@@ -105,7 +107,6 @@ export default function MessengerSettingsPage() {
 
   const [productList, setProductList] = useState<PromptProduct[]>([]);
   const [productLoading, setProductLoading] = useState(false);
-  const [promptLocked, setPromptLocked] = useState(false);
 
   const handleApplyCoupon = () => {
     // Simple validation for demo - in production this would verify with backend
@@ -153,10 +154,8 @@ export default function MessengerSettingsPage() {
         const pageRow = pageData as any;
         
         setVerified(dbRow.verified !== false);
-        if (!promptLocked) {
-          setTempPrompt(dbRow.text_prompt || "");
-          setTempImagePrompt(dbRow.image_prompt || "");
-        }
+        setBaseTextPrompt(dbRow.text_prompt || "");
+        setBaseImagePrompt(dbRow.image_prompt || "");
 
         // Check ownership
         const { data: { user } } = await supabase.auth.getUser();
@@ -222,11 +221,6 @@ export default function MessengerSettingsPage() {
           text_prompt: dbRow.text_prompt || "",
         });
         
-        // Set temp prompt for modal
-        if (!promptLocked) {
-          setTempPrompt(dbRow.text_prompt || "");
-        }
-        
         // Set behavior settings
         setWait(dbRow.wait || 8);
         setMemoryContextName(dbRow.memory_context_name || "");
@@ -239,7 +233,7 @@ export default function MessengerSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [promptLocked]);
+  }, [form]);
 
   useEffect(() => {
     const checkConnection = () => {
@@ -266,7 +260,7 @@ export default function MessengerSettingsPage() {
       window.removeEventListener("storage", checkConnection);
       window.removeEventListener("db-connection-changed", checkConnection);
     };
-  }, [form, fetchConfig]);
+  }, [fetchConfig]);
 
   const fetchProductsForPrompt = async () => {
     if (!pageId) return;
@@ -308,7 +302,11 @@ export default function MessengerSettingsPage() {
 
   const handleOpenPrompt = (tab: "text" | "image") => {
     setActiveTab(tab);
-    setPromptLocked(true);
+    if (tab === "text") {
+      setTempPrompt(baseTextPrompt || form.getValues("text_prompt") || "");
+    } else {
+      setTempImagePrompt(baseImagePrompt || "");
+    }
     setIsPromptOpen(true);
     if (!productList.length && pageId) {
       fetchProductsForPrompt();
@@ -365,6 +363,7 @@ export default function MessengerSettingsPage() {
         
         // Also update form state to keep in sync
         form.setValue('text_prompt', processedPrompt);
+        setBaseTextPrompt(processedPrompt);
         
         toast.success("System & Image prompts updated successfully!");
         
@@ -379,7 +378,6 @@ export default function MessengerSettingsPage() {
         }
 
         setIsPromptOpen(false);
-        setPromptLocked(false);
     } catch (error: any) {
         console.error("Error saving prompt:", error);
         toast.error("Failed to save prompt: " + error.message);
@@ -652,15 +650,7 @@ export default function MessengerSettingsPage() {
       </div>
 
       {/* System Prompt Full Screen Dialog */}
-      <Dialog
-        open={isPromptOpen}
-        onOpenChange={(open) => {
-          setIsPromptOpen(open);
-          if (!open) {
-            setPromptLocked(false);
-          }
-        }}
-      >
+      <Dialog open={isPromptOpen} onOpenChange={setIsPromptOpen}>
         <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
             <DialogHeader>
                 <DialogTitle>Edit AI Instructions</DialogTitle>
@@ -749,13 +739,7 @@ export default function MessengerSettingsPage() {
                     </Button>
                 </div>
                 <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsPromptOpen(false);
-                        setPromptLocked(false);
-                      }}
-                    >
+                    <Button variant="outline" onClick={() => setIsPromptOpen(false)}>
                       Cancel
                     </Button>
                     <Button onClick={handleSavePrompt} disabled={promptSaving || optimizing}>
