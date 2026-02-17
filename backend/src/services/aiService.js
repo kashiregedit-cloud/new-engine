@@ -597,7 +597,11 @@ Rules:
   "dm_message": "msg"|null,
   "bad_words": "words"|null,
   "order_details": { "product_name", "quantity", "address", "phone", "price" }|null
-}`;
+}
+11. URL SAFETY:
+   - NEVER invent or guess external website links.
+   - If no 'Image URL' or 'image_url' is provided in context for a product, respond without any link for that product.
+   - Only use URLs that explicitly appear in 'Image URL' fields inside the context.`;
 
         const systemMessage = { role: 'system', content: n8nSystemPrompt };
     

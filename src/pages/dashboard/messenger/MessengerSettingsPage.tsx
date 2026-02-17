@@ -62,6 +62,13 @@ const formSchema = z.object({
 const MANAGED_SECRET_KEY = import.meta.env.VITE_MANAGED_API_KEY || "";
 const MANAGED_MODEL = import.meta.env.VITE_MANAGED_MODEL || "gemini-2.5-flash-lite";
 
+type PromptProduct = {
+  id: string | number;
+  name?: string | null;
+  price?: number | null;
+  currency?: string | null;
+};
+
 export default function MessengerSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [dbId, setDbId] = useState<string | null>(null);
@@ -93,6 +100,9 @@ export default function MessengerSettingsPage() {
   
   // New State for Optimization
   const [optimizing, setOptimizing] = useState(false);
+
+  const [productList, setProductList] = useState<PromptProduct[]>([]);
+  const [productLoading, setProductLoading] = useState(false);
 
   const handleApplyCoupon = () => {
     // Simple validation for demo - in production this would verify with backend
@@ -249,6 +259,62 @@ export default function MessengerSettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchProductsForPrompt = async () => {
+    if (!pageId) return;
+    setProductLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const params = new URLSearchParams();
+      params.set("page_id", pageId);
+      params.set("limit", "50");
+
+      const url = `${BACKEND_URL}/api/products?${params.toString()}`;
+      const headers: HeadersInit = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        throw new Error("Failed to load products");
+      }
+
+      const data = await res.json();
+      let items: PromptProduct[] = [];
+      if (data.data && Array.isArray(data.data)) {
+        items = data.data as PromptProduct[];
+      } else if (Array.isArray(data)) {
+        items = data as PromptProduct[];
+      }
+      setProductList(items);
+    } catch (error) {
+      console.error("Failed to load products for prompt:", error);
+      toast.error("Products load korte parlam na");
+    } finally {
+      setProductLoading(false);
+    }
+  };
+
+  const handleOpenPrompt = (tab: "text" | "image") => {
+    setActiveTab(tab);
+    setIsPromptOpen(true);
+    if (!productList.length && pageId) {
+      fetchProductsForPrompt();
+    }
+  };
+
+  const handleInsertProductIntoPrompt = (product: PromptProduct) => {
+    const name = product?.name || "Unnamed Product";
+    const priceText = product?.price ? `${product.price} ${product.currency || "USD"}` : "";
+    const line =
+      priceText
+        ? `\nIf user asks for ${name}, send image and details of product "${name}" (price ${priceText}).`
+        : `\nIf user asks for ${name}, send image and details of product "${name}".`;
+    setTempPrompt((prev) => (prev || "") + line);
   };
 
   const handleSavePrompt = async () => {
@@ -545,7 +611,7 @@ export default function MessengerSettingsPage() {
         </div>
         <div className="flex gap-2">
             <Button 
-                onClick={() => { setActiveTab("text"); setIsPromptOpen(true); }} 
+                onClick={() => handleOpenPrompt("text")} 
                 variant="outline"
                 className="border-[#00ff88]/40 text-[#00ff88] hover:bg-[#00ff88]/10"
             >
@@ -553,7 +619,7 @@ export default function MessengerSettingsPage() {
                 Edit System Prompt
             </Button>
             <Button 
-                onClick={() => { setActiveTab("image"); setIsPromptOpen(true); }} 
+                onClick={() => handleOpenPrompt("image")} 
                 variant="outline"
                 className="border-[#00ff88]/40 text-[#00ff88] hover:bg-[#00ff88]/10"
             >
@@ -580,12 +646,43 @@ export default function MessengerSettingsPage() {
                     </TabsList>
                     
                     <TabsContent value="text" className="flex-1 mt-4 h-full">
-                        <Textarea 
-                            value={tempPrompt}
-                            onChange={(e) => setTempPrompt(e.target.value)}
-                            className="w-full h-full min-h-[400px] font-mono text-sm leading-relaxed p-4 resize-none"
-                            placeholder="You are a helpful assistant..."
-                        />
+                        <div className="flex flex-col h-full gap-3">
+                          <div className="space-y-1">
+                            <div className="text-xs font-medium text-muted-foreground">
+                              Products shortcut
+                            </div>
+                            <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-white/10 rounded-md bg-black/20 p-2">
+                              {productLoading && (
+                                <span className="text-xs text-muted-foreground">
+                                  Loading products...
+                                </span>
+                              )}
+                              {!productLoading && productList.length === 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  No products found. Add products first from Global Products.
+                                </span>
+                              )}
+                              {!productLoading &&
+                                productList.map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => handleInsertProductIntoPrompt(p)}
+                                    className="text-xs px-2 py-1 rounded-full border border-white/15 bg-black/30 hover:border-[#00ff88] hover:bg-[#00ff88]/10 transition-colors"
+                                  >
+                                    {p.name || "Untitled"}
+                                    {p.price ? ` • ${p.price} ${p.currency || "USD"}` : ""}
+                                  </button>
+                                ))}
+                            </div>
+                          </div>
+                          <Textarea 
+                              value={tempPrompt}
+                              onChange={(e) => setTempPrompt(e.target.value)}
+                              className="w-full flex-1 min-h-[300px] font-mono text-sm leading-relaxed p-4 resize-none"
+                              placeholder="You are a helpful assistant..."
+                          />
+                        </div>
                     </TabsContent>
                     
                     <TabsContent value="image" className="flex-1 mt-4 h-full">
